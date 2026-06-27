@@ -1,0 +1,39 @@
+import { DayCell } from './DayCell';
+import type { CalendarDay } from '../../lib/calendar';
+import type { PTOWithUser } from '../../types/api';
+
+const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+export interface MonthGridProps {
+  weeks: CalendarDay[][];
+  ptoList: PTOWithUser[];
+  onChipClick: (pto: PTOWithUser) => void;
+}
+
+export function MonthGrid({ weeks, ptoList, onChipClick }: MonthGridProps): JSX.Element {
+  return (
+    <div
+      role="grid"
+      aria-label="Month grid"
+      className="rounded-lg border border-slate-200 bg-white"
+    >
+      <div
+        role="row"
+        className="grid grid-cols-7 border-b border-slate-200 bg-slate-50 text-xs font-medium text-slate-600"
+      >
+        {WEEKDAY_LABELS.map((label) => (
+          <div key={label} role="columnheader" className="px-2 py-1.5 text-center">
+            {label}
+          </div>
+        ))}
+      </div>
+      {weeks.map((week, rowIdx) => (
+        <div key={rowIdx} role="row" className="grid grid-cols-7">
+          {week.map((day) => (
+            <DayCell key={day.iso} day={day} ptoList={ptoList} onChipClick={onChipClick} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}

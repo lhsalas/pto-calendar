@@ -40,6 +40,11 @@ export default defineConfig({
           branches: 80,
           functions: 80,
         },
+        'src/pages/CalendarPage.tsx': {
+          lines: 80,
+          statements: 80,
+          branches: 80,
+        },
         'src/routes/RequireAuth.tsx': {
           lines: 80,
           statements: 80,
@@ -58,6 +63,12 @@ export default defineConfig({
           branches: 80,
           functions: 80,
         },
+        'src/components/pto/PTOChip.tsx': {
+          lines: 80,
+          statements: 80,
+          branches: 80,
+          functions: 80,
+        },
         'src/hooks/usePtoList.ts': {
           lines: 80,
           statements: 80,
@@ -65,6 +76,18 @@ export default defineConfig({
           functions: 80,
         },
         'src/components/calendar/DayCell.tsx': {
+          lines: 80,
+          statements: 80,
+          branches: 80,
+          functions: 80,
+        },
+        'src/components/calendar/MonthGrid.tsx': {
+          lines: 80,
+          statements: 80,
+          branches: 80,
+          functions: 80,
+        },
+        'src/components/calendar/CalendarHeader.tsx': {
           lines: 80,
           statements: 80,
           branches: 80,

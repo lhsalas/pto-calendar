@@ -72,14 +72,14 @@ test.describe('Sprint 2 critical journey', () => {
     await page.getByRole('button', { name: /sign in/i }).click();
     await expect(page.getByRole('heading', { name: /calendar/i })).toBeVisible();
 
-    await page.getByRole('button', { name: /add pto/i }).click();
+    await page.getByRole('button', { name: /^add pto$/i }).click();
     await page.getByLabel(/start date/i).fill(start);
     await page.getByLabel(/end date/i).fill(end);
     await page.getByLabel(/day part/i).selectOption('morning');
     await page.getByRole('button', { name: /save pto/i }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
 
-    await page.getByRole('button', { name: iso }).click();
+    await page.getByRole('button', { name: /developer one/i }).click();
     await expect(page.getByRole('dialog', { name: /pto details/i })).toBeVisible();
     await page.getByRole('button', { name: /^edit$/i }).click();
     await expect(page.getByText(/edit pto/i)).toBeVisible();
@@ -87,11 +87,52 @@ test.describe('Sprint 2 critical journey', () => {
     await page.getByRole('button', { name: /save pto/i }).click();
     await expect(page.getByText(/PTO updated/i)).toBeVisible();
 
-    await page.getByRole('button', { name: iso }).click();
+    await page.getByRole('button', { name: /developer one/i }).click();
     await page.getByRole('button', { name: /^delete$/i }).click();
     await expect(page.getByText(/cannot be undone/i)).toBeVisible();
     await page.getByRole('button', { name: /yes, delete/i }).click();
     await expect(page.getByText(/PTO deleted/i)).toBeVisible();
     await expect(page.getByText(iso)).not.toBeVisible();
+  });
+});
+
+test.describe('Sprint 3 critical journey', () => {
+  test.describe.configure({ retries: 0 });
+  test('navigating months updates the grid heading and visible range', async ({ page }) => {
+    const { iso: todayIso } = firstWeekdayInCurrentMonth();
+    await page.goto('/');
+    await page.getByLabel(/email/i).fill(SEED.dev1.email);
+    await page.getByLabel(/password/i).fill(SEED.dev1.password);
+    await page.getByRole('button', { name: /sign in/i }).click();
+    await expect(page.getByRole('heading', { name: /calendar/i })).toBeVisible();
+
+    await expect(page.getByText(todayIso).first()).toBeVisible();
+
+    await page.getByRole('button', { name: /add pto/i }).click();
+    await page.getByLabel(/start date/i).fill(todayIso);
+    await page.getByLabel(/end date/i).fill(todayIso);
+    await page.getByLabel(/day part/i).selectOption('morning');
+    await page.getByRole('button', { name: /save pto/i }).click();
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+
+    await page.getByRole('button', { name: /next month/i }).click();
+    const nextMonth = new Date(todayIso);
+    nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
+    const nextLabel = nextMonth.toLocaleString('en-US', {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+    await expect(page.getByRole('heading', { name: nextLabel })).toBeVisible();
+    await expect(page.getByText(todayIso)).not.toBeVisible();
+
+    await page.getByRole('button', { name: /previous month/i }).click();
+    const currentLabel = new Date(todayIso).toLocaleString('en-US', {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+    await expect(page.getByRole('heading', { name: currentLabel })).toBeVisible();
+    await expect(page.getByText(todayIso).first()).toBeVisible();
   });
 });
