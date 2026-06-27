@@ -5,6 +5,7 @@ import { PTOFormModal } from '../components/pto/PTOFormModal';
 import { PTOViewModal } from '../components/pto/PTOViewModal';
 import { CalendarHeader } from '../components/calendar/CalendarHeader';
 import { MonthGrid } from '../components/calendar/MonthGrid';
+import { ThemeToggle } from '../components/ThemeToggle';
 import { addMonths, currentYearMonth, grid, type YearMonth } from '../lib/calendar';
 import type { CreatePTORequest, PTOWithUser } from '../types/api';
 
@@ -47,21 +48,22 @@ export function CalendarPage(): JSX.Element {
   }
 
   if (!user) {
-    return <div className="p-6 text-slate-500">Loading…</div>;
+    return <div className="p-6 text-slate-500 dark:text-slate-400">Loading…</div>;
   }
 
   return (
-    <div className="min-h-full bg-slate-50 p-6">
+    <div className="min-h-full bg-slate-50 p-6 dark:bg-slate-950">
       <header className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-900">Calendar</h1>
-        <div className="flex items-center gap-4 text-sm text-slate-700">
+        <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Calendar</h1>
+        <div className="flex items-center gap-4 text-sm text-slate-700 dark:text-slate-300">
+          <ThemeToggle />
           <span>
-            {user.name} <span className="text-slate-400">({user.role})</span>
+            {user.name} <span className="text-slate-400 dark:text-slate-500">({user.role})</span>
           </span>
           <button
             type="button"
             onClick={() => void logout()}
-            className="rounded border border-slate-300 px-3 py-1 hover:bg-slate-100"
+            className="rounded border border-slate-300 px-3 py-1 hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800"
           >
             Sign out
           </button>
@@ -69,7 +71,7 @@ export function CalendarPage(): JSX.Element {
       </header>
 
       <div className="mb-4 flex items-center justify-between">
-        <p className="text-sm text-slate-600" data-testid="range-label">
+        <p className="text-sm text-slate-600 dark:text-slate-400" data-testid="range-label">
           Showing {start} to {end}
         </p>
         <button
@@ -84,7 +86,7 @@ export function CalendarPage(): JSX.Element {
       {toast ? (
         <div
           role="status"
-          className="mb-4 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
+          className="mb-4 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
         >
           {toast}
         </div>
@@ -93,7 +95,7 @@ export function CalendarPage(): JSX.Element {
       {error ? (
         <div
           role="alert"
-          className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+          className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/50 dark:text-red-300"
         >
           {error}{' '}
           <button type="button" onClick={() => void refetch()} className="ml-2 underline">
@@ -110,7 +112,7 @@ export function CalendarPage(): JSX.Element {
       />
 
       {loading && items.length === 0 ? (
-        <p className="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
+        <p className="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
           Loading…
         </p>
       ) : (

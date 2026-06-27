@@ -1,5 +1,7 @@
 @import 'tailwindcss';
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 html,
 body,
 #root {
@@ -18,4 +20,9 @@ body {
     sans-serif;
   background-color: #f8fafc;
   color: #0f172a;
+}
+
+html.dark body {
+  background-color: #020617;
+  color: #f1f5f9;
 }

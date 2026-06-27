@@ -59,6 +59,7 @@ The app is intended to support:
 - Month navigation (prev/next + a "Today" button to jump back to the current month; the Today button is disabled while the calendar is already on the current month)
 - Color-coded PTO visibility by person
 - Edit/delete permissions restricted to owner or team lead
+- Light / Dark / System theme toggle (persisted in `localStorage`; default is System and follows `prefers-color-scheme`; no flash of incorrect theme on load)
 
 ## Confirmed MVP Stack
 
@@ -214,6 +215,7 @@ The `build` and `e2e` jobs in `.github/workflows/ci.yml` run against an ephemera
 - Multiple team leads are supported
 - Audit logging is included in MVP and stored internally only
 - Calendar PTO data is fetched for the full visible grid range, including adjacent-month days
+- Dark mode is class-based via Tailwind v4 `@custom-variant dark`; a tiny pre-paint script in `index.html` applies the `.dark` class to `<html>` to avoid FOUC when the system prefers dark
 
 ## Deliverables in This Repo
 

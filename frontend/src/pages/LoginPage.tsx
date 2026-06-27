@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/useAuth';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 export function LoginPage(): JSX.Element {
   const { login, error, status } = useAuth();
@@ -29,15 +30,22 @@ export function LoginPage(): JSX.Element {
   }
 
   return (
-    <main className="flex min-h-full items-center justify-center bg-slate-50 p-6">
+    <main className="flex min-h-full flex-col items-center justify-center bg-slate-50 p-6 dark:bg-slate-950">
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
+        className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900"
       >
-        <h1 className="mb-1 text-xl font-semibold text-slate-900">PTO Calendar</h1>
-        <p className="mb-6 text-sm text-slate-500">Sign in to manage your time off.</p>
+        <h1 className="mb-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
+          PTO Calendar
+        </h1>
+        <p className="mb-6 text-sm text-slate-500 dark:text-slate-400">
+          Sign in to manage your time off.
+        </p>
 
-        <label className="mb-3 block text-sm font-medium text-slate-700">
+        <label className="mb-3 block text-sm font-medium text-slate-700 dark:text-slate-300">
           Email
           <input
             type="email"
@@ -45,11 +53,11 @@ export function LoginPage(): JSX.Element {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            className="mt-1 block w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
           />
         </label>
 
-        <label className="mb-4 block text-sm font-medium text-slate-700">
+        <label className="mb-4 block text-sm font-medium text-slate-700 dark:text-slate-300">
           Password
           <input
             type="password"
@@ -57,12 +65,12 @@ export function LoginPage(): JSX.Element {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            className="mt-1 block w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
           />
         </label>
 
         {error ? (
-          <p role="alert" className="mb-3 text-sm text-red-600">
+          <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">
             {error}
           </p>
         ) : null}

@@ -21,7 +21,7 @@ export function CalendarHeader({
           type="button"
           onClick={onPrev}
           aria-label="Previous month"
-          className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+          className="rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
         >
           ‹
         </button>
@@ -29,7 +29,7 @@ export function CalendarHeader({
           type="button"
           onClick={onNext}
           aria-label="Next month"
-          className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100"
+          className="rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
         >
           ›
         </button>
@@ -39,11 +39,13 @@ export function CalendarHeader({
           aria-label="Jump to current month"
           data-testid="today-button"
           disabled={onCurrentMonth}
-          className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
         >
           Today
         </button>
-        <h2 className="ml-2 text-lg font-semibold text-slate-900">{formatYearMonth(yearMonth)}</h2>
+        <h2 className="ml-2 text-lg font-semibold text-slate-900 dark:text-slate-100">
+          {formatYearMonth(yearMonth)}
+        </h2>
       </div>
     </div>
   );

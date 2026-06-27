@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from '../../src/context/AuthContext';
+import { ThemeProvider } from '../../src/context/ThemeContext';
 import { CalendarPage } from '../../src/pages/CalendarPage';
 import { RequireAuth } from '../../src/routes/RequireAuth';
 import { LoginPage } from '../../src/pages/LoginPage';
@@ -27,19 +28,21 @@ function firstWeekdayInCurrentMonth(): string {
 function renderPage(): ReturnType<typeof render> {
   return render(
     <MemoryRouter initialEntries={['/calendar']}>
-      <AuthProvider>
-        <Routes>
-          <Route
-            path="/calendar"
-            element={
-              <RequireAuth>
-                <CalendarPage />
-              </RequireAuth>
-            }
-          />
-          <Route path="/login" element={<LoginPage />} />
-        </Routes>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <Routes>
+            <Route
+              path="/calendar"
+              element={
+                <RequireAuth>
+                  <CalendarPage />
+                </RequireAuth>
+              }
+            />
+            <Route path="/login" element={<LoginPage />} />
+          </Routes>
+        </AuthProvider>
+      </ThemeProvider>
     </MemoryRouter>,
   );
 }
@@ -60,6 +63,15 @@ describe('CalendarPage', () => {
     expect(screen.getByRole('button', { name: /add pto/i })).toBeInTheDocument();
     const dayCells = await screen.findAllByTestId(/^day-cell-/, {}, { timeout: 2000 });
     expect(dayCells).toHaveLength(42);
+  });
+
+  it('renders the theme toggle in the header', async () => {
+    server.use(http.get('/pto', () => HttpResponse.json([])));
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('theme-toggle')).toBeInTheDocument();
   });
 
   it('renders PTO chips on the days they cover', async () => {
