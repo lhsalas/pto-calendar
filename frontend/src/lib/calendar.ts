@@ -67,6 +67,11 @@ export function currentYearMonth(): YearMonth {
   return { year: now.getUTCFullYear(), month: now.getUTCMonth() };
 }
 
+export function isCurrentYearMonth(yearMonth: YearMonth): boolean {
+  const current = currentYearMonth();
+  return yearMonth.year === current.year && yearMonth.month === current.month;
+}
+
 export function addMonths(yearMonth: YearMonth, delta: number): YearMonth {
   const d = new Date(Date.UTC(yearMonth.year, yearMonth.month + delta, 1));
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() };

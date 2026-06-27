@@ -55,7 +55,7 @@ The app is intended to support:
 - Single-day PTO with `morning`, `evening`, or `all_day`
 - Multi-day PTO across date ranges
 - Shared monthly calendar view
-- Month navigation
+- Month navigation (prev/next + a "Today" button to jump back to the current month; the Today button is disabled while the calendar is already on the current month)
 - Color-coded PTO visibility by person
 - Edit/delete permissions restricted to owner or team lead
 
