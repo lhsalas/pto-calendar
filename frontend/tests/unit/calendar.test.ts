@@ -6,6 +6,7 @@ import {
   formatYearMonth,
   grid,
   initials,
+  isCurrentYearMonth,
   ptoCoversDay,
   visibleGridRange,
 } from '../../src/lib/calendar';
@@ -61,6 +62,22 @@ describe('calendar utilities', () => {
       expect(ym.year).toBeGreaterThan(2020);
       expect(ym.month).toBeGreaterThanOrEqual(0);
       expect(ym.month).toBeLessThan(12);
+    });
+  });
+
+  describe('isCurrentYearMonth', () => {
+    it('returns true for the current year-month', () => {
+      expect(isCurrentYearMonth(currentYearMonth())).toBe(true);
+    });
+    it('returns false for a different month in the current year', () => {
+      const current = currentYearMonth();
+      const other = { year: current.year, month: (current.month + 1) % 12 };
+      expect(isCurrentYearMonth(other)).toBe(false);
+    });
+    it('returns false for a different year', () => {
+      const current = currentYearMonth();
+      expect(isCurrentYearMonth({ year: current.year - 1, month: current.month })).toBe(false);
+      expect(isCurrentYearMonth({ year: current.year + 1, month: current.month })).toBe(false);
     });
   });
 

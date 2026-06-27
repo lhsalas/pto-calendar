@@ -90,6 +90,25 @@ describe('CalendarPage', () => {
     });
   });
 
+  it('returns to the current month when the Today button is clicked from another month', async () => {
+    server.use(http.get('/pto', () => HttpResponse.json([])));
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /next month/i }));
+    await user.click(screen.getByRole('button', { name: /next month/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /august 2026/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('today-button'));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /june 2026/i })).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('today-button')).toBeDisabled();
+  });
+
   it('opens the PTOViewModal when a chip is clicked and the user is the owner', async () => {
     const today = firstWeekdayInCurrentMonth();
     const localPto = { ...STUB_PTO, startDate: today, endDate: today };

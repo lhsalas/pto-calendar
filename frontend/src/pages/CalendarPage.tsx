@@ -106,6 +106,7 @@ export function CalendarPage(): JSX.Element {
         yearMonth={yearMonth}
         onPrev={() => setYearMonth((m) => addMonths(m, -1))}
         onNext={() => setYearMonth((m) => addMonths(m, 1))}
+        onToday={() => setYearMonth(currentYearMonth())}
       />
 
       {loading && items.length === 0 ? (
