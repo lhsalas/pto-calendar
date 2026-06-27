@@ -8,7 +8,6 @@ function firstWeekdayInCurrentMonth(): { start: string; end: string; iso: string
   const now = new Date();
   const year = now.getUTCFullYear();
   const month = now.getUTCMonth();
-  const monthStart = new Date(Date.UTC(year, month, 1));
   for (let day = 1; day <= 31; day += 1) {
     const d = new Date(Date.UTC(year, month, day));
     if (d.getUTCMonth() !== month) break;
