@@ -96,9 +96,9 @@ describe('CalendarPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/team lead/i)).toBeInTheDocument();
     });
-    await user.click(screen.getByRole('button', { name: /next month/i }));
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /july 2026/i })).toBeInTheDocument();
+      expect(screen.getByTestId('header-label')).toHaveTextContent(/july 2026/i);
     });
   });
 
@@ -109,16 +109,140 @@ describe('CalendarPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/team lead/i)).toBeInTheDocument();
     });
-    await user.click(screen.getByRole('button', { name: /next month/i }));
-    await user.click(screen.getByRole('button', { name: /next month/i }));
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /august 2026/i })).toBeInTheDocument();
+      expect(screen.getByTestId('header-label')).toHaveTextContent(/august 2026/i);
     });
     await user.click(screen.getByTestId('today-button'));
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /june 2026/i })).toBeInTheDocument();
+      expect(screen.getByTestId('header-label')).toHaveTextContent(/june 2026/i);
     });
     expect(screen.getByTestId('today-button')).toBeDisabled();
+  });
+
+  it('switches to the list view and shows the default 90-day window', async () => {
+    server.use(http.get('/pto', () => HttpResponse.json([])));
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('view-option-list'));
+    await waitFor(() => {
+      expect(screen.getByTestId('view-toggle')).toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: /show upcoming pto list/i })).toHaveAttribute(
+        'aria-checked',
+        'true',
+      );
+    });
+    expect(screen.getByTestId('upcoming-empty')).toHaveTextContent(/no ptos in the next 3 months/i);
+  });
+
+  it('shifts the 3-month list window forward when Next is clicked', async () => {
+    server.use(http.get('/pto', () => HttpResponse.json([])));
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('view-option-list'));
+    const initialLabel = screen.getByTestId('header-label').textContent ?? '';
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+    const shiftedLabel = screen.getByTestId('header-label').textContent ?? '';
+    expect(shiftedLabel).not.toBe(initialLabel);
+  });
+
+  it('returns to the default list window when Today is clicked after a shift', async () => {
+    server.use(http.get('/pto', () => HttpResponse.json([])));
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('view-option-list'));
+    const initialLabel = screen.getByTestId('header-label').textContent ?? '';
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+    await user.click(screen.getByTestId('today-button'));
+    expect(screen.getByTestId('header-label').textContent).toBe(initialLabel);
+    expect(screen.getByTestId('today-button')).toBeDisabled();
+  });
+
+  it('renders PTO rows in the list view, grouped by month', async () => {
+    const today = firstWeekdayInCurrentMonth();
+    const later = new Date(today);
+    later.setUTCDate(later.getUTCDate() + 14);
+    const laterIso = later.toISOString().slice(0, 10);
+    server.use(
+      http.get('/pto', () =>
+        HttpResponse.json([
+          { ...STUB_PTO, startDate: today, endDate: today },
+          { ...STUB_PTO, id: 'pto-2', startDate: laterIso, endDate: laterIso },
+        ]),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('view-option-list'));
+    await waitFor(() => {
+      expect(screen.getByTestId('upcoming-list')).toBeInTheDocument();
+    });
+    const rows = screen.getAllByTestId(/^upcoming-row-/);
+    expect(rows).toHaveLength(2);
+  });
+
+  it('opens the view modal when a list row is clicked', async () => {
+    const today = firstWeekdayInCurrentMonth();
+    const localPto = { ...STUB_PTO, startDate: today, endDate: today };
+    server.use(
+      http.get('/pto', () => HttpResponse.json([localPto])),
+      http.get('/pto/:id', () =>
+        HttpResponse.json({
+          id: localPto.id,
+          userId: localPto.user.id,
+          startDate: localPto.startDate,
+          endDate: localPto.endDate,
+          dayPart: localPto.dayPart,
+          note: 'Doctor',
+          user: localPto.user,
+          createdAt: '2026-05-01T10:00:00.000Z',
+          updatedAt: '2026-05-01T10:00:00.000Z',
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('view-option-list'));
+    await waitFor(() => {
+      expect(screen.getByTestId('upcoming-list')).toBeInTheDocument();
+    });
+    const row = screen.getByTestId(`upcoming-row-${localPto.id}`);
+    await user.click(row.querySelector('button')!);
+    await waitFor(() => {
+      expect(screen.getByText(/pto details/i)).toBeInTheDocument();
+    });
+  });
+
+  it('switches back to the grid view and preserves the grid state', async () => {
+    server.use(http.get('/pto', () => HttpResponse.json([])));
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId('header-label')).toHaveTextContent(/july 2026/i);
+    });
+    await user.click(screen.getByTestId('view-option-list'));
+    await user.click(screen.getByTestId('view-option-grid'));
+    expect(screen.getByTestId('header-label')).toHaveTextContent(/july 2026/i);
   });
 
   it('opens the PTOViewModal when a chip is clicked and the user is the owner', async () => {

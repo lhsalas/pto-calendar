@@ -1,22 +1,44 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useAuth } from '../context/useAuth';
 import { usePtoList } from '../hooks/usePtoList';
 import { PTOFormModal } from '../components/pto/PTOFormModal';
 import { PTOViewModal } from '../components/pto/PTOViewModal';
+import { UpcomingPtoList } from '../components/pto/UpcomingPtoList';
 import { CalendarHeader } from '../components/calendar/CalendarHeader';
 import { MonthGrid } from '../components/calendar/MonthGrid';
 import { ThemeToggle } from '../components/ThemeToggle';
-import { addMonths, currentYearMonth, grid, type YearMonth } from '../lib/calendar';
+import {
+  addDays,
+  addMonths,
+  currentYearMonth,
+  formatYearMonth,
+  grid,
+  isCurrentYearMonth,
+  listWindow,
+  todayIso,
+  type YearMonth,
+} from '../lib/calendar';
+import type { ViewMode } from '../components/calendar/ViewToggle';
 import type { CreatePTORequest, PTOWithUser } from '../types/api';
+
+const LIST_WINDOW_DAYS = 90;
 
 export function CalendarPage(): JSX.Element {
   const { user, logout } = useAuth();
+  const [view, setView] = useState<ViewMode>('grid');
   const [yearMonth, setYearMonth] = useState<YearMonth>(() => currentYearMonth());
-  const { start, end, weeks } = useMemo(() => {
-    const g = grid(yearMonth);
-    return { start: g.start, end: g.end, weeks: g.weeks };
-  }, [yearMonth]);
-  const { items, loading, error, refetch, create, update, remove } = usePtoList(start, end);
+  const [listStart, setListStart] = useState<string>(() => todayIso());
+
+  const gridData = useMemo(() => grid(yearMonth), [yearMonth]);
+  const listRange = useMemo(() => listWindow(listStart, LIST_WINDOW_DAYS), [listStart]);
+
+  const fetchStart = view === 'grid' ? gridData.start : listRange.start;
+  const fetchEnd = view === 'grid' ? gridData.end : listRange.end;
+
+  const { items, loading, error, refetch, create, update, remove } = usePtoList(
+    fetchStart,
+    fetchEnd,
+  );
   const [createOpen, setCreateOpen] = useState<boolean>(false);
   const [viewing, setViewing] = useState<PTOWithUser | null>(null);
   const [editing, setEditing] = useState<PTOWithUser | null>(null);
@@ -26,6 +48,40 @@ export function CalendarPage(): JSX.Element {
     setToast(message);
     window.setTimeout(() => setToast(null), 3000);
   }
+
+  const handlePrev = useCallback((): void => {
+    if (view === 'grid') {
+      setYearMonth((m) => addMonths(m, -1));
+    } else {
+      setListStart((s) => addDays(s, -LIST_WINDOW_DAYS));
+    }
+  }, [view]);
+
+  const handleNext = useCallback((): void => {
+    if (view === 'grid') {
+      setYearMonth((m) => addMonths(m, 1));
+    } else {
+      setListStart((s) => addDays(s, LIST_WINDOW_DAYS));
+    }
+  }, [view]);
+
+  const handleToday = useCallback((): void => {
+    if (view === 'grid') {
+      setYearMonth(currentYearMonth());
+    } else {
+      setListStart(todayIso());
+    }
+  }, [view]);
+
+  const handleViewChange = useCallback((next: ViewMode): void => {
+    setView(next);
+    if (next === 'list') {
+      setListStart(todayIso());
+    }
+  }, []);
+
+  const headerLabel = view === 'grid' ? formatYearMonth(yearMonth) : listRange.label;
+  const todayDisabled = view === 'grid' ? isCurrentYearMonth(yearMonth) : listStart === todayIso();
 
   async function handleCreate(payload: CreatePTORequest): Promise<void> {
     await create(payload);
@@ -72,7 +128,7 @@ export function CalendarPage(): JSX.Element {
 
       <div className="mb-4 flex items-center justify-between">
         <p className="text-sm text-slate-600 dark:text-slate-400" data-testid="range-label">
-          Showing {start} to {end}
+          Showing {fetchStart} to {fetchEnd}
         </p>
         <button
           type="button"
@@ -105,18 +161,34 @@ export function CalendarPage(): JSX.Element {
       ) : null}
 
       <CalendarHeader
-        yearMonth={yearMonth}
-        onPrev={() => setYearMonth((m) => addMonths(m, -1))}
-        onNext={() => setYearMonth((m) => addMonths(m, 1))}
-        onToday={() => setYearMonth(currentYearMonth())}
+        label={headerLabel}
+        view={view}
+        onViewChange={handleViewChange}
+        onPrev={handlePrev}
+        onNext={handleNext}
+        onToday={handleToday}
+        todayDisabled={todayDisabled}
       />
 
-      {loading && items.length === 0 ? (
-        <p className="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
-          Loading…
-        </p>
+      {view === 'grid' ? (
+        loading && items.length === 0 ? (
+          <p className="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
+            Loading…
+          </p>
+        ) : (
+          <MonthGrid weeks={gridData.weeks} ptoList={items} onChipClick={setViewing} />
+        )
       ) : (
-        <MonthGrid weeks={weeks} ptoList={items} onChipClick={setViewing} />
+        <UpcomingPtoList
+          ptoList={items}
+          currentUser={user}
+          onRowClick={setViewing}
+          onEdit={(p) => {
+            setViewing(null);
+            setEditing(p);
+          }}
+          onDelete={handleDelete}
+        />
       )}
 
       <PTOFormModal

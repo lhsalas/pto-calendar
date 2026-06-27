@@ -115,7 +115,7 @@ test.describe('Sprint 3 critical journey', () => {
     await page.getByRole('button', { name: /save pto/i }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
 
-    await page.getByRole('button', { name: /next month/i }).click();
+    await page.getByRole('button', { name: /^next$/i }).click();
     const nextMonth = new Date(todayIso);
     nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
     const nextLabel = nextMonth.toLocaleString('en-US', {
@@ -126,7 +126,7 @@ test.describe('Sprint 3 critical journey', () => {
     await expect(page.getByRole('heading', { name: nextLabel })).toBeVisible();
     await expect(page.getByText(todayIso)).not.toBeVisible();
 
-    await page.getByRole('button', { name: /previous month/i }).click();
+    await page.getByRole('button', { name: /^previous$/i }).click();
     const currentLabel = new Date(todayIso).toLocaleString('en-US', {
       month: 'long',
       year: 'numeric',

@@ -72,6 +72,50 @@ export function isCurrentYearMonth(yearMonth: YearMonth): boolean {
   return yearMonth.year === current.year && yearMonth.month === current.month;
 }
 
+export function addDays(iso: string, days: number): string {
+  if (!ISO_DATE.test(iso)) return iso;
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
+export function todayIso(): string {
+  const now = new Date();
+  return `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`;
+}
+
+export interface ListWindow {
+  start: string;
+  end: string;
+  label: string;
+}
+
+const SHORT_MONTH = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+] as const;
+
+export function listWindow(startIso: string, days: number): ListWindow {
+  const endIso = addDays(startIso, days);
+  const startParts = startIso.split('-').map(Number) as [number, number, number];
+  const endParts = endIso.split('-').map(Number) as [number, number, number];
+  const [, startMonth, startDay] = startParts;
+  const [endYear, endMonth, endDay] = endParts;
+  const startLabel = `${SHORT_MONTH[startMonth - 1]} ${startDay}`;
+  const endLabel = `${SHORT_MONTH[endMonth - 1]} ${endDay}, ${endYear}`;
+  return { start: startIso, end: endIso, label: `${startLabel} – ${endLabel}` };
+}
+
 export function addMonths(yearMonth: YearMonth, delta: number): YearMonth {
   const d = new Date(Date.UTC(yearMonth.year, yearMonth.month + delta, 1));
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() };
