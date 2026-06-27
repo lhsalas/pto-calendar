@@ -322,6 +322,10 @@ components:
           format: date-time
     PTOWithUser:
       type: object
+      description: >
+        Returned by GET /pto (list) and GET /pto/:id (detail). The list response
+        always has `note: null`; the detail response includes `note` for the PTO
+        owner or a team lead, and `null` otherwise.
       required: [id, user, startDate, endDate, dayPart]
       properties:
         id:
@@ -349,6 +353,7 @@ components:
         note:
           type: string
           nullable: true
+          description: Always null in list responses. Populated in detail responses only for the PTO owner or a team lead.
     LoginRequest:
       type: object
       required: [email, password]

@@ -1,8 +1,6 @@
 import { PrismaClient, Role } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
-const prisma = new PrismaClient();
-
 const SEED_USERS = [
   {
     name: 'Team Lead',
@@ -27,13 +25,15 @@ const SEED_USERS = [
   },
 ];
 
-async function main(): Promise<void> {
-  const rounds = Number.parseInt(process.env.BCRYPT_ROUNDS ?? '10', 10);
+const DEFAULT_ROUNDS = 10;
+
+export async function runSeed(prisma: PrismaClient): Promise<void> {
+  const rounds = Number.parseInt(process.env.BCRYPT_ROUNDS ?? String(DEFAULT_ROUNDS), 10);
   for (const u of SEED_USERS) {
     const passwordHash = await bcrypt.hash(u.password, rounds);
     await prisma.user.upsert({
       where: { email: u.email },
-      update: { name: u.name, role: u.role, colorCode: u.colorCode },
+      update: { name: u.name, role: u.role, colorCode: u.colorCode, passwordHash },
       create: {
         name: u.name,
         email: u.email,
@@ -42,15 +42,23 @@ async function main(): Promise<void> {
         passwordHash,
       },
     });
-    console.log(`Seeded ${u.role} ${u.email} (password: ${u.password})`);
   }
 }
 
-main()
-  .catch((err) => {
-    console.error(err);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+const isCli = process.argv[1]?.endsWith('seed.ts') ?? false;
+if (isCli) {
+  const prisma = new PrismaClient();
+  runSeed(prisma)
+    .then(() => {
+      for (const u of SEED_USERS) {
+        console.log(`Seeded ${u.role} ${u.email} (password: ${u.password})`);
+      }
+    })
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}

@@ -30,6 +30,18 @@ export default defineConfig({
           branches: 100,
           functions: 100,
         },
+        'src/services/auth/**': {
+          lines: 100,
+          statements: 100,
+          branches: 100,
+          functions: 100,
+        },
+        'src/services/users/**': {
+          lines: 100,
+          statements: 100,
+          branches: 100,
+          functions: 100,
+        },
         'src/services/pto/validation.ts': {
           lines: 100,
           statements: 100,

@@ -83,7 +83,7 @@ jobs:
       - run: npm ci
       - run: npm run prisma:generate
       - run: npx prisma migrate deploy --schema=backend/prisma/schema.prisma
-      - run: npm run test:integration -w backend
+      - run: npm run test:integration:coverage -w backend
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4

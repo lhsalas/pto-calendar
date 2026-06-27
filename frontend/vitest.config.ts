@@ -26,9 +26,26 @@ export default defineConfig({
         'src/main.tsx',
         'src/types/**',
         'src/lib/utils.ts',
-        'src/api/client.ts',
       ],
       thresholds: {
+        'src/context/AuthContext.tsx': {
+          lines: 80,
+          statements: 80,
+          branches: 80,
+          functions: 80,
+        },
+        'src/pages/LoginPage.tsx': {
+          lines: 80,
+          statements: 80,
+          branches: 80,
+          functions: 80,
+        },
+        'src/routes/RequireAuth.tsx': {
+          lines: 80,
+          statements: 80,
+          branches: 80,
+          functions: 80,
+        },
         'src/components/pto/PTOFormModal.tsx': {
           lines: 80,
           statements: 80,

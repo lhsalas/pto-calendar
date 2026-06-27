@@ -222,7 +222,7 @@ Query behavior:
 - Return any PTO where:
   - `start_date <= requested_end`
   - `end_date >= requested_start`
-- Include notes only when the requester is the PTO owner or has role `team_lead`
+- The list endpoint (`GET /pto?start=&end=`) **never** returns the `note` field, regardless of the requester's role. Notes are only surfaced through the detail endpoint (`GET /pto/:id`) for the PTO owner or a team lead, and rendered in the `PTOViewModal` UI. The list response and the calendar chip never display notes (per MVP product decision).
 
 #### GET /pto/:id
 Response 200:
