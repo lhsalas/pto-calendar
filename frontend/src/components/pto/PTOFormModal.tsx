@@ -44,6 +44,11 @@ export function PTOFormModal({
     }
   }, [open, initialPto, today]);
 
+  function handleStartDateChange(value: string): void {
+    setStartDate(value);
+    setEndDate(value);
+  }
+
   if (!open) return null;
 
   const isSingleDay = startDate !== '' && endDate !== '' && startDate === endDate;
@@ -101,7 +106,7 @@ export function PTOFormModal({
               type="date"
               required
               value={startDate}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setStartDate(e.target.value)}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => handleStartDateChange(e.target.value)}
               className="mt-1 block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
             />
           </label>
@@ -111,6 +116,7 @@ export function PTOFormModal({
               type="date"
               required
               value={endDate}
+              min={startDate}
               onChange={(e: ChangeEvent<HTMLInputElement>) => setEndDate(e.target.value)}
               className="mt-1 block w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
             />

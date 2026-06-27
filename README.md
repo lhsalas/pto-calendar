@@ -54,6 +54,7 @@ The app is intended to support:
 - PTO CRUD operations
 - Single-day PTO with `morning`, `evening`, or `all_day`
 - Multi-day PTO across date ranges
+- PTO form auto-syncs the end date to the start date on every start-date change; the end-date input has `min={startDate}` so the browser's date picker prevents picking an end date before the start
 - Shared monthly calendar view
 - Month navigation (prev/next + a "Today" button to jump back to the current month; the Today button is disabled while the calendar is already on the current month)
 - Color-coded PTO visibility by person

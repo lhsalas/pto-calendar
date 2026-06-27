@@ -76,17 +76,43 @@ describe('PTOFormModal', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('rejects endDate before startDate with an inline error', async () => {
+  it('auto-syncs the end date to the start date when the start date is changed', async () => {
     const user = userEvent.setup();
-    const onSubmit = vi.fn();
-    renderModal({ onSubmit });
+    renderModal();
     await setDate(/start date/i, '2026-05-13', user);
-    await setDate(/end date/i, '2026-05-11', user);
-    await user.click(screen.getByRole('button', { name: /save pto/i }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      /end date cannot be before start date/i,
-    );
-    expect(onSubmit).not.toHaveBeenCalled();
+    const endInput = screen.getByLabelText(/end date/i) as HTMLInputElement;
+    expect(endInput.value).toBe('2026-05-13');
+  });
+
+  it('re-syncs the end date when the start date is changed again', async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await setDate(/start date/i, '2026-05-13', user);
+    await setDate(/end date/i, '2026-05-15', user);
+    const endInput = screen.getByLabelText(/end date/i) as HTMLInputElement;
+    expect(endInput.value).toBe('2026-05-15');
+    await setDate(/start date/i, '2026-05-18', user);
+    expect(endInput.value).toBe('2026-05-18');
+  });
+
+  it('sets min={startDate} on the end-date input so earlier dates are disabled', () => {
+    renderModal();
+    const startInput = screen.getByLabelText(/start date/i) as HTMLInputElement;
+    const endInput = screen.getByLabelText(/end date/i) as HTMLInputElement;
+    expect(endInput.getAttribute('min')).toBe(startInput.value);
+  });
+
+  it('does not auto-snap the end date when the modal opens with an initialPto', () => {
+    const multiDayPto = {
+      ...STUB_PTO,
+      startDate: '2026-05-11',
+      endDate: '2026-05-15',
+    };
+    renderModal({ initialPto: multiDayPto });
+    const startInput = screen.getByLabelText(/start date/i) as HTMLInputElement;
+    const endInput = screen.getByLabelText(/end date/i) as HTMLInputElement;
+    expect(startInput.value).toBe('2026-05-11');
+    expect(endInput.value).toBe('2026-05-15');
   });
 
   it('submits a valid single-day PTO with the day-part included', async () => {
