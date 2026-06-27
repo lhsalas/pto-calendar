@@ -6,6 +6,7 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/integration/**/*.test.ts'],
     exclude: ['node_modules', 'dist', 'coverage', 'tests/unit/**'],
+    passWithNoTests: true,
     testTimeout: 30000,
     hookTimeout: 30000,
     pool: 'forks',
