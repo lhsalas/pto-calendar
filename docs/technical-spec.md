@@ -379,13 +379,18 @@ function canModifyPTO(currentUser, pto) {
 - optional `/pto/:id`
 
 ### 11.2 Main calendar page components
-- `CalendarPage`
+
+**Route pages** (live under `frontend/src/pages/`):
+- `LoginPage`
+- `CalendarPage` — the `/calendar` route container; fetches the visible-grid PTO range, owns `selectedMonth` state, renders `CalendarHeader` and `MonthGrid`
+
+**Calendar grid components** (live under `frontend/src/components/calendar/` and `frontend/src/components/pto/`):
 - `CalendarHeader`
 - `MonthGrid`
 - `DayCell`
 - `PTOChip`
-- `PTOFormModal`
-- `PTOViewModal`
+- `PTOFormModal` (under `components/pto/`)
+- `PTOViewModal` (under `components/pto/`)
 
 ### 11.3 State requirements
 Frontend state should track:
@@ -457,6 +462,8 @@ function expandPTOToDates(pto) {
 - Input validation and sanitization
 - bcrypt password hashing
 - HTTP-only secure cookie sessions
+- Cross-origin requests are allowed via the `cors` middleware using the `CORS_ORIGIN` env var allowlist. Credentials are permitted (`credentials: true`) so the HTTP-only cookie session works across origins in production. The allowlist is enforced server-side.
+- Health-check endpoints must return a minimal payload (`{ "status": "ok" }`) and must not leak environment, version, or deployment metadata.
 
 ### 13.3 Reliability
 - Failed requests should return clear errors
@@ -466,6 +473,8 @@ function expandPTOToDates(pto) {
 - Strong typing recommended
 - Shared validation schema between frontend and backend if possible
 - Centralized permission logic
+- Tailwind v4 builds CSS via `@tailwindcss/vite`; `autoprefixer` is not required and should not be installed.
+- Dependency hygiene: prune unused `dependencies`/`devDependencies` after each sprint. A dependency is unused if no `import`/`require` references it in `src/` or `tests/` (excluding config-only packages like `eslint`/`prettier`/`husky`/`lint-staged`).
 
 ## 14. Testing Specification
 
@@ -510,6 +519,7 @@ See `testing-strategy.md` for the full automation plan: tooling matrix (Vitest, 
 - Internal-only deployment is sufficient for MVP
 - Back up database regularly
 - Configure environment variables for DB and auth secrets
+- Set `CORS_ORIGIN` to the frontend's production origin (e.g., `https://pto.internal.example.com`). Backends must run with `COOKIE_SECURE=true` and `COOKIE_DOMAIN` set to the backend's host so session cookies are set with the right scope across origins.
 
 ## 17. Confirmed Technical Decisions
 - Audit logs are stored internally only and are not exposed in the MVP UI

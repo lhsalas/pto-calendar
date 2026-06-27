@@ -266,6 +266,7 @@
 - Add DB migration step to deployment runbook
 - Add deployment documentation (local Docker compose + internal host instructions)
 - Validate build and startup scripts end-to-end against a clean environment
+- Audit `package.json` files for unused dependencies and remove them (e.g., `pino-http`, `autoprefixer` are candidates; per `technical-spec.md` §13.4 dep hygiene rule)
 
 ### Story 5.3: CI pipeline runs all checks on every PR
 **As** the team

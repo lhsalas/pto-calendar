@@ -49,7 +49,8 @@ Coverage is enforced on PRs via CI. Thresholds are set in `vitest.config.ts`.
 | `src/services/calendar/CalendarQuery.*` | 80% | 80% | Overlap SQL + expansion |
 | `src/services/audit/AuditLogService.*` | 80% | 80% | Required for audit correctness |
 | Other backend services | tracked | tracked | Reported, not blocking |
-| Frontend critical components (`PTOFormModal`, `DayCell`, `CalendarPage`) | 80% | tracked | Reported and blocking |
+| Frontend critical pages (`pages/CalendarPage.tsx`) | 80% | tracked | Reported and blocking |
+| Frontend critical components (`components/pto/PTOFormModal.tsx`, `components/calendar/DayCell.tsx`) | 80% | tracked | Reported and blocking |
 | Other frontend | tracked | tracked | Reported, not blocking |
 
 A PR fails if coverage on a **blocking** path drops below its threshold.
@@ -60,6 +61,7 @@ A PR fails if coverage on a **blocking** path drops below its threshold.
 - Cover pure functions and helpers: `validatePtoPayload`, `canModifyPTO`, `expandPTOToDates`, `isWeekend`, `normalizeDayPart`.
 - No DB or network access.
 - Use table-driven tests for boundary cases.
+- Tests must not mutate `process.env` directly without restoring it. Cache env state via `beforeAll`/`afterAll` (capture the original values, set required vars in `beforeAll`, restore originals in `afterAll`), calling `resetEnvForTests()` (or the equivalent env-cache reset helper) after setting and after restoring so the `loadEnv()` cache doesn't leak between files. This prevents one test file's env from influencing another's cached configuration.
 
 ### 6.2 Integration tests
 - Spin up an ephemeral PostgreSQL container per CI job (GitHub Actions service container).
@@ -133,8 +135,8 @@ Keep the E2E suite small and focused on critical user journeys. Heavy logic cove
 ### 9.2 Database lifecycle
 - CI: GitHub Actions service container `postgres:16` with health check.
 - Local: `docker compose up -d db` for developers; document in `README.md`.
-- Prisma migrations run on test setup.
-- `TRUNCATE pto_requests, audit_logs RESTART IDENTITY CASCADE;` between tests (keep `users` seeded once).
+- Prisma migrations run on test setup. Assumes the baseline migration has been generated and committed under `backend/prisma/migrations/` before the first integration test run (see `plan.md` Phase 0). CI runs `prisma migrate deploy`, never `migrate dev`.
+- `TRUNCATE pto_requests, audit_logs RESTART IDENTITY CASCADE;` between tests (keep `users` seeded once). The seed script itself must be **idempotent including password hashes** — re-running it updates each user's `passwordHash` to match the seed definition, so test fixtures stay reproducible across re-seeds.
 
 ### 9.3 Frontend mocking
 - MSW handlers mirror `openapi.yaml` response shapes.
