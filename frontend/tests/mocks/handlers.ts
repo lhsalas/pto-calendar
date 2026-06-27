@@ -76,4 +76,31 @@ export const ptoConflict = http.post('/pto', () =>
   ),
 );
 
+export const ptoUpdateOk = http.put('/pto/:id', () =>
+  HttpResponse.json({
+    id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+    userId: STUB_USER.id,
+    startDate: '2026-05-12',
+    endDate: '2026-05-12',
+    dayPart: 'evening',
+    note: 'Edited',
+    createdAt: '2026-05-01T10:00:00.000Z',
+    updatedAt: '2026-05-02T10:00:00.000Z',
+  }),
+);
+
+export const ptoDeleteOk = http.delete('/pto/:id', () => new HttpResponse(null, { status: 204 }));
+
+export const ptoGetDetail = http.get('/pto/:id', () =>
+  HttpResponse.json({
+    id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+    userId: STUB_USER.id,
+    startDate: '2026-05-11',
+    endDate: '2026-05-11',
+    dayPart: 'morning',
+    note: 'Doctor',
+    user: { id: STUB_USER.id, name: STUB_USER.name, colorCode: STUB_USER.colorCode },
+  }),
+);
+
 export const handlers = [unauthenticated, loginOk, logoutOk, ptoListEmpty, ptoCreateOk];

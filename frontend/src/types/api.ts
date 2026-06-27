@@ -36,6 +36,12 @@ export interface PTOWithUser {
   note: string | null;
 }
 
+export interface PTODetail extends PTOWithUser {
+  userId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CreatePTORequest {
   startDate: string;
   endDate: string;

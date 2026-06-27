@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 
 const SEED = {
   lead: { email: 'lead@example.com', password: 'lead-dev-password' },
+  dev1: { email: 'dev1@example.com', password: 'dev1-dev-password' },
 };
 
 function firstWeekdayInCurrentMonth(): { start: string; end: string; iso: string } {
@@ -49,5 +50,38 @@ test.describe('Sprint 1 critical journey', () => {
     await expect(page.getByText(/PTO saved/i)).toBeVisible();
     await expect(page.getByText(/Team Lead/).first()).toBeVisible();
     await expect(page.getByText(iso).first()).toBeVisible();
+  });
+});
+
+test.describe('Sprint 2 critical journey', () => {
+  test.describe.configure({ retries: 0 });
+  test('dev1 can edit and then delete their own PTO with confirm', async ({ page }) => {
+    await page.goto('/');
+    await page.getByLabel(/email/i).fill(SEED.dev1.email);
+    await page.getByLabel(/password/i).fill(SEED.dev1.password);
+    await page.getByRole('button', { name: /sign in/i }).click();
+    await expect(page.getByRole('heading', { name: /calendar/i })).toBeVisible();
+
+    await page.getByRole('button', { name: /add pto/i }).click();
+    await page.getByLabel(/start date/i).fill('2026-05-12');
+    await page.getByLabel(/end date/i).fill('2026-05-12');
+    await page.getByLabel(/day part/i).selectOption('morning');
+    await page.getByRole('button', { name: /save pto/i }).click();
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+
+    await page.getByRole('button', { name: '2026-05-12' }).click();
+    await expect(page.getByRole('dialog', { name: /pto details/i })).toBeVisible();
+    await page.getByRole('button', { name: /^edit$/i }).click();
+    await expect(page.getByText(/edit pto/i)).toBeVisible();
+    await page.getByLabel(/day part/i).selectOption('evening');
+    await page.getByRole('button', { name: /save pto/i }).click();
+    await expect(page.getByText(/PTO updated/i)).toBeVisible();
+
+    await page.getByRole('button', { name: '2026-05-12' }).click();
+    await page.getByRole('button', { name: /^delete$/i }).click();
+    await expect(page.getByText(/cannot be undone/i)).toBeInTheDocument();
+    await page.getByRole('button', { name: /yes, delete/i }).click();
+    await expect(page.getByText(/PTO deleted/i)).toBeVisible();
+    await expect(page.getByText('2026-05-12')).not.toBeVisible();
   });
 });

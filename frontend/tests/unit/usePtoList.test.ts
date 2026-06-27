@@ -68,6 +68,66 @@ describe('usePtoList', () => {
     expect(listCallCount).toBe(before + 1);
   });
 
+  it('update() PUTs to /pto/:id and refetches the list', async () => {
+    let listCallCount = 0;
+    server.use(
+      http.get('/pto', () => {
+        listCallCount += 1;
+        return HttpResponse.json([STUB_PTO]);
+      }),
+      http.put('/pto/:id', () =>
+        HttpResponse.json(
+          { ...STUB_PTO, startDate: '2026-05-12', endDate: '2026-05-12', dayPart: 'evening' },
+          { status: 200 },
+        ),
+      ),
+    );
+
+    const { result } = renderHook(() => usePtoList('2026-05-01', '2026-05-31'));
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    const before = listCallCount;
+
+    await act(async () => {
+      await result.current.update(STUB_PTO.id, {
+        startDate: '2026-05-12',
+        endDate: '2026-05-12',
+        dayPart: 'evening',
+      });
+    });
+
+    expect(listCallCount).toBe(before + 1);
+  });
+
+  it('remove() DELETEs /pto/:id and refetches the list', async () => {
+    let listCallCount = 0;
+    let deleteCalled = false;
+    server.use(
+      http.get('/pto', () => {
+        listCallCount += 1;
+        return HttpResponse.json([STUB_PTO]);
+      }),
+      http.delete('/pto/:id', () => {
+        deleteCalled = true;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    const { result } = renderHook(() => usePtoList('2026-05-01', '2026-05-31'));
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    const before = listCallCount;
+
+    await act(async () => {
+      await result.current.remove(STUB_PTO.id);
+    });
+
+    expect(deleteCalled).toBe(true);
+    expect(listCallCount).toBe(before + 1);
+  });
+
   it('exposes refetch() that re-issues the GET', async () => {
     let callCount = 0;
     server.use(
