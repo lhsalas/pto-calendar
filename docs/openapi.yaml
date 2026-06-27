@@ -11,6 +11,23 @@ servers:
 security:
   - cookieAuth: []
 paths:
+  /health:
+    get:
+      security: []
+      summary: Health check
+      tags: [Health]
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
   /auth/login:
     post:
       security: []

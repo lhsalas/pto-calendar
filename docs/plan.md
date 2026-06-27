@@ -74,7 +74,7 @@ The main page should be a **calendar view**.
 
 ### MVP
 - Email/password login/authentication
-- Manually seeded users for MVP
+- Manually seeded users for MVP (seed script is idempotent; re-running it refreshes password hashes, names, roles, and colors)
 - User roles (`member`, `team_lead`)
 - PTO create/read/update/delete
 - Single-day half-day selection (`morning`, `evening`, `all_day`)
@@ -183,6 +183,7 @@ Frontend responsibilities:
 Confirmed MVP stack:
 - **Node.js + Express + TypeScript**
 - **Prisma** for database access
+- **`cors` middleware** for cross-origin support (MVP, with `CORS_ORIGIN` allowlist)
 
 Backend responsibilities:
 - Email/password authentication validation
@@ -281,6 +282,11 @@ Recommendation:
 - Time zone consistency for date storage/display
 
 ## 13. Suggested Implementation Phases
+
+### Phase 0: Foundation Scaffolding
+- Generate the initial Prisma migration from `backend/prisma/schema.prisma` and commit it under `backend/prisma/migrations/<timestamp>_init/migration.sql`.
+- The committed migration is propagated to CI and integration test setup via `prisma migrate deploy`; `migrate dev` must never run in CI.
+- Migration SQL must include the `CHECK` constraints defined in `docs/schema.sql` §6.1 (`end_date >= start_date`, `start_date = end_date OR day_part = 'all_day'`) since Prisma's schema DSL cannot express CHECK constraints.
 
 ### Phase 1: Foundation
 - Set up app project structure
