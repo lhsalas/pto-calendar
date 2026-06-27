@@ -5,22 +5,30 @@ const SEED = {
   dev1: { email: 'dev1@example.com', password: 'dev1-dev-password' },
 };
 
-function firstWeekdayInCurrentMonth(): { start: string; end: string; iso: string } {
+function nthWeekdayInCurrentMonth(n: number): { start: string; end: string; iso: string } {
   const now = new Date();
   const year = now.getUTCFullYear();
   const month = now.getUTCMonth();
+  let count = 0;
   for (let day = 1; day <= 31; day += 1) {
     const d = new Date(Date.UTC(year, month, day));
     if (d.getUTCMonth() !== month) break;
     const dow = d.getUTCDay();
     if (dow !== 0 && dow !== 6) {
-      const iso = d.toISOString().slice(0, 10);
-      return { start: iso, end: iso, iso };
+      count += 1;
+      if (count === n) {
+        const iso = d.toISOString().slice(0, 10);
+        return { start: iso, end: iso, iso };
+      }
     }
   }
   const fallback = new Date(Date.UTC(year, month, 2));
   const iso = fallback.toISOString().slice(0, 10);
   return { start: iso, end: iso, iso };
+}
+
+function firstWeekdayInCurrentMonth(): { start: string; end: string; iso: string } {
+  return nthWeekdayInCurrentMonth(1);
 }
 
 test.describe('Sprint 1 critical journey', () => {
@@ -56,7 +64,7 @@ test.describe('Sprint 1 critical journey', () => {
 test.describe('Sprint 2 critical journey', () => {
   test.describe.configure({ retries: 0 });
   test('dev1 can edit and then delete their own PTO with confirm', async ({ page }) => {
-    const { start, end, iso } = firstWeekdayInCurrentMonth();
+    const { start, end, iso } = nthWeekdayInCurrentMonth(2);
 
     await page.goto('/');
     await page.getByLabel(/email/i).fill(SEED.dev1.email);
