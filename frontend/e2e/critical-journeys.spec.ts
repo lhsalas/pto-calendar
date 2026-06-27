@@ -76,20 +76,25 @@ test.describe('Sprint 4 — critical journeys', () => {
     await login(page, SEED.dev1.email, SEED.dev1.password);
     const day = nthWeekdayInCurrentMonth(3, 1);
 
+    async function fillDay(): Promise<void> {
+      const startInput = page.getByLabel(/start date/i);
+      const endInput = page.getByLabel(/end date/i);
+      await startInput.fill('');
+      await startInput.fill(day);
+      await endInput.fill('');
+      await endInput.fill(day);
+      await expect(startInput).toHaveValue(day);
+      await expect(endInput).toHaveValue(day);
+    }
+
     await page.getByRole('button', { name: /^add pto$/i }).click();
-    await page.getByLabel(/start date/i).pressSequentially(day.replaceAll('-', ''), { delay: 5 });
-    await page.getByLabel(/end date/i).pressSequentially(day.replaceAll('-', ''), { delay: 5 });
-    await expect(page.getByLabel(/start date/i)).toHaveValue(day);
-    await expect(page.getByLabel(/end date/i)).toHaveValue(day);
+    await fillDay();
     await page.getByLabel(/day part/i).selectOption('morning');
     await page.getByRole('button', { name: /save pto/i }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
 
     await page.getByRole('button', { name: /^add pto$/i }).click();
-    await page.getByLabel(/start date/i).pressSequentially(day.replaceAll('-', ''), { delay: 5 });
-    await page.getByLabel(/end date/i).pressSequentially(day.replaceAll('-', ''), { delay: 5 });
-    await expect(page.getByLabel(/start date/i)).toHaveValue(day);
-    await expect(page.getByLabel(/end date/i)).toHaveValue(day);
+    await fillDay();
     await page.getByLabel(/day part/i).selectOption('evening');
     await page.getByRole('button', { name: /save pto/i }).click();
     await expect(page.getByRole('alert')).toContainText(/overlap/i);
@@ -111,7 +116,10 @@ test.describe('Sprint 4 — critical journeys', () => {
     await page.getByLabel(/password/i).fill(SEED.dev1.password);
     await page.getByRole('button', { name: /sign in/i }).click();
     await expect(page.getByRole('heading', { name: /calendar/i })).toBeVisible();
-    await page.getByRole('button', { name: /team lead/i }).click();
+    await page
+      .getByRole('button', { name: /team lead/i })
+      .first()
+      .click();
     await expect(page.getByText(/pto details/i)).toBeVisible();
     expect(page.getByRole('button', { name: /^edit$/i })).toHaveCount(0);
     expect(page.getByRole('button', { name: /^delete$/i })).toHaveCount(0);
@@ -133,7 +141,10 @@ test.describe('Sprint 4 — critical journeys', () => {
     await page.getByLabel(/password/i).fill(SEED.lead.password);
     await page.getByRole('button', { name: /sign in/i }).click();
     await expect(page.getByRole('heading', { name: /calendar/i })).toBeVisible();
-    await page.getByRole('button', { name: /developer one/i }).click();
+    await page
+      .getByRole('button', { name: /developer one/i })
+      .first()
+      .click();
     await expect(page.getByText(/pto details/i)).toBeVisible();
     await expect(page.getByRole('button', { name: /^edit$/i })).toBeVisible();
     await expect(page.getByRole('button', { name: /^delete$/i })).toBeVisible();
