@@ -49,8 +49,8 @@ Coverage is enforced on PRs via CI. Thresholds are set in `vitest.config.ts`.
 | `src/services/calendar/CalendarQuery.*` | 80% | 80% | Overlap SQL + expansion |
 | `src/services/audit/AuditLogService.*` | 80% | 80% | Required for audit correctness |
 | Other backend services | tracked | tracked | Reported, not blocking |
-| Frontend critical pages (`pages/CalendarPage.tsx`) | 80% | tracked | Reported and blocking |
-| Frontend critical components (`components/pto/PTOFormModal.tsx`, `components/calendar/DayCell.tsx`) | 80% | tracked | Reported and blocking |
+| Frontend critical pages (`pages/CalendarPage.tsx`) | 80% | tracked | Reported and blocking; threshold is added to `frontend/vitest.config.ts` when Sprint 3 lands the page with its first component test, and removed until then so it doesn't fail Phase 0 scaffolding |
+| Frontend critical components (`components/pto/PTOFormModal.tsx`, `components/calendar/DayCell.tsx`) | 80% | tracked | Reported and blocking; thresholds are inert until those files exist (Sprint 2 / Sprint 3) |
 | Other frontend | tracked | tracked | Reported, not blocking |
 
 A PR fails if coverage on a **blocking** path drops below its threshold.
