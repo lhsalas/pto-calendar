@@ -24,6 +24,10 @@ This repository contains planning and technical documentation for a small intern
 - **File:** `backlog.md`
 - **Purpose:** Epics, user stories, acceptance criteria, tasks, sprint suggestions, and definition of done.
 
+### 6. Testing & Automation Strategy
+- **File:** `testing-strategy.md`
+- **Purpose:** Tooling matrix, test pyramid, coverage targets (≥80% on critical services), GitHub Actions CI pipeline, ephemeral Postgres for integration tests, Playwright E2E scope, pre-commit hooks, and merge policy.
+
 ## Functional Summary
 The app is intended to support:
 - Authenticated access only
@@ -50,6 +54,7 @@ The app is intended to support:
 3. `schema.sql`
 4. `openapi.yaml`
 5. `backlog.md`
+6. `testing-strategy.md`
 
 ## Suggested Next Steps
 - Review and confirm open product decisions in `plan.md`
@@ -74,6 +79,7 @@ The app is intended to support:
 - SQL schema
 - API contract
 - Delivery backlog
+- Testing and automation strategy
 
 ## Optional Next Artifacts
 If needed, the following can be added next:

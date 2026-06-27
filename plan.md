@@ -268,7 +268,7 @@ Recommendation:
 - Require authentication for all app routes and APIs
 - Validate user identity server-side, not only in UI
 - Enforce owner/team lead authorization in backend
-- Log sensitive actions like delete/update for traceability
+- Audit logging covers **all** PTO update and delete actions, including owner self-edits; logs are stored internally only and not exposed in the MVP UI
 
 ## 12. Edge Cases to Consider
 - Single-day PTO with missing half-day selection

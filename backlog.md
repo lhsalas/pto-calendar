@@ -192,12 +192,13 @@
 #### Acceptance Criteria
 - Team lead can access edit/delete actions for any PTO
 - Backend authorizes team lead override
-- Audit log entry is created for team lead modifications
+- Audit log entry is created for **all** PTO update and delete actions (owner self-edits and team-lead edits alike), capturing actor, target, action, and timestamp
 
 #### Tasks
 - Add team lead authorization rules
 - Surface lead actions in UI
 - Add audit logging hooks for update/delete actions
+- Verify audit logs are written for both owner and team-lead updates/deletes
 
 ### Story 4.2: Non-owners cannot modify others’ PTO
 **As** a logged-in user
@@ -254,16 +255,68 @@
 **So that** the team can start using it
 
 #### Acceptance Criteria
-- Environment variables are documented
-- Database schema can be created in target environment
-- App can run in production mode
-- Basic deployment steps are documented
+- Environment variables are documented (DB connection string, session secret, cookie flags)
+- Database schema can be created in the target environment via Prisma migrations
+- Backend can run in production mode (build + start scripts)
+- Frontend can be built and served as static assets behind the backend or via a reverse proxy
+- Basic deployment steps are documented in the README
 
 #### Tasks
-- Create production env template
-- Add DB migration or schema execution step
-- Add deployment documentation
-- Validate build and startup scripts
+- Create production `.env.example` template
+- Add DB migration step to deployment runbook
+- Add deployment documentation (local Docker compose + internal host instructions)
+- Validate build and startup scripts end-to-end against a clean environment
+
+### Story 5.3: CI pipeline runs all checks on every PR
+**As** the team
+**I want** every pull request to run lint, typecheck, unit, integration, and E2E tests automatically
+**So that** regressions are caught before merge
+
+#### Acceptance Criteria
+- GitHub Actions workflow runs on every PR and push to `main`
+- Pipeline includes: lint, typecheck, backend unit, backend integration (with ephemeral Postgres), frontend unit/component, build, Playwright E2E
+- Required status checks block merge when any job fails
+- Pipeline runs in under 15 minutes for typical PRs
+
+#### Tasks
+- Add `.github/workflows/ci.yml`
+- Configure Postgres service container for integration jobs
+- Configure Playwright with `webServer` for E2E
+- Cache `node_modules` and Playwright browsers
+- Configure branch protection required status checks
+
+### Story 5.4: Coverage gates enforced on critical paths
+**As** the team
+**I want** automated coverage gates on authorization, validation, and core services
+**So that** critical logic cannot silently lose test coverage
+
+#### Acceptance Criteria
+- Vitest coverage thresholds configured in `vitest.config.ts`
+- `AuthorizationService`, PTO validation, `PTOService`, `CalendarQuery`, and `AuditLogService` enforce ≥80% line coverage
+- Frontend critical components (`PTOFormModal`, `DayCell`, `CalendarPage`) enforce ≥80% line coverage
+- PR fails if any blocking path drops below its threshold
+- Coverage diff posted as a PR comment
+
+#### Tasks
+- Configure `c8`/`@vitest/coverage-v8` thresholds per path
+- Add coverage diff PR comment step to CI
+- Document thresholds in `testing-strategy.md` (already done) and link from README
+
+### Story 5.5: Playwright E2E covers critical user journeys
+**As** the team
+**I want** automated end-to-end tests for the most important user flows
+**So that** full-stack regressions are caught even when unit/integration tests pass
+
+#### Acceptance Criteria
+- Playwright suite covers: login, single-day PTO create, multi-day PTO create, weekend rejection, overlap rejection, edit own PTO, delete own PTO, permission enforcement (member vs team lead), month navigation
+- Tests run in CI against a freshly seeded test database
+- Traces and videos uploaded as artifacts on failure
+- Suite is stable (no known flaky tests)
+
+#### Tasks
+- Add Playwright config with `webServer` and ephemeral DB
+- Implement critical journey specs listed in `testing-strategy.md` §8.2
+- Wire Playwright into GitHub Actions with artifact uploads
 
 ## 7. Prioritized Delivery Plan
 
@@ -288,6 +341,9 @@
 
 ### Sprint 4
 - Story 5.1 Core business rules are covered by tests
+- Story 5.3 CI pipeline runs all checks on every PR
+- Story 5.4 Coverage gates enforced on critical paths
+- Story 5.5 Playwright E2E covers critical user journeys
 - Story 5.2 App is deployable for internal use
 
 ## 8. Definition of Done

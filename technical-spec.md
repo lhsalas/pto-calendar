@@ -491,6 +491,9 @@ function expandPTOToDates(pto) {
 - single-day form toggles day-part selector
 - edit/delete visibility respects permissions
 
+### 14.4 Automation, tooling, CI/CD, and coverage policy
+See `testing-strategy.md` for the full automation plan: tooling matrix (Vitest, Supertest, React Testing Library, MSW, Playwright, GitHub Actions), coverage targets with strict gates on authorization and PTO validation, ephemeral Postgres for integration tests, pre-commit hooks, and merge policy.
+
 ## 15. Suggested Implementation Choices
 
 ### Confirmed MVP implementation choice
