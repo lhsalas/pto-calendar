@@ -5,6 +5,7 @@ const SEED = {
 };
 
 test.describe('Sprint 1 critical journey', () => {
+  test.describe.configure({ retries: 0 });
   test('seeded team lead can log in and create a single-day morning PTO', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveTitle(/PTO Calendar/i);
