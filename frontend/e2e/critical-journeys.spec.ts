@@ -77,23 +77,19 @@ test.describe('Sprint 4 — critical journeys', () => {
     const day = nthWeekdayInCurrentMonth(3, 1);
 
     await page.getByRole('button', { name: /^add pto$/i }).click();
-    const startInput = page.getByLabel(/start date/i);
-    const endInput = page.getByLabel(/end date/i);
-    await startInput.fill(day);
-    await endInput.fill(day);
-    await expect(startInput).toHaveValue(day);
-    await expect(endInput).toHaveValue(day);
+    await page.getByLabel(/start date/i).pressSequentially(day.replaceAll('-', ''), { delay: 5 });
+    await page.getByLabel(/end date/i).pressSequentially(day.replaceAll('-', ''), { delay: 5 });
+    await expect(page.getByLabel(/start date/i)).toHaveValue(day);
+    await expect(page.getByLabel(/end date/i)).toHaveValue(day);
     await page.getByLabel(/day part/i).selectOption('morning');
     await page.getByRole('button', { name: /save pto/i }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
 
     await page.getByRole('button', { name: /^add pto$/i }).click();
-    const startInput2 = page.getByLabel(/start date/i);
-    const endInput2 = page.getByLabel(/end date/i);
-    await startInput2.fill(day);
-    await endInput2.fill(day);
-    await expect(startInput2).toHaveValue(day);
-    await expect(endInput2).toHaveValue(day);
+    await page.getByLabel(/start date/i).pressSequentially(day.replaceAll('-', ''), { delay: 5 });
+    await page.getByLabel(/end date/i).pressSequentially(day.replaceAll('-', ''), { delay: 5 });
+    await expect(page.getByLabel(/start date/i)).toHaveValue(day);
+    await expect(page.getByLabel(/end date/i)).toHaveValue(day);
     await page.getByLabel(/day part/i).selectOption('evening');
     await page.getByRole('button', { name: /save pto/i }).click();
     await expect(page.getByRole('alert')).toContainText(/overlap/i);
