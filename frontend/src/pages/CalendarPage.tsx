@@ -3,42 +3,33 @@ import { useAuth } from '../context/useAuth';
 import { usePtoList } from '../hooks/usePtoList';
 import { PTOFormModal } from '../components/pto/PTOFormModal';
 import { PTOViewModal } from '../components/pto/PTOViewModal';
-import type { CreatePTORequest, DayPart, PTOWithUser } from '../types/api';
-
-function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-function currentMonthRange(): { start: string; end: string } {
-  const now = new Date();
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
-  return { start: isoDate(start), end: isoDate(end) };
-}
-
-function dayPartLabel(dp: DayPart): string {
-  if (dp === 'morning') return 'AM';
-  if (dp === 'evening') return 'PM';
-  return 'Full';
-}
+import { CalendarHeader } from '../components/calendar/CalendarHeader';
+import { MonthGrid } from '../components/calendar/MonthGrid';
+import { addMonths, currentYearMonth, grid, type YearMonth } from '../lib/calendar';
+import type { CreatePTORequest, PTOWithUser } from '../types/api';
 
 export function CalendarPage(): JSX.Element {
   const { user, logout } = useAuth();
-  const range = useMemo(currentMonthRange, []);
-  const { items, loading, error, refetch, create, update, remove } = usePtoList(
-    range.start,
-    range.end,
-  );
+  const [yearMonth, setYearMonth] = useState<YearMonth>(() => currentYearMonth());
+  const { start, end, weeks } = useMemo(() => {
+    const g = grid(yearMonth);
+    return { start: g.start, end: g.end, weeks: g.weeks };
+  }, [yearMonth]);
+  const { items, loading, error, refetch, create, update, remove } = usePtoList(start, end);
   const [createOpen, setCreateOpen] = useState<boolean>(false);
   const [viewing, setViewing] = useState<PTOWithUser | null>(null);
   const [editing, setEditing] = useState<PTOWithUser | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  function showToast(message: string): void {
+    setToast(message);
+    window.setTimeout(() => setToast(null), 3000);
+  }
+
   async function handleCreate(payload: CreatePTORequest): Promise<void> {
     await create(payload);
     setCreateOpen(false);
-    setToast('PTO saved.');
-    window.setTimeout(() => setToast(null), 3000);
+    showToast('PTO saved.');
   }
 
   async function handleUpdate(payload: CreatePTORequest): Promise<void> {
@@ -46,15 +37,13 @@ export function CalendarPage(): JSX.Element {
     await update(editing.id, payload);
     setEditing(null);
     setViewing(null);
-    setToast('PTO updated.');
-    window.setTimeout(() => setToast(null), 3000);
+    showToast('PTO updated.');
   }
 
   async function handleDelete(pto: PTOWithUser): Promise<void> {
     await remove(pto.id);
     setViewing(null);
-    setToast('PTO deleted.');
-    window.setTimeout(() => setToast(null), 3000);
+    showToast('PTO deleted.');
   }
 
   if (!user) {
@@ -80,8 +69,8 @@ export function CalendarPage(): JSX.Element {
       </header>
 
       <div className="mb-4 flex items-center justify-between">
-        <p className="text-sm text-slate-600">
-          Showing {range.start} to {range.end}
+        <p className="text-sm text-slate-600" data-testid="range-label">
+          Showing {start} to {end}
         </p>
         <button
           type="button"
@@ -113,42 +102,19 @@ export function CalendarPage(): JSX.Element {
         </div>
       ) : null}
 
-      <section className="rounded-lg border border-slate-200 bg-white">
-        {loading && items.length === 0 ? (
-          <p className="p-6 text-center text-sm text-slate-500">Loading…</p>
-        ) : items.length === 0 ? (
-          <p className="p-6 text-center text-sm text-slate-500">
-            No PTOs in this range. Click <span className="font-medium">Add PTO</span> to create one.
-          </p>
-        ) : (
-          <ul className="divide-y divide-slate-200">
-            {items.map((p) => (
-              <li key={p.id}>
-                <button
-                  type="button"
-                  onClick={() => setViewing(p)}
-                  className="flex w-full items-center justify-between px-4 py-3 text-left text-sm hover:bg-slate-50"
-                >
-                  <div className="flex items-center gap-3">
-                    <span
-                      aria-hidden="true"
-                      className="inline-block h-3 w-3 rounded"
-                      style={{ backgroundColor: p.user.colorCode }}
-                    />
-                    <span className="font-medium text-slate-900">{p.user.name}</span>
-                    <span className="text-slate-600">
-                      {p.startDate === p.endDate ? p.startDate : `${p.startDate} → ${p.endDate}`}
-                    </span>
-                  </div>
-                  <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
-                    {dayPartLabel(p.dayPart)}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <CalendarHeader
+        yearMonth={yearMonth}
+        onPrev={() => setYearMonth((m) => addMonths(m, -1))}
+        onNext={() => setYearMonth((m) => addMonths(m, 1))}
+      />
+
+      {loading && items.length === 0 ? (
+        <p className="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
+          Loading…
+        </p>
+      ) : (
+        <MonthGrid weeks={weeks} ptoList={items} onChipClick={setViewing} />
+      )}
 
       <PTOFormModal
         open={createOpen}
