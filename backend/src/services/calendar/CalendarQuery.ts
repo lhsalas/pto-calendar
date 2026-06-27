@@ -44,7 +44,7 @@ export async function listVisibleRange(start: string, end: string): Promise<PTOW
     startDate: fromDateOnly(r.startDate),
     endDate: fromDateOnly(r.endDate),
     dayPart: r.dayPart,
-    note: r.note,
+    note: null,
   }));
 }
 
