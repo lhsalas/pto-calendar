@@ -192,20 +192,22 @@ jobs:
   coverage-gate:
     name: Coverage gate
     runs-on: ubuntu-latest
-    needs: [test-backend-unit, test-frontend]
+    needs: [test-backend-unit, test-backend-integration, test-frontend]
     steps:
       - uses: actions/checkout@v4
-      - run: echo "Coverage thresholds are enforced inside Vitest via per-path thresholds. This job verifies that coverage artifacts are present and become stricter as integration tests land."
       - name: Download backend coverage
         uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: backend-coverage
           path: backend/coverage
       - name: Download frontend coverage
         uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: frontend-coverage
           path: frontend/coverage
-      - run: ls -la backend/coverage || echo "backend coverage not yet uploaded (no integration tests in Phase 0)"; ls -la frontend/coverage || echo "frontend coverage not yet uploaded"
+      - run: ls backend/coverage/lcov.info && ls frontend/coverage/lcov.info
+      - name: Post coverage diff comment
+        uses: dorny/compare-coverage-action@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          lcov: backend/coverage/lcov.info,frontend/coverage/lcov.info
