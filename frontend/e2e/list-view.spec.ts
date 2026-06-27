@@ -50,9 +50,10 @@ test.describe('Sprint 4 — list view', () => {
     await expect(row).toBeVisible();
     await expect(row).toContainText(day);
     await row.locator('button').first().click();
-    await expect(page.getByText(/pto details/i)).toBeVisible();
+    const viewModal = page.getByRole('dialog', { name: /pto details/i });
+    await expect(viewModal).toBeVisible();
 
-    await page.getByRole('button', { name: /^edit$/i }).click();
+    await viewModal.getByRole('button', { name: /^edit$/i }).click();
     await expect(page.getByText(/edit pto/i)).toBeVisible();
     await page.getByLabel(/start date/i).fill(newDay);
     await page.getByLabel(/end date/i).fill(newDay);
