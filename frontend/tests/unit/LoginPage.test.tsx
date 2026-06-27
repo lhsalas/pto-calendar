@@ -5,6 +5,7 @@ import { http, HttpResponse } from 'msw';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { LoginPage } from '../../src/pages/LoginPage';
 import { AuthProvider } from '../../src/context/AuthContext';
+import { ThemeProvider } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/useAuth';
 import { server } from '../mocks/server';
 import { authenticated } from '../mocks/handlers';
@@ -22,20 +23,22 @@ function CalendarProbe(): JSX.Element {
 function renderWithProviders(initialPath = '/login'): ReturnType<typeof render> {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
-      <AuthProvider>
-        <LocationDisplay />
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route
-            path="/calendar"
-            element={
-              <>
-                <CalendarProbe />
-              </>
-            }
-          />
-        </Routes>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <LocationDisplay />
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route
+              path="/calendar"
+              element={
+                <>
+                  <CalendarProbe />
+                </>
+              }
+            />
+          </Routes>
+        </AuthProvider>
+      </ThemeProvider>
     </MemoryRouter>,
   );
 }

@@ -15,11 +15,11 @@ export function MonthGrid({ weeks, ptoList, onChipClick }: MonthGridProps): JSX.
     <div
       role="grid"
       aria-label="Month grid"
-      className="rounded-lg border border-slate-200 bg-white"
+      className="rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"
     >
       <div
         role="row"
-        className="grid grid-cols-7 border-b border-slate-200 bg-slate-50 text-xs font-medium text-slate-600"
+        className="grid grid-cols-7 border-b border-slate-200 bg-slate-50 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
       >
         {WEEKDAY_LABELS.map((label) => (
           <div key={label} role="columnheader" className="px-2 py-1.5 text-center">

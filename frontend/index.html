@@ -5,6 +5,19 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PTO Calendar</title>
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('pto-calendar-theme');
+          var mode = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
+          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var resolved = mode === 'dark' || (mode === 'system' && prefersDark);
+          if (resolved) document.documentElement.classList.add('dark');
+        } catch (e) {
+          /* localStorage unavailable; fall back to light */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
