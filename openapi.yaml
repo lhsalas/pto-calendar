@@ -1,0 +1,393 @@
+openapi: 3.0.3
+info:
+  title: PTO / Vacation Calendar API
+  version: 1.0.0
+  description: API for managing PTO requests in a shared team calendar.
+servers:
+  - url: https://api.example.com
+    description: Production
+  - url: http://localhost:3000
+    description: Local
+security:
+  - cookieAuth: []
+paths:
+  /auth/login:
+    post:
+      security: []
+      summary: Log in a user
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Logged in successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /auth/logout:
+    post:
+      summary: Log out current user
+      tags: [Auth]
+      responses:
+        '204':
+          description: Logged out
+  /auth/me:
+    get:
+      summary: Get current authenticated user
+      tags: [Auth]
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /pto:
+    get:
+      summary: List PTO entries overlapping a visible calendar date range
+      tags: [PTO]
+      parameters:
+        - in: query
+          name: start
+          required: true
+          schema:
+            type: string
+            format: date
+            example: 2026-04-27
+          description: Visible calendar grid start date in YYYY-MM-DD format
+        - in: query
+          name: end
+          required: true
+          schema:
+            type: string
+            format: date
+            example: 2026-05-31
+          description: Visible calendar grid end date in YYYY-MM-DD format
+      responses:
+        '200':
+          description: PTO entries overlapping the requested visible calendar date range
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PTOWithUser'
+        '400':
+          description: Invalid date range parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Create PTO entry for current user
+      tags: [PTO]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePTORequest'
+      responses:
+        '201':
+          description: PTO created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PTO'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: PTO overlaps an existing PTO entry for the same user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /pto/{id}:
+    get:
+      summary: Get PTO by id
+      tags: [PTO]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: PTO details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PTOWithUser'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: PTO not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      summary: Update PTO by id
+      tags: [PTO]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePTORequest'
+      responses:
+        '200':
+          description: PTO updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PTO'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Not allowed to modify PTO
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: PTO not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Delete PTO by id
+      tags: [PTO]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: PTO deleted
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Not allowed to delete PTO
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: PTO not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: session
+  schemas:
+    Role:
+      type: string
+      enum: [member, team_lead]
+    DayPart:
+      type: string
+      enum: [morning, evening, all_day]
+    User:
+      type: object
+      required: [id, name, email, role, colorCode]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/Role'
+        colorCode:
+          type: string
+          example: '#3B82F6'
+    PTO:
+      type: object
+      required: [id, userId, startDate, endDate, dayPart, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        dayPart:
+          $ref: '#/components/schemas/DayPart'
+        note:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    PTOWithUser:
+      type: object
+      required: [id, user, startDate, endDate, dayPart]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user:
+          type: object
+          required: [id, name, colorCode]
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+            colorCode:
+              type: string
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        dayPart:
+          $ref: '#/components/schemas/DayPart'
+        note:
+          type: string
+          nullable: true
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+    CreatePTORequest:
+      type: object
+      description: Single-day PTO requires dayPart. Multi-day PTO is normalized to all_day. Weekend date selections and overlaps for the same user are rejected.
+      required: [startDate, endDate]
+      properties:
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        dayPart:
+          $ref: '#/components/schemas/DayPart'
+        note:
+          type: string
+          maxLength: 500
+      example:
+        startDate: 2026-05-10
+        endDate: 2026-05-10
+        dayPart: morning
+        note: Doctor appointment
+    UpdatePTORequest:
+      type: object
+      description: Same validation rules as create. Update is allowed only for the owner or a team lead. Notes are visible only to the owner and team leads.
+      properties:
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        dayPart:
+          $ref: '#/components/schemas/DayPart'
+        note:
+          type: string
+          maxLength: 500
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: FORBIDDEN
+            message:
+              type: string
+              example: You are not allowed to modify this PTO entry.
