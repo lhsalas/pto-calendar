@@ -52,6 +52,12 @@ export default defineConfig({
           branches: 80,
           functions: 80,
         },
+        'src/hooks/usePtoList.ts': {
+          lines: 80,
+          statements: 80,
+          branches: 80,
+          functions: 80,
+        },
         'src/components/calendar/DayCell.tsx': {
           lines: 80,
           statements: 80,

@@ -2,6 +2,7 @@ import express from 'express';
 import type { Express } from 'express';
 import cors from 'cors';
 import { authRouter } from './routes/auth.js';
+import { ptoRouter } from './routes/pto.js';
 import { cookieSessionMiddleware } from './middleware/cookieSession.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { logger } from './lib/logger.js';
@@ -26,6 +27,7 @@ export function createApp(): Express {
   });
 
   app.use('/auth', authRouter);
+  app.use('/pto', ptoRouter);
 
   app.use((_req, res) => {
     res.status(404).json({
