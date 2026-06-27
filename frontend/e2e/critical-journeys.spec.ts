@@ -6,7 +6,7 @@ const SEED = {
   dev2: { email: 'dev2@example.com', password: 'dev2-dev-password' },
 };
 
-function nthWeekdayInCurrentMonth(n: number): string {
+function nthWeekdayInCurrentMonth(n: number, weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6 = 1): string {
   const now = new Date();
   const year = now.getUTCFullYear();
   const month = now.getUTCMonth();
@@ -15,12 +15,12 @@ function nthWeekdayInCurrentMonth(n: number): string {
     const d = new Date(Date.UTC(year, month, day));
     if (d.getUTCMonth() !== month) break;
     const dow = d.getUTCDay();
-    if (dow !== 0 && dow !== 6) {
+    if (dow === weekday) {
       count += 1;
       if (count === n) return d.toISOString().slice(0, 10);
     }
   }
-  return new Date(Date.UTC(year, month, 2)).toISOString().slice(0, 10);
+  throw new Error(`No ${weekday} #${n} in the current month`);
 }
 
 function nextSaturday(): string {
@@ -48,7 +48,7 @@ test.describe('Sprint 4 — critical journeys', () => {
   test('Journey 3: create a multi-day PTO (Mon–Fri)', async ({ page }) => {
     await login(page, SEED.dev1.email, SEED.dev1.password);
     await page.getByRole('button', { name: /^add pto$/i }).click();
-    const monday = nthWeekdayInCurrentMonth(3);
+    const monday = nthWeekdayInCurrentMonth(2, 1);
     const friday = new Date(monday);
     friday.setUTCDate(friday.getUTCDate() + 4);
     const fridayIso = friday.toISOString().slice(0, 10);
@@ -74,7 +74,7 @@ test.describe('Sprint 4 — critical journeys', () => {
 
   test('Journey 5: rejects a PTO that overlaps an existing entry', async ({ page }) => {
     await login(page, SEED.dev1.email, SEED.dev1.password);
-    const day = nthWeekdayInCurrentMonth(4);
+    const day = nthWeekdayInCurrentMonth(3, 1);
     await page.getByRole('button', { name: /^add pto$/i }).click();
     await page.getByLabel(/start date/i).fill(day);
     await page.getByLabel(/end date/i).fill(day);
@@ -92,7 +92,7 @@ test.describe('Sprint 4 — critical journeys', () => {
 
   test('Journey 8a: a member does not see Edit or Delete on a team lead PTO', async ({ page }) => {
     await login(page, SEED.lead.email, SEED.lead.password);
-    const day = nthWeekdayInCurrentMonth(5);
+    const day = nthWeekdayInCurrentMonth(3, 2);
     await page.getByRole('button', { name: /^add pto$/i }).click();
     await page.getByLabel(/start date/i).fill(day);
     await page.getByLabel(/end date/i).fill(day);
@@ -114,7 +114,7 @@ test.describe('Sprint 4 — critical journeys', () => {
 
   test('Journey 8b: a team lead can edit a member PTO', async ({ page }) => {
     await login(page, SEED.dev1.email, SEED.dev1.password);
-    const day = nthWeekdayInCurrentMonth(6);
+    const day = nthWeekdayInCurrentMonth(3, 3);
     await page.getByRole('button', { name: /^add pto$/i }).click();
     await page.getByLabel(/start date/i).fill(day);
     await page.getByLabel(/end date/i).fill(day);
