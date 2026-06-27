@@ -104,7 +104,7 @@ test.describe('Sprint 3 critical journey', () => {
     await page.getByLabel(/email/i).fill(SEED.dev1.email);
     await page.getByLabel(/password/i).fill(SEED.dev1.password);
     await page.getByRole('button', { name: /sign in/i }).click();
-    await expect(page.getByRole('heading', { name: /calendar/i })).toBeInTheDocument();
+    await expect(page.getByRole('heading', { name: /calendar/i })).toBeVisible();
 
     await expect(page.getByText(todayIso).first()).toBeVisible();
 
@@ -127,15 +127,12 @@ test.describe('Sprint 3 critical journey', () => {
     await expect(page.getByText(todayIso)).not.toBeVisible();
 
     await page.getByRole('button', { name: /previous month/i }).click();
-    await expect(
-      page.getByRole('heading', {
-        name: new Date(todayIso).toLocaleString('en-US', {
-          month: 'long',
-          year: 'numeric',
-          timeZone: 'UTC',
-        }),
-      }),
-    ).toBeVisible();
+    const currentLabel = new Date(todayIso).toLocaleString('en-US', {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+    await expect(page.getByRole('heading', { name: currentLabel })).toBeVisible();
     await expect(page.getByText(todayIso).first()).toBeVisible();
   });
 });
