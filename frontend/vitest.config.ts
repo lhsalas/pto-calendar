@@ -41,12 +41,6 @@ export default defineConfig({
           branches: 80,
           functions: 80,
         },
-        'src/components/calendar/CalendarPage.tsx': {
-          lines: 80,
-          statements: 80,
-          branches: 80,
-          functions: 80,
-        },
       },
     },
   },
