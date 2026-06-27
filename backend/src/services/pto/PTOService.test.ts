@@ -1,135 +1,253 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HttpError } from '../../middleware/errorHandler.js';
-import { createPto, findOverlapping, toPublicPto } from './PTOService.js';
+import { deletePto, getPtoById, toPublicPto, updatePto } from './PTOService.js';
 
 vi.mock('../../lib/prisma.js', () => {
   const pTORequest = {
     findFirst: vi.fn(),
+    findUnique: vi.fn(),
     create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
   };
-  return { prisma: { pTORequest } };
+  const auditLog = { create: vi.fn(), findMany: vi.fn() };
+  const tx = { pTORequest, auditLog };
+  const $transaction = vi.fn((fn: (txClient: typeof tx) => Promise<unknown>) => fn(tx));
+  return { prisma: { pTORequest, auditLog, $transaction } };
 });
 
 import { prisma } from '../../lib/prisma.js';
 
 const mockFindFirst = prisma.pTORequest.findFirst as unknown as ReturnType<typeof vi.fn>;
+const mockFindUnique = prisma.pTORequest.findUnique as unknown as ReturnType<typeof vi.fn>;
 const mockCreate = prisma.pTORequest.create as unknown as ReturnType<typeof vi.fn>;
+const mockUpdate = prisma.pTORequest.update as unknown as ReturnType<typeof vi.fn>;
+const mockDelete = prisma.pTORequest.delete as unknown as ReturnType<typeof vi.fn>;
+const mockAuditCreate = prisma.auditLog.create as unknown as ReturnType<typeof vi.fn>;
+const mockTx = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
 
 const USER_ID = '11111111-1111-1111-1111-111111111111';
+const OTHER_ID = '33333333-3333-3333-3333-333333333333';
+const PTO_ID = '22222222-2222-2222-2222-222222222222';
 
-const CREATED_ROW = {
-  id: '22222222-2222-2222-2222-222222222222',
+const ACTOR_MEMBER = { id: USER_ID, role: 'member' as const };
+const ACTOR_OTHER_MEMBER = { id: OTHER_ID, role: 'member' as const };
+const ACTOR_LEAD = { id: '44444444-4444-4444-4444-444444444444', role: 'team_lead' as const };
+
+const EXISTING_ROW = {
+  id: PTO_ID,
   userId: USER_ID,
-  startDate: new Date('2026-05-11T00:00:00.000Z'),
-  endDate: new Date('2026-05-11T00:00:00.000Z'),
-  dayPart: 'morning' as const,
-  note: null,
-  createdAt: new Date('2026-05-01T10:00:00.000Z'),
-  updatedAt: new Date('2026-05-01T10:00:00.000Z'),
 };
 
-describe('PTOService', () => {
+const UPDATED_ROW = {
+  id: PTO_ID,
+  userId: USER_ID,
+  startDate: new Date('2026-05-12T00:00:00.000Z'),
+  endDate: new Date('2026-05-12T00:00:00.000Z'),
+  dayPart: 'morning' as const,
+  note: 'Edited',
+  createdAt: new Date('2026-05-01T10:00:00.000Z'),
+  updatedAt: new Date('2026-05-02T10:00:00.000Z'),
+};
+
+describe('PTOService extended', () => {
   beforeEach(() => {
     mockFindFirst.mockReset();
+    mockFindUnique.mockReset();
     mockCreate.mockReset();
+    mockUpdate.mockReset();
+    mockDelete.mockReset();
+    mockAuditCreate.mockReset();
+    mockTx.mockClear();
   });
+  afterEach(() => vi.clearAllMocks());
 
-  afterEach(() => {
-    vi.clearAllMocks();
-  });
+  describe('getPtoById', () => {
+    it('returns null when not found', async () => {
+      mockFindUnique.mockResolvedValueOnce(null);
+      expect(await getPtoById('missing')).toBeNull();
+    });
 
-  describe('findOverlapping', () => {
-    it('queries with the documented overlap predicate', async () => {
-      mockFindFirst.mockResolvedValueOnce(CREATED_ROW);
-      const result = await findOverlapping(USER_ID, '2026-05-11', '2026-05-15');
-      expect(result).toBe(CREATED_ROW);
-      expect(mockFindFirst).toHaveBeenCalledWith({
-        where: {
-          userId: USER_ID,
-          AND: [
-            { startDate: { lte: new Date('2026-05-15T00:00:00.000Z') } },
-            { endDate: { gte: new Date('2026-05-11T00:00:00.000Z') } },
-          ],
-        },
-        select: expect.objectContaining({
-          id: true,
-          userId: true,
-          startDate: true,
-          endDate: true,
-          dayPart: true,
-          note: true,
-          createdAt: true,
-          updatedAt: true,
-        }),
+    it('maps the row to the public shape with date strings and ISO timestamps', async () => {
+      mockFindUnique.mockResolvedValueOnce({
+        id: PTO_ID,
+        userId: USER_ID,
+        startDate: new Date('2026-05-11T00:00:00.000Z'),
+        endDate: new Date('2026-05-11T00:00:00.000Z'),
+        dayPart: 'morning',
+        note: 'Doctor',
+        createdAt: new Date('2026-05-01T10:00:00.000Z'),
+        updatedAt: new Date('2026-05-01T10:00:00.000Z'),
+        user: { id: USER_ID, name: 'Alice', colorCode: '#3B82F6' },
       });
-    });
-
-    it('excludes a given id when provided', async () => {
-      mockFindFirst.mockResolvedValueOnce(null);
-      await findOverlapping(USER_ID, '2026-05-11', '2026-05-15', 'exclude-this-id');
-      const calls = mockFindFirst.mock.calls[0];
-      const call = calls?.[0] as { where: { id: unknown } };
-      expect(call.where.id).toEqual({ not: 'exclude-this-id' });
-    });
-
-    it('returns null when no overlap', async () => {
-      mockFindFirst.mockResolvedValueOnce(null);
-      expect(await findOverlapping(USER_ID, '2026-05-11', '2026-05-11')).toBeNull();
-    });
-  });
-
-  describe('createPto', () => {
-    it('persists a validated PTO and returns the public row', async () => {
-      mockFindFirst.mockResolvedValueOnce(null);
-      mockCreate.mockResolvedValueOnce(CREATED_ROW);
-      const result = await createPto(USER_ID, {
+      const result = await getPtoById(PTO_ID);
+      expect(result).toEqual({
+        id: PTO_ID,
+        userId: USER_ID,
         startDate: '2026-05-11',
         endDate: '2026-05-11',
         dayPart: 'morning',
         note: 'Doctor',
-      });
-      expect(result).toBe(CREATED_ROW);
-      expect(mockCreate).toHaveBeenCalledWith({
-        data: {
-          userId: USER_ID,
-          startDate: new Date('2026-05-11T00:00:00.000Z'),
-          endDate: new Date('2026-05-11T00:00:00.000Z'),
-          dayPart: 'morning',
-          note: 'Doctor',
-        },
-        select: expect.objectContaining({ id: true, userId: true }),
+        createdAt: '2026-05-01T10:00:00.000Z',
+        updatedAt: '2026-05-01T10:00:00.000Z',
+        user: { id: USER_ID, name: 'Alice', colorCode: '#3B82F6' },
       });
     });
+  });
 
-    it('throws 409 CONFLICT when an overlap exists', async () => {
-      mockFindFirst.mockResolvedValueOnce(CREATED_ROW);
+  describe('updatePto', () => {
+    it('returns 404 when the PTO is missing', async () => {
+      mockFindUnique.mockResolvedValueOnce(null);
       await expect(
-        createPto(USER_ID, {
-          startDate: '2026-05-11',
-          endDate: '2026-05-11',
+        updatePto(ACTOR_MEMBER, PTO_ID, {
+          startDate: '2026-05-12',
+          endDate: '2026-05-12',
           dayPart: 'morning',
         }),
-      ).rejects.toMatchObject({ status: 409, code: 'CONFLICT' });
-      expect(mockCreate).not.toHaveBeenCalled();
+      ).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
     });
 
-    it('surfaces validation errors as 400', async () => {
+    it('returns 403 when a non-owner non-lead attempts to edit', async () => {
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
       await expect(
-        createPto(USER_ID, {
+        updatePto(ACTOR_OTHER_MEMBER, PTO_ID, {
+          startDate: '2026-05-12',
+          endDate: '2026-05-12',
+          dayPart: 'morning',
+        }),
+      ).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
+    });
+
+    it('lets the owner update and writes an audit log inside a transaction', async () => {
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      mockFindFirst.mockResolvedValueOnce(null);
+      mockUpdate.mockResolvedValueOnce(UPDATED_ROW);
+
+      const result = await updatePto(ACTOR_MEMBER, PTO_ID, {
+        startDate: '2026-05-12',
+        endDate: '2026-05-12',
+        dayPart: 'morning',
+        note: 'Edited',
+      });
+
+      expect(result).toBe(UPDATED_ROW);
+      expect(mockUpdate).toHaveBeenCalledTimes(1);
+      expect(mockAuditCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            actorUserId: USER_ID,
+            action: 'update_pto',
+            entityType: 'pto_request',
+            entityId: PTO_ID,
+          }),
+        }),
+      );
+      expect(mockTx).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets a team lead update another user PTO and audits the action', async () => {
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      mockFindFirst.mockResolvedValueOnce(null);
+      mockUpdate.mockResolvedValueOnce(UPDATED_ROW);
+
+      await updatePto(ACTOR_LEAD, PTO_ID, {
+        startDate: '2026-05-12',
+        endDate: '2026-05-12',
+        dayPart: 'morning',
+      });
+      expect(mockAuditCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ actorUserId: ACTOR_LEAD.id, action: 'update_pto' }),
+        }),
+      );
+    });
+
+    it('returns 409 on overlap with another PTO of the same user', async () => {
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      mockFindFirst.mockResolvedValueOnce({ id: 'another-id' });
+      await expect(
+        updatePto(ACTOR_MEMBER, PTO_ID, {
+          startDate: '2026-05-12',
+          endDate: '2026-05-13',
+          dayPart: 'all_day',
+        }),
+      ).rejects.toMatchObject({ status: 409, code: 'CONFLICT' });
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
+
+    it('re-runs validation and rejects weekend edits', async () => {
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      await expect(
+        updatePto(ACTOR_MEMBER, PTO_ID, {
           startDate: '2026-05-09',
           endDate: '2026-05-09',
           dayPart: 'morning',
         }),
       ).rejects.toBeInstanceOf(HttpError);
-      expect(mockFindFirst).not.toHaveBeenCalled();
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deletePto', () => {
+    it('returns 404 when the PTO is missing', async () => {
+      mockFindUnique.mockResolvedValueOnce(null);
+      await expect(deletePto(ACTOR_MEMBER, PTO_ID)).rejects.toMatchObject({
+        status: 404,
+        code: 'NOT_FOUND',
+      });
+    });
+
+    it('returns 403 when a non-owner non-lead attempts to delete', async () => {
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      await expect(deletePto(ACTOR_OTHER_MEMBER, PTO_ID)).rejects.toMatchObject({
+        status: 403,
+        code: 'FORBIDDEN',
+      });
+    });
+
+    it('lets the owner delete and writes an audit log inside a transaction', async () => {
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      mockDelete.mockResolvedValueOnce({});
+      await deletePto(ACTOR_MEMBER, PTO_ID);
+      expect(mockDelete).toHaveBeenCalledWith({ where: { id: PTO_ID } });
+      expect(mockAuditCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            actorUserId: USER_ID,
+            action: 'delete_pto',
+            entityType: 'pto_request',
+            entityId: PTO_ID,
+          }),
+        }),
+      );
+    });
+
+    it('lets a team lead delete another user PTO and audits the action', async () => {
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      mockDelete.mockResolvedValueOnce({});
+      await deletePto(ACTOR_LEAD, PTO_ID);
+      expect(mockAuditCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ actorUserId: ACTOR_LEAD.id, action: 'delete_pto' }),
+        }),
+      );
     });
   });
 
   describe('toPublicPto', () => {
     it('converts a Prisma row to the public API shape', () => {
-      const publicRow = toPublicPto(CREATED_ROW);
+      const publicRow = toPublicPto({
+        id: PTO_ID,
+        userId: USER_ID,
+        startDate: new Date('2026-05-11T00:00:00.000Z'),
+        endDate: new Date('2026-05-11T00:00:00.000Z'),
+        dayPart: 'morning',
+        note: null,
+        createdAt: new Date('2026-05-01T10:00:00.000Z'),
+        updatedAt: new Date('2026-05-01T10:00:00.000Z'),
+      });
       expect(publicRow).toEqual({
-        id: CREATED_ROW.id,
+        id: PTO_ID,
         userId: USER_ID,
         startDate: '2026-05-11',
         endDate: '2026-05-11',

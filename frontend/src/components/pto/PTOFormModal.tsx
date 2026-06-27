@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
-import type { CreatePTORequest, DayPart } from '../../types/api';
+import type { CreatePTORequest, DayPart, PTOWithUser } from '../../types/api';
 
 const NOTE_MAX = 500;
 const DAY_PARTS: DayPart[] = ['morning', 'evening', 'all_day'];
 
 export interface PTOFormModalProps {
   open: boolean;
+  initialPto?: PTOWithUser;
   onSubmit: (payload: CreatePTORequest) => Promise<void> | void;
   onClose: () => void;
 }
@@ -19,33 +20,38 @@ function isWeekend(dateStr: string): boolean {
   return dow === 0 || dow === 6;
 }
 
-export function PTOFormModal({ open, onSubmit, onClose }: PTOFormModalProps): JSX.Element | null {
+export function PTOFormModal({
+  open,
+  initialPto,
+  onSubmit,
+  onClose,
+}: PTOFormModalProps): JSX.Element | null {
   const today = new Date().toISOString().slice(0, 10);
-  const [startDate, setStartDate] = useState<string>(today);
-  const [endDate, setEndDate] = useState<string>(today);
-  const [dayPart, setDayPart] = useState<DayPart>('all_day');
-  const [note, setNote] = useState<string>('');
+  const [startDate, setStartDate] = useState<string>(initialPto?.startDate ?? today);
+  const [endDate, setEndDate] = useState<string>(initialPto?.endDate ?? today);
+  const [dayPart, setDayPart] = useState<DayPart>(initialPto?.dayPart ?? 'all_day');
+  const [note, setNote] = useState<string>(initialPto?.note ?? '');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
 
   useEffect(() => {
     if (open) {
       setError(null);
-      setNote('');
+      setStartDate(initialPto?.startDate ?? today);
+      setEndDate(initialPto?.endDate ?? today);
+      setDayPart(initialPto?.dayPart ?? 'all_day');
+      setNote(initialPto?.note ?? '');
     }
-  }, [open]);
+  }, [open, initialPto, today]);
 
   if (!open) return null;
 
   const isSingleDay = startDate !== '' && endDate !== '' && startDate === endDate;
 
   function validate(): string | null {
-    if (!startDate || !endDate) return 'Please pick a start and end date.';
     if (endDate < startDate) return 'End date cannot be before start date.';
     if (isWeekend(startDate)) return 'Start date cannot fall on a weekend.';
     if (isWeekend(endDate)) return 'End date cannot fall on a weekend.';
-    if (isSingleDay && !dayPart) return 'Single-day PTO requires a day part.';
-    if (note.length > NOTE_MAX) return `Note must be ${NOTE_MAX} characters or fewer.`;
     return null;
   }
 
@@ -85,7 +91,7 @@ export function PTOFormModal({ open, onSubmit, onClose }: PTOFormModalProps): JS
         className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-lg"
       >
         <h2 id="pto-form-title" className="mb-4 text-lg font-semibold text-slate-900">
-          Add PTO
+          {initialPto ? 'Edit PTO' : 'Add PTO'}
         </h2>
 
         <div className="mb-3 grid grid-cols-2 gap-3">

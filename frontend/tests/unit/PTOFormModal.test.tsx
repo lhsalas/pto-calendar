@@ -4,19 +4,29 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { PTOFormModal } from '../../src/components/pto/PTOFormModal';
+import { STUB_PTO } from '../mocks/handlers';
 
 interface RenderArgs {
   onSubmit?: ReturnType<typeof vi.fn>;
   onClose?: ReturnType<typeof vi.fn>;
   open?: boolean;
+  initialPto?: typeof STUB_PTO;
 }
 
 function renderModal({
   onSubmit = vi.fn(),
   onClose = vi.fn(),
   open = true,
+  initialPto,
 }: RenderArgs = {}): void {
-  render(<PTOFormModal open={open} onSubmit={onSubmit} onClose={onClose} />);
+  render(
+    <PTOFormModal
+      open={open}
+      onSubmit={onSubmit}
+      onClose={onClose}
+      {...(initialPto ? { initialPto } : {})}
+    />,
+  );
 }
 
 async function setDate(
@@ -176,5 +186,27 @@ describe('PTOFormModal', () => {
     renderModal({ onClose });
     await user.click(screen.getByRole('button', { name: /cancel/i }));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('shows the "Edit PTO" title and prefills fields when initialPto is provided', async () => {
+    renderModal({ initialPto: STUB_PTO });
+    expect(screen.getByText(/edit pto/i)).toBeInTheDocument();
+    const startInput = screen.getByLabelText(/start date/i) as HTMLInputElement;
+    const endInput = screen.getByLabelText(/end date/i) as HTMLInputElement;
+    expect(startInput.value).toBe(STUB_PTO.startDate);
+    expect(endInput.value).toBe(STUB_PTO.endDate);
+  });
+
+  it('rejects weekend endDate when startDate is a weekday', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderModal({ onSubmit });
+    await setDate(/start date/i, '2026-05-11', user);
+    await setDate(/end date/i, '2026-05-16', user);
+    await user.click(screen.getByRole('button', { name: /save pto/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /end date cannot fall on a weekend/i,
+    );
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });
