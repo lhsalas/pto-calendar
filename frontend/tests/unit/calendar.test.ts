@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addDays,
   addMonths,
   currentYearMonth,
   dayCovers,
@@ -7,7 +8,9 @@ import {
   grid,
   initials,
   isCurrentYearMonth,
+  listWindow,
   ptoCoversDay,
+  todayIso,
   visibleGridRange,
 } from '../../src/lib/calendar';
 
@@ -78,6 +81,51 @@ describe('calendar utilities', () => {
       const current = currentYearMonth();
       expect(isCurrentYearMonth({ year: current.year - 1, month: current.month })).toBe(false);
       expect(isCurrentYearMonth({ year: current.year + 1, month: current.month })).toBe(false);
+    });
+  });
+
+  describe('addDays', () => {
+    it('adds days within the same month', () => {
+      expect(addDays('2026-06-01', 5)).toBe('2026-06-06');
+    });
+    it('crosses a month boundary', () => {
+      expect(addDays('2026-06-28', 5)).toBe('2026-07-03');
+    });
+    it('crosses a year boundary', () => {
+      expect(addDays('2026-12-30', 5)).toBe('2027-01-04');
+      expect(addDays('2026-12-31', 1)).toBe('2027-01-01');
+    });
+    it('returns the same value for zero delta', () => {
+      expect(addDays('2026-06-15', 0)).toBe('2026-06-15');
+    });
+    it('handles negative deltas', () => {
+      expect(addDays('2026-06-01', -1)).toBe('2026-05-31');
+    });
+    it('returns the input for malformed ISO', () => {
+      expect(addDays('not-a-date', 5)).toBe('not-a-date');
+    });
+  });
+
+  describe('todayIso', () => {
+    it('returns a valid ISO date string for today', () => {
+      const iso = todayIso();
+      expect(iso).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      const now = new Date();
+      expect(iso).toBe(
+        `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`,
+      );
+    });
+  });
+
+  describe('listWindow', () => {
+    it('returns a 90-day window starting at the given date', () => {
+      const w = listWindow('2026-06-01', 90);
+      expect(w.start).toBe('2026-06-01');
+      expect(w.end).toBe('2026-08-30');
+    });
+    it('produces a human-readable label', () => {
+      const w = listWindow('2026-06-27', 90);
+      expect(w.label).toBe('Jun 27 – Sep 25, 2026');
     });
   });
 
