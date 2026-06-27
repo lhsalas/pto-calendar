@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -192,20 +196,91 @@ jobs:
   coverage-gate:
     name: Coverage gate
     runs-on: ubuntu-latest
-    needs: [test-backend-unit, test-frontend]
+    needs: [test-backend-unit, test-backend-integration, test-frontend]
     steps:
       - uses: actions/checkout@v4
-      - run: echo "Coverage thresholds are enforced inside Vitest via per-path thresholds. This job verifies that coverage artifacts are present and become stricter as integration tests land."
       - name: Download backend coverage
         uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: backend-coverage
           path: backend/coverage
       - name: Download frontend coverage
         uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: frontend-coverage
           path: frontend/coverage
-      - run: ls -la backend/coverage || echo "backend coverage not yet uploaded (no integration tests in Phase 0)"; ls -la frontend/coverage || echo "frontend coverage not yet uploaded"
+      - name: Verify lcov reports exist
+        run: |
+          test -f backend/coverage/lcov.info
+          test -f frontend/coverage/lcov.info
+      - name: Post coverage summary comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import os, re, sys, urllib.request
+
+          def parse_lcov(path):
+              totals = {"lines": [0, 0], "branches": [0, 0], "functions": [0, 0]}
+              file_re = re.compile(r"^SF:(.+)$")
+              lf_re = re.compile(r"^LF:(\d+)$")
+              lh_re = re.compile(r"^LH:(\d+)$")
+              brf_re = re.compile(r"^BRF:(\d+)$")
+              brh_re = re.compile(r"^BRH:(\d+)$")
+              fnd_re = re.compile(r"^FNF:(\d+)$")
+              fnh_re = re.compile(r"^FNH:(\d+)$")
+              with open(path) as f:
+                  for line in f:
+                      line = line.rstrip()
+                      if line.startswith("LF:"):
+                          totals["lines"][0] += int(line[3:])
+                      elif line.startswith("LH:"):
+                          totals["lines"][1] += int(line[3:])
+                      elif line.startswith("BRF:"):
+                          totals["branches"][0] += int(line[4:])
+                      elif line.startswith("BRH:"):
+                          totals["branches"][1] += int(line[4:])
+                      elif line.startswith("FNF:"):
+                          totals["functions"][0] += int(line[4:])
+                      elif line.startswith("FNH:"):
+                          totals["functions"][1] += int(line[4:])
+              return totals
+
+          def fmt(name, hit, total):
+              pct = (hit / total * 100) if total else 100.0
+              return f"  - {name}: {hit}/{total} ({pct:.2f}%)"
+
+          backend = parse_lcov("backend/coverage/lcov.info")
+          frontend = parse_lcov("frontend/coverage/lcov.info")
+
+          lines = []
+          lines.append("### Coverage summary")
+          lines.append("")
+          lines.append("| Workspace | Lines | Branches | Functions |")
+          lines.append("|---|---|---|---|")
+          for label, data in (("backend", backend), ("frontend", frontend)):
+              lp = (data["lines"][1] / data["lines"][0] * 100) if data["lines"][0] else 100
+              bp = (data["branches"][1] / data["branches"][0] * 100) if data["branches"][0] else 100
+              fp = (data["functions"][1] / data["functions"][0] * 100) if data["functions"][0] else 100
+              lines.append(f"| {label} | {lp:.2f}% ({data['lines'][1]}/{data['lines'][0]}) | {bp:.2f}% ({data['branches'][1]}/{data['branches'][0]}) | {fp:.2f}% ({data['functions'][1]}/{data['functions'][0]}) |")
+          lines.append("")
+          lines.append("Per-path thresholds inside each workspace's `vitest.config.ts` are the real gate. The values above are the totals that flow into `dorny/compare-coverage-action` style comments.")
+          body = "\n".join(lines)
+
+          pr = os.environ.get("GITHUB_EVENT_PATH")
+          with open(pr) as f:
+              import json
+              event = json.load(f)
+          issue = event.get("issue") or event.get("pull_request")
+          if not issue:
+              print("No issue/PR found; skipping comment.")
+              sys.exit(0)
+          url = f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/issues/{issue['number']}/comments"
+          req = urllib.request.Request(url, data=json.dumps({"body": body}).encode(), method="POST")
+          req.add_header("Authorization", f"Bearer {os.environ['GITHUB_TOKEN']}")
+          req.add_header("Accept", "application/vnd.github+json")
+          req.add_header("Content-Type", "application/json")
+          req.add_header("X-GitHub-Api-Version", "2022-11-28")
+          with urllib.request.urlopen(req) as resp:
+              print(f"Posted comment: HTTP {resp.status}")
+          PY
