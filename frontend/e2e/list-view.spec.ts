@@ -5,27 +5,15 @@ const SEED = {
   dev1: { email: 'dev1@example.com', password: 'dev1-dev-password' },
 };
 
-function isoPlusDays(base: string, days: number): string {
-  const d = new Date(`${base}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-function secondWeekdayInCurrentMonth(): string {
+function nextWeekdayFromToday(offsetDays: number): string {
   const now = new Date();
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth();
-  let count = 0;
-  for (let day = 1; day <= 31; day += 1) {
-    const d = new Date(Date.UTC(year, month, day));
-    if (d.getUTCMonth() !== month) break;
-    const dow = d.getUTCDay();
-    if (dow !== 0 && dow !== 6) {
-      count += 1;
-      if (count === 2) return d.toISOString().slice(0, 10);
-    }
+  const candidate = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + offsetDays),
+  );
+  while (candidate.getUTCDay() === 0 || candidate.getUTCDay() === 6) {
+    candidate.setUTCDate(candidate.getUTCDate() + 1);
   }
-  return new Date(Date.UTC(year, month, 2)).toISOString().slice(0, 10);
+  return candidate.toISOString().slice(0, 10);
 }
 
 async function login(page: Page, email: string, password: string): Promise<void> {
@@ -42,8 +30,8 @@ test.describe('Sprint 4 — list view', () => {
     page,
   }) => {
     await login(page, SEED.dev1.email, SEED.dev1.password);
-    const day = secondWeekdayInCurrentMonth();
-    const newDay = isoPlusDays(day, 1);
+    const day = nextWeekdayFromToday(5);
+    const newDay = nextWeekdayFromToday(7);
 
     await page.getByRole('button', { name: /^add pto$/i }).click();
     await page.getByLabel(/start date/i).fill(day);
