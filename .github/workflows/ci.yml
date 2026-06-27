@@ -155,6 +155,7 @@ jobs:
       - run: npm ci
       - run: npm run prisma:generate
       - run: npx prisma migrate deploy --schema=backend/prisma/schema.prisma
+      - run: PGPASSWORD=pto psql -h localhost -U pto -d pto_test -c "TRUNCATE pto_requests, audit_logs RESTART IDENTITY CASCADE;"
       - run: npm run db:seed -w backend
       - name: Start backend in the background
         run: |
