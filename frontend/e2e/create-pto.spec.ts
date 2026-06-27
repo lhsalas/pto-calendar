@@ -136,3 +136,39 @@ test.describe('Sprint 3 critical journey', () => {
     await expect(page.getByText(todayIso).first()).toBeVisible();
   });
 });
+
+test.describe('Sprint 4 — auto-sync end date', () => {
+  test.describe.configure({ retries: 0 });
+  test('changing the start date auto-fills the end date and the min attribute prevents earlier picks', async ({
+    page,
+  }) => {
+    const { iso: todayIso } = firstWeekdayInCurrentMonth();
+    const laterIso = new Date(todayIso);
+    laterIso.setUTCDate(laterIso.getUTCDate() + 2);
+    const later = laterIso.toISOString().slice(0, 10);
+
+    await page.goto('/');
+    await page.getByLabel(/email/i).fill(SEED.dev1.email);
+    await page.getByLabel(/password/i).fill(SEED.dev1.password);
+    await page.getByRole('button', { name: /sign in/i }).click();
+    await expect(page.getByRole('heading', { name: /calendar/i })).toBeVisible();
+
+    await page.getByRole('button', { name: /^add pto$/i }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    await page.getByLabel(/start date/i).fill(todayIso);
+    const endInput = page.getByLabel(/end date/i);
+    await expect(endInput).toHaveValue(todayIso);
+    await expect(endInput).toHaveAttribute('min', todayIso);
+
+    await page.getByLabel(/start date/i).fill(later);
+    await expect(endInput).toHaveValue(later);
+    await expect(endInput).toHaveAttribute('min', later);
+
+    await endInput.fill(later);
+    await page.getByLabel(/day part/i).selectOption('morning');
+    await page.getByRole('button', { name: /save pto/i }).click();
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+    await expect(page.getByText(/PTO saved/i)).toBeVisible();
+  });
+});
