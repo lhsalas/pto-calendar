@@ -79,7 +79,7 @@ test.describe('Sprint 2 critical journey', () => {
     await page.getByRole('button', { name: /save pto/i }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
 
-    await page.getByRole('button', { name: /team lead/i }).click();
+    await page.getByRole('button', { name: /developer one/i }).click();
     await expect(page.getByRole('dialog', { name: /pto details/i })).toBeVisible();
     await page.getByRole('button', { name: /^edit$/i }).click();
     await expect(page.getByText(/edit pto/i)).toBeVisible();
@@ -87,7 +87,7 @@ test.describe('Sprint 2 critical journey', () => {
     await page.getByRole('button', { name: /save pto/i }).click();
     await expect(page.getByText(/PTO updated/i)).toBeVisible();
 
-    await page.getByRole('button', { name: /team lead/i }).click();
+    await page.getByRole('button', { name: /developer one/i }).click();
     await page.getByRole('button', { name: /^delete$/i }).click();
     await expect(page.getByText(/cannot be undone/i)).toBeVisible();
     await page.getByRole('button', { name: /yes, delete/i }).click();
