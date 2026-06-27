@@ -1,6 +1,7 @@
 import express from 'express';
 import type { Express } from 'express';
 import cors from 'cors';
+import { authRouter } from './routes/auth.js';
 import { cookieSessionMiddleware } from './middleware/cookieSession.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { logger } from './lib/logger.js';
@@ -23,6 +24,8 @@ export function createApp(): Express {
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok' });
   });
+
+  app.use('/auth', authRouter);
 
   app.use((_req, res) => {
     res.status(404).json({
