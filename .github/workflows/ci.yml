@@ -156,8 +156,25 @@ jobs:
       - run: npm run prisma:generate
       - run: npx prisma migrate deploy --schema=backend/prisma/schema.prisma
       - run: npm run db:seed -w backend
+      - name: Start backend in the background
+        run: |
+          mkdir -p /tmp/e2e-logs
+          nohup npm run dev -w backend > /tmp/e2e-logs/backend.log 2>&1 &
+          echo "Backend PID: $!"
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/health >/dev/null 2>&1; then
+              echo "Backend is healthy after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://localhost:3000/health
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e -w frontend
+      - name: Run Playwright (only boots the frontend)
+        run: npm run test:e2e -w frontend
+      - name: Show backend log on failure
+        if: failure()
+        run: tail -n 100 /tmp/e2e-logs/backend.log
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
