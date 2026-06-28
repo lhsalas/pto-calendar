@@ -1,6 +1,39 @@
 @import 'tailwindcss';
+@import './fonts.css';
 
 @custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-surface: #fbf8f1;
+  --color-surface-2: #f5efe4;
+  --color-surface-3: #fefcf8;
+  --color-surface-dark: #1b1a18;
+  --color-surface-dark-2: #252320;
+  --color-surface-dark-3: #2d2a26;
+
+  --color-ink: #1f1b16;
+  --color-ink-muted: #6b5f4f;
+  --color-ink-inverse: #f5efe4;
+  --color-ink-dark: #f5efe4;
+  --color-ink-muted-dark: #a89d8b;
+
+  --color-accent-50: #f8e6df;
+  --color-accent-100: #f0d0c2;
+  --color-accent-500: #b5533a;
+  --color-accent-600: #a04c32;
+  --color-accent-700: #8e412e;
+  --color-accent-900: #5c2a1e;
+
+  --color-success: #6b8e4e;
+  --color-danger: #a53d2a;
+
+  --color-border: #e8dfd0;
+  --color-border-dark: #3b3631;
+
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
 
 html,
 body,
@@ -10,14 +43,7 @@ body,
 
 body {
   margin: 0;
-  font-family:
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    'Helvetica Neue',
-    Arial,
-    sans-serif;
+  font-family: var(--font-sans);
   background-color: #f8fafc;
   color: #0f172a;
 }

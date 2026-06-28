@@ -63,6 +63,7 @@ The app is intended to support:
 - Color-coded PTO visibility by person
 - Edit/delete permissions restricted to owner or team lead
 - Light / Dark / System theme toggle (persisted in `localStorage`; default is System and follows `prefers-color-scheme`; no flash of incorrect theme on load)
+- Self-hosted typography (IBM Plex Sans body, Fraunces display, IBM Plex Mono for tabular dates) and a Tailwind v4 `@theme` block with the warm-editorial palette tokens defined (consumed in PR C); `lucide-react` icon set re-exported from `src/components/icons.tsx`; `motion` package installed for upcoming animations
 
 ## Confirmed MVP Stack
 
