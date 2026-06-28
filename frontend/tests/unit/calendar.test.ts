@@ -7,6 +7,8 @@ import {
   dayCovers,
   firstOfMonthIso,
   formatLongDate,
+  formatMonthDay,
+  formatRangeLabel,
   formatYearMonth,
   grid,
   initials,
@@ -14,6 +16,7 @@ import {
   isWeekend,
   listWindow,
   ptoCoversDay,
+  readableTextOn,
   todayIso,
   visibleGridRange,
 } from '../../src/lib/calendar';
@@ -169,6 +172,51 @@ describe('calendar utilities', () => {
     });
     it('returns the input unchanged for malformed ISO', () => {
       expect(formatLongDate('not-a-date')).toBe('not-a-date');
+    });
+  });
+
+  describe('formatMonthDay', () => {
+    it('formats a known date', () => {
+      expect(formatMonthDay('2026-06-15')).toBe('Jun 15');
+    });
+    it('returns the input unchanged for malformed ISO', () => {
+      expect(formatMonthDay('not-a-date')).toBe('not-a-date');
+    });
+  });
+
+  describe('formatRangeLabel', () => {
+    it('returns month-day when start and end are the same', () => {
+      expect(formatRangeLabel('2026-06-15', '2026-06-15')).toBe('Jun 15');
+    });
+    it('formats a same-month range with en-dash', () => {
+      expect(formatRangeLabel('2026-06-15', '2026-06-19')).toBe('Jun 15 → 19');
+    });
+    it('formats a cross-month range without the year if same year', () => {
+      expect(formatRangeLabel('2026-06-28', '2026-09-26')).toBe('Jun 28 → Sep 26');
+    });
+    it('formats a cross-year range with both years', () => {
+      expect(formatRangeLabel('2026-12-30', '2027-01-04')).toBe('Dec 30, 2026 → Jan 4, 2027');
+    });
+  });
+
+  describe('readableTextOn', () => {
+    it('picks dark ink for a very light pastel yellow', () => {
+      expect(readableTextOn('#FCE7A1')).toBe('#1F1B16');
+    });
+    it('picks dark ink for white', () => {
+      expect(readableTextOn('#FFFFFF')).toBe('#1F1B16');
+    });
+    it('picks inverse cream for the seeded blue', () => {
+      expect(readableTextOn('#3B82F6')).toBe('#F5EFE4');
+    });
+    it('picks inverse cream for dark purple', () => {
+      expect(readableTextOn('#1F1B16')).toBe('#F5EFE4');
+    });
+    it('expands 3-digit hex shorthand', () => {
+      expect(readableTextOn('#FFF')).toBe('#1F1B16');
+    });
+    it('returns ink for malformed hex', () => {
+      expect(readableTextOn('not-a-color')).toBe('#1F1B16');
     });
   });
 

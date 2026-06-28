@@ -5,6 +5,7 @@ import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { PTOViewModal } from '../../src/components/pto/PTOViewModal';
 import { STUB_PTO, STUB_USER } from '../mocks/handlers';
+import { formatRangeLabel } from '../../src/lib/calendar';
 
 function renderModal(
   props: Partial<React.ComponentProps<typeof PTOViewModal>> = {},
@@ -30,7 +31,9 @@ describe('PTOViewModal', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByText(/PTO details/i)).toBeInTheDocument();
     expect(screen.getByText(STUB_USER.name)).toBeInTheDocument();
-    expect(screen.getByText(STUB_PTO.startDate)).toBeInTheDocument();
+    expect(
+      screen.getByText(formatRangeLabel(STUB_PTO.startDate, STUB_PTO.endDate)),
+    ).toBeInTheDocument();
     expect(screen.getByText(/morning \(am\)/i)).toBeInTheDocument();
   });
 

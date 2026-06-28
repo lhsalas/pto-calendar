@@ -111,6 +111,66 @@ export function formatLongDate(iso: string): string {
   }).format(date);
 }
 
+export function formatMonthDay(iso: string): string {
+  const parts = iso.split('-').map(Number);
+  if (parts.length !== 3) return iso;
+  const [y, m, d] = parts as [number, number, number];
+  const date = new Date(Date.UTC(y, m - 1, d));
+  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d) {
+    return iso;
+  }
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  }).format(date);
+}
+
+export function formatRangeLabel(startIso: string, endIso: string): string {
+  if (startIso === endIso) return formatMonthDay(startIso);
+  const startParts = startIso.split('-').map(Number);
+  const endParts = endIso.split('-').map(Number);
+  if (startParts.length !== 3 || endParts.length !== 3) {
+    return `${startIso} → ${endIso}`;
+  }
+  const [sy, sm, sd] = startParts as [number, number, number];
+  const [ey, em, ed] = endParts as [number, number, number];
+  const startDate = new Date(Date.UTC(sy, sm - 1, sd));
+  const endDate = new Date(Date.UTC(ey, em - 1, ed));
+  const monthFormat = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    timeZone: 'UTC',
+  });
+  const startMonth = monthFormat.format(startDate);
+  const endMonth = monthFormat.format(endDate);
+  if (sy !== ey) {
+    return `${startMonth} ${sd}, ${sy} → ${endMonth} ${ed}, ${ey}`;
+  }
+  if (sm === em) {
+    return `${startMonth} ${sd} → ${ed}`;
+  }
+  return `${startMonth} ${sd} → ${endMonth} ${ed}`;
+}
+
+export function readableTextOn(hex: string): string {
+  const cleaned = hex.replace('#', '');
+  if (cleaned.length !== 6 && cleaned.length !== 3) return '#1F1B16';
+  const full =
+    cleaned.length === 3
+      ? cleaned
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : cleaned;
+  const r = parseInt(full.slice(0, 2), 16) / 255;
+  const g = parseInt(full.slice(2, 4), 16) / 255;
+  const b = parseInt(full.slice(4, 6), 16) / 255;
+  if (![r, g, b].every(Number.isFinite)) return '#1F1B16';
+  const channel = (c: number): number => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const luminance = 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+  return luminance > 0.55 ? '#1F1B16' : '#F5EFE4';
+}
+
 export function addDays(iso: string, days: number): string {
   if (!ISO_DATE.test(iso)) return iso;
   const d = new Date(`${iso}T00:00:00Z`);

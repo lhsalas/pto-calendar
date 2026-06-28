@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import type { DayPart, PTO, PTOWithUser, User } from '../../types/api';
 import { canModifyPto } from '../../lib/permissions';
+import { formatRangeLabel } from '../../lib/calendar';
 import { X } from '../icons';
 import { useModalA11y } from '../../hooks/useModalA11y';
 
@@ -16,11 +18,6 @@ function dayPartLabel(dp: DayPart): string {
   if (dp === 'morning') return 'Morning (AM)';
   if (dp === 'evening') return 'Evening (PM)';
   return 'All day';
-}
-
-function formatRange(p: PTOWithUser): string {
-  if (p.startDate === p.endDate) return p.startDate;
-  return `${p.startDate} → ${p.endDate}`;
 }
 
 export function PTOViewModal({
@@ -83,133 +80,146 @@ export function PTOViewModal({
   }
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="pto-view-title"
-      onClick={handleBackdropClick}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
-    >
-      <div
-        ref={cardRef}
-        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-lg dark:border-slate-700 dark:bg-slate-900"
+    <AnimatePresence>
+      <motion.div
+        key="backdrop"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pto-view-title"
+        onClick={handleBackdropClick}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.15, ease: 'easeOut' }}
+        className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4 dark:bg-ink-dark/40"
       >
-        <div className="mb-4 flex items-center justify-between">
-          <h2
-            id="pto-view-title"
-            className="text-lg font-semibold text-slate-900 dark:text-slate-100"
-          >
-            PTO details
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Dismiss"
-            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-300"
-          >
-            <X aria-hidden className="h-4 w-4" />
-          </button>
-        </div>
-
-        <dl className="mb-4 space-y-2 text-sm">
-          <div className="flex items-center justify-between">
-            <dt className="text-slate-500 dark:text-slate-400">User</dt>
-            <dd className="flex items-center gap-2 font-medium text-slate-900 dark:text-slate-100">
-              <span
-                aria-hidden="true"
-                className="inline-block h-3 w-3 rounded"
-                style={{ backgroundColor: pto.user.colorCode }}
-              />
-              {pto.user.name}
-            </dd>
-          </div>
-          <div className="flex items-center justify-between">
-            <dt className="text-slate-500 dark:text-slate-400">Date(s)</dt>
-            <dd className="font-medium text-slate-900 dark:text-slate-100">{formatRange(pto)}</dd>
-          </div>
-          <div className="flex items-center justify-between">
-            <dt className="text-slate-500 dark:text-slate-400">Day part</dt>
-            <dd className="font-medium text-slate-900 dark:text-slate-100">
-              {dayPartLabel(pto.dayPart)}
-            </dd>
-          </div>
-          <div className="flex items-start justify-between gap-3">
-            <dt className="text-slate-500 dark:text-slate-400">Note</dt>
-            <dd className="max-w-xs text-right text-slate-900 dark:text-slate-100">
-              {fullPto.note ?? (
-                <span className="text-slate-400 dark:text-slate-500">(no note)</span>
-              )}
-              {canModify && fullPto.note === null ? (
-                <button
-                  type="button"
-                  onClick={() => void loadDetail()}
-                  className="ml-2 text-xs text-blue-600 hover:underline dark:text-blue-400"
-                >
-                  Load note
-                </button>
-              ) : null}
-            </dd>
-          </div>
-        </dl>
-
-        {error ? (
-          <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">
-            {error}
-          </p>
-        ) : null}
-
-        {confirming ? (
-          <div className="mb-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/50 dark:text-red-300">
-            <p className="mb-2">Delete this PTO? This cannot be undone.</p>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setConfirming(false)}
-                disabled={busy}
-                className="min-h-11 rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleDelete()}
-                disabled={busy}
-                className="min-h-11 rounded bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
-              >
-                {busy ? 'Deleting…' : 'Yes, delete'}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex justify-end gap-2">
+        <motion.div
+          ref={cardRef}
+          initial={{ y: 8, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: 4, opacity: 0 }}
+          transition={{ duration: 0.15, ease: 'easeOut' }}
+          className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg border border-border bg-surface-3 p-6 shadow-lg dark:border-border-dark dark:bg-surface-dark-3"
+        >
+          <div className="mb-4 flex items-center justify-between">
+            <h2
+              id="pto-view-title"
+              className="font-display text-xl font-semibold tracking-tight text-ink dark:text-ink-dark"
+            >
+              PTO details
+            </h2>
             <button
               type="button"
               onClick={onClose}
-              className="min-h-11 rounded border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+              aria-label="Dismiss"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-2 hover:text-ink dark:text-ink-muted-dark dark:hover:bg-surface-dark-2 dark:hover:text-ink-dark"
             >
-              Close
+              <X aria-hidden className="h-4 w-4" />
             </button>
-            {canModify ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => onEdit(pto)}
-                  className="min-h-11 rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirming(true)}
-                  className="min-h-11 rounded bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
-                >
-                  Delete
-                </button>
-              </>
-            ) : null}
           </div>
-        )}
-      </div>
-    </div>
+
+          <dl className="mb-4 space-y-2 text-sm">
+            <div className="flex items-center justify-between">
+              <dt className="text-ink-muted dark:text-ink-muted-dark">User</dt>
+              <dd className="flex items-center gap-2 font-medium text-ink dark:text-ink-dark">
+                <span
+                  aria-hidden="true"
+                  className="inline-block h-3 w-3 rounded"
+                  style={{ backgroundColor: pto.user.colorCode }}
+                />
+                {pto.user.name}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between">
+              <dt className="text-ink-muted dark:text-ink-muted-dark">Date(s)</dt>
+              <dd className="font-mono text-sm tabular-nums font-medium text-ink dark:text-ink-dark">
+                {formatRangeLabel(pto.startDate, pto.endDate)}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between">
+              <dt className="text-ink-muted dark:text-ink-muted-dark">Day part</dt>
+              <dd className="font-medium text-ink dark:text-ink-dark">
+                {dayPartLabel(pto.dayPart)}
+              </dd>
+            </div>
+            <div className="flex items-start justify-between gap-3">
+              <dt className="text-ink-muted dark:text-ink-muted-dark">Note</dt>
+              <dd className="max-w-xs text-right text-ink dark:text-ink-dark">
+                {fullPto.note ?? (
+                  <span className="text-ink-muted/70 dark:text-ink-muted-dark/70">(no note)</span>
+                )}
+                {canModify && fullPto.note === null ? (
+                  <button
+                    type="button"
+                    onClick={() => void loadDetail()}
+                    className="ml-2 text-xs text-accent hover:underline"
+                  >
+                    Load note
+                  </button>
+                ) : null}
+              </dd>
+            </div>
+          </dl>
+
+          {error ? (
+            <p role="alert" className="mb-3 text-sm text-danger">
+              {error}
+            </p>
+          ) : null}
+
+          {confirming ? (
+            <div className="mb-3 rounded border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
+              <p className="mb-2">Delete this PTO? This cannot be undone.</p>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirming(false)}
+                  disabled={busy}
+                  className="min-h-11 rounded border border-border bg-surface-3 px-3 py-2 text-sm text-ink transition-colors duration-150 hover:bg-surface-2 disabled:opacity-60 dark:border-border-dark dark:bg-surface-dark-3 dark:text-ink-dark dark:hover:bg-surface-dark-2"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDelete()}
+                  disabled={busy}
+                  className="min-h-11 rounded bg-danger px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:opacity-90 disabled:opacity-60"
+                >
+                  {busy ? 'Deleting…' : 'Yes, delete'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="min-h-11 rounded border border-border px-3 py-2 text-sm text-ink transition-colors duration-150 hover:bg-surface-2 dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2"
+              >
+                Close
+              </button>
+              {canModify ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => onEdit(pto)}
+                    className="min-h-11 rounded bg-accent px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirming(true)}
+                    className="min-h-11 rounded bg-danger px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:opacity-90"
+                  >
+                    Delete
+                  </button>
+                </>
+              ) : null}
+            </div>
+          )}
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
   );
 }

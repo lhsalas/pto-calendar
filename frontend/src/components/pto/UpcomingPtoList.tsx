@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
+import { motion } from 'motion/react';
 import type { DayPart, PTOWithUser, User } from '../../types/api';
 import { canModifyPto } from '../../lib/permissions';
+import { formatRangeLabel } from '../../lib/calendar';
 
 export interface UpcomingPtoListProps {
   ptoList: PTOWithUser[];
@@ -29,11 +31,6 @@ function dayPartLabel(dp: DayPart): string {
   if (dp === 'morning') return 'AM';
   if (dp === 'evening') return 'PM';
   return 'Full';
-}
-
-function formatRange(p: PTOWithUser): string {
-  if (p.startDate === p.endDate) return p.startDate;
-  return `${p.startDate} → ${p.endDate}`;
 }
 
 interface MonthGroup {
@@ -80,7 +77,7 @@ export function UpcomingPtoList({
     return (
       <div
         data-testid="upcoming-empty"
-        className="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400"
+        className="rounded-lg border border-border bg-surface-3 p-6 text-center text-sm text-ink-muted dark:border-border-dark dark:bg-surface-dark-3 dark:text-ink-muted-dark"
       >
         No PTOs in the next 3 months.
       </div>
@@ -90,16 +87,18 @@ export function UpcomingPtoList({
   return (
     <div data-testid="upcoming-list" className="space-y-4">
       {groups.map((group) => (
-        <section
+        <motion.section
           key={`${group.year}-${group.month}`}
           aria-label={group.label}
           data-testid={`upcoming-group-${group.year}-${String(group.month).padStart(2, '0')}`}
-          className="rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"
+          whileHover={{ y: -1 }}
+          transition={{ type: 'tween', duration: 0.12, ease: 'easeOut' }}
+          className="rounded-lg border border-border bg-surface-3 shadow-sm dark:border-border-dark dark:bg-surface-dark-3"
         >
-          <h3 className="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          <h3 className="border-b border-border bg-surface-2 px-3 py-1.5 font-display text-sm font-semibold tracking-tight text-ink dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark">
             {group.label}
           </h3>
-          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+          <ul className="divide-y divide-border dark:divide-border-dark">
             {group.items.map((pto) => {
               const canModify = canModifyPto(
                 { id: currentUser.id, role: currentUser.role },
@@ -121,11 +120,11 @@ export function UpcomingPtoList({
                     onClick={() => onRowClick(pto)}
                     className="flex flex-1 items-center gap-3 text-left hover:underline"
                   >
-                    <span className="font-medium text-slate-900 dark:text-slate-100">
-                      {pto.user.name}
+                    <span className="font-medium text-ink dark:text-ink-dark">{pto.user.name}</span>
+                    <span className="font-mono text-xs tabular-nums text-ink-muted dark:text-ink-muted-dark">
+                      {formatRangeLabel(pto.startDate, pto.endDate)}
                     </span>
-                    <span className="text-slate-600 dark:text-slate-300">{formatRange(pto)}</span>
-                    <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                    <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-ink-muted dark:bg-surface-dark-2 dark:text-ink-muted-dark">
                       {dayPartLabel(pto.dayPart)}
                     </span>
                   </button>
@@ -134,14 +133,14 @@ export function UpcomingPtoList({
                       <button
                         type="button"
                         onClick={() => onEdit(pto)}
-                        className="min-h-9 rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                        className="min-h-9 rounded border border-border px-3 py-1.5 text-sm text-ink transition-colors duration-150 hover:bg-surface-2 dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2"
                       >
                         Edit
                       </button>
                       <button
                         type="button"
                         onClick={() => void onDelete(pto)}
-                        className="min-h-9 rounded border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/50"
+                        className="min-h-9 rounded border border-danger/30 px-3 py-1.5 text-sm text-danger transition-colors duration-150 hover:bg-danger/10"
                       >
                         Delete
                       </button>
@@ -151,7 +150,7 @@ export function UpcomingPtoList({
               );
             })}
           </ul>
-        </section>
+        </motion.section>
       ))}
     </div>
   );

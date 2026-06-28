@@ -22,11 +22,11 @@ export function MonthGrid({
       <div
         role="grid"
         aria-label="Month grid"
-        className="min-w-[480px] rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"
+        className="min-w-[480px] rounded-lg border border-border bg-surface-3 shadow-sm dark:border-border-dark dark:bg-surface-dark-3"
       >
         <div
           role="row"
-          className="sticky top-0 z-10 grid grid-cols-7 border-b border-slate-200 bg-slate-50 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+          className="sticky top-0 z-10 grid grid-cols-7 border-b border-border bg-surface-2 font-mono text-[11px] uppercase tracking-wider text-ink-muted dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-muted-dark"
         >
           {WEEKDAY_LABELS.map((label) => (
             <div key={label} role="columnheader" className="px-2 py-1.5 text-center">

@@ -6,7 +6,13 @@ export function RequireAuth({ children }: { children: ReactNode }): JSX.Element 
   const { status } = useAuth();
   if (status === 'loading') {
     return (
-      <div className="flex min-h-full items-center justify-center text-sm text-slate-500">
+      <div
+        role="status"
+        aria-busy="true"
+        aria-label="Loading"
+        className="flex min-h-full items-center justify-center gap-2 text-sm text-ink-muted dark:text-ink-muted-dark"
+      >
+        <span className="h-3 w-3 animate-pulse rounded-full bg-accent" />
         Loading…
       </div>
     );

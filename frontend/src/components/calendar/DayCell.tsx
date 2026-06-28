@@ -1,4 +1,5 @@
 import type { KeyboardEvent } from 'react';
+import { motion } from 'motion/react';
 import { PTOChip } from '../pto/PTOChip';
 import { formatLongDate, isWeekend, ptoCoversDay } from '../../lib/calendar';
 import type { CalendarDay } from '../../lib/calendar';
@@ -30,14 +31,14 @@ export function DayCell({ day, ptoList, onChipClick, onDayClick }: DayCellProps)
     }
   }
 
-  const baseClass = `flex h-28 flex-col gap-1 border border-slate-200 p-1.5 dark:border-slate-700 ${
+  const baseClass = `flex h-28 flex-col gap-1 border border-border p-1.5 dark:border-border-dark ${
     day.isInMonth
-      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100'
-      : 'bg-slate-50 text-slate-400 dark:bg-slate-950 dark:text-slate-600'
+      ? 'bg-surface-3 text-ink dark:bg-surface-dark-3 dark:text-ink-dark'
+      : 'bg-surface text-ink-muted dark:bg-surface-dark dark:text-ink-muted-dark'
   }`;
 
   const interactiveClass = clickable
-    ? 'cursor-pointer transition-colors hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 dark:hover:bg-slate-800'
+    ? 'cursor-pointer transition-colors duration-150 hover:bg-accent-50 focus:outline-none dark:hover:bg-accent-900/30'
     : '';
 
   const cellProps = clickable
@@ -58,22 +59,25 @@ export function DayCell({ day, ptoList, onChipClick, onDayClick }: DayCellProps)
     >
       <div className="flex items-center justify-between text-xs">
         {day.isToday ? (
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-xs font-semibold text-white">
+          <motion.span
+            initial={{ scale: 0.7 }}
+            animate={{ scale: 1 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 18 }}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-accent font-mono text-xs font-semibold tabular-nums text-ink-inverse"
+          >
             {day.dayOfMonth}
-          </span>
+          </motion.span>
         ) : (
           <span
-            className={`font-semibold ${
-              day.isInMonth
-                ? 'text-slate-700 dark:text-slate-300'
-                : 'text-slate-400 dark:text-slate-600'
+            className={`font-mono font-medium tabular-nums ${
+              day.isInMonth ? 'text-ink-muted dark:text-ink-muted-dark' : 'text-ink-muted/60'
             }`}
           >
             {day.dayOfMonth}
           </span>
         )}
         {overflow > 0 ? (
-          <span className="rounded bg-slate-100 px-1 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          <span className="rounded bg-surface-2 px-1 text-[10px] font-medium text-ink-muted dark:bg-surface-dark-2 dark:text-ink-muted-dark">
             +{overflow} more
           </span>
         ) : null}

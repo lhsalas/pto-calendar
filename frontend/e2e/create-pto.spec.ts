@@ -57,7 +57,9 @@ test.describe('Sprint 1 critical journey', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible();
     await expect(page.getByText(/PTO saved/i)).toBeVisible();
     await expect(page.getByText(/Team Lead/).first()).toBeVisible();
-    await expect(page.getByText(iso).first()).toBeVisible();
+    await expect(
+      page.getByTestId(`day-cell-${iso}`).getByRole('button', { name: /team lead/i }),
+    ).toBeVisible();
   });
 });
 
@@ -92,7 +94,7 @@ test.describe('Sprint 2 critical journey', () => {
     await expect(page.getByText(/cannot be undone/i)).toBeVisible();
     await page.getByRole('button', { name: /yes, delete/i }).click();
     await expect(page.getByText(/PTO deleted/i)).toBeVisible();
-    await expect(page.getByText(iso)).not.toBeVisible();
+    await expect(page.getByTestId(`day-cell-${iso}`)).not.toContainText(/developer one/i);
   });
 });
 
@@ -106,7 +108,7 @@ test.describe('Sprint 3 critical journey', () => {
     await page.getByRole('button', { name: /sign in/i }).click();
     await expect(page.getByRole('heading', { name: /calendar/i })).toBeVisible();
 
-    await expect(page.getByText(todayIso).first()).toBeVisible();
+    await expect(page.getByTestId(`day-cell-${todayIso}`)).toBeVisible();
 
     await page.getByRole('button', { name: /add pto/i }).click();
     await page.getByLabel(/start date/i).fill(todayIso);
@@ -124,7 +126,7 @@ test.describe('Sprint 3 critical journey', () => {
       timeZone: 'UTC',
     });
     await expect(page.getByRole('heading', { name: nextLabel })).toBeVisible();
-    await expect(page.getByText(todayIso)).not.toBeVisible();
+    await expect(page.getByTestId(`day-cell-${todayIso}`)).not.toBeVisible();
 
     await page.getByRole('button', { name: /^previous$/i }).click();
     const currentLabel = new Date(todayIso).toLocaleString('en-US', {
@@ -133,7 +135,7 @@ test.describe('Sprint 3 critical journey', () => {
       timeZone: 'UTC',
     });
     await expect(page.getByRole('heading', { name: currentLabel })).toBeVisible();
-    await expect(page.getByText(todayIso).first()).toBeVisible();
+    await expect(page.getByTestId(`day-cell-${todayIso}`)).toBeVisible();
   });
 });
 
