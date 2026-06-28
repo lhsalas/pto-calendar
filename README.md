@@ -122,6 +122,8 @@ Frontend runs on http://localhost:5173, backend on http://localhost:3000. Seeded
 | `npm run db:reset`          | Drop, recreate, migrate, and seed                 |
 | `npm run db:seed`           | Seed the dev users                                |
 
+The backend reads `backend/.env` automatically on `npm run dev` and `npm run test:integration`. No `source` step is required. Existing shell env vars (e.g. production overrides) always win over the file.
+
 ## Production Deployment
 
 The MVP deploys as two artifacts (the Node API and a static SPA) fronted by a reverse proxy. The proxy terminates TLS, serves the SPA, and forwards `/auth/*` and `/pto/*` to the Node service so the session cookie's origin matches the API host.
