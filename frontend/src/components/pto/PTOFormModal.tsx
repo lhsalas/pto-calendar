@@ -134,7 +134,7 @@ export function PTOFormModal({
                   onChange={(e: ChangeEvent<HTMLInputElement>) =>
                     handleStartDateChange(e.target.value)
                   }
-                  className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm tabular-nums text-ink focus:border-accent-500 focus:outline-none dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
+                  className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm tabular-nums text-ink focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
                 />
               </label>
               <label className="block text-sm font-medium text-ink dark:text-ink-dark">
@@ -145,7 +145,7 @@ export function PTOFormModal({
                   value={endDate}
                   min={startDate}
                   onChange={(e: ChangeEvent<HTMLInputElement>) => setEndDate(e.target.value)}
-                  className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm tabular-nums text-ink focus:border-accent-500 focus:outline-none dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
+                  className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm tabular-nums text-ink focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
                 />
               </label>
             </div>
@@ -159,7 +159,7 @@ export function PTOFormModal({
                   onChange={(e: ChangeEvent<HTMLSelectElement>) =>
                     setDayPart(e.target.value as DayPart)
                   }
-                  className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 text-sm text-ink focus:border-accent-500 focus:outline-none dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
+                  className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 text-sm text-ink focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
                 >
                   {DAY_PARTS.map((dp) => (
                     <option key={dp} value={dp}>
@@ -177,7 +177,7 @@ export function PTOFormModal({
                 onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setNote(e.target.value)}
                 maxLength={NOTE_MAX}
                 rows={3}
-                className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 text-sm text-ink focus:border-accent-500 focus:outline-none dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
+                className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 text-sm text-ink focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
               />
               <span className="mt-1 block text-right font-mono text-xs tabular-nums text-ink-muted dark:text-ink-muted-dark">
                 {note.length}/{NOTE_MAX}
@@ -195,14 +195,14 @@ export function PTOFormModal({
                 type="button"
                 onClick={onClose}
                 disabled={submitting}
-                className="min-h-11 rounded border border-border px-3 py-2 text-sm text-ink transition-colors duration-150 hover:bg-surface-2 disabled:opacity-60 dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2"
+                className="min-h-11 rounded border border-border px-3 py-2 text-sm text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60 dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={submitting}
-                className="min-h-11 rounded bg-accent px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover disabled:opacity-60"
+                className="min-h-11 rounded bg-accent px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60 dark:focus-visible:ring-offset-surface-dark"
               >
                 {submitting ? 'Saving…' : 'Save PTO'}
               </button>

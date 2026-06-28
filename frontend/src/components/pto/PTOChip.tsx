@@ -17,7 +17,7 @@ export function PTOChip({ pto, onClick }: PTOChipProps): JSX.Element {
       type="button"
       onClick={() => onClick?.(pto)}
       title={`${pto.user.name} — ${label}`}
-      className="flex w-full items-center gap-1 rounded px-1.5 py-0.5 text-left text-xs shadow-sm transition-opacity duration-150 hover:opacity-90"
+      className="flex w-full items-center gap-1 rounded px-1.5 py-0.5 text-left text-xs shadow-sm transition-opacity duration-150 hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-1 focus-visible:ring-offset-surface dark:focus-visible:ring-offset-surface-dark"
       style={{ backgroundColor: pto.user.colorCode, color: textColor }}
     >
       <span

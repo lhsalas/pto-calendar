@@ -112,7 +112,7 @@ export function PTOViewModal({
               type="button"
               onClick={onClose}
               aria-label="Dismiss"
-              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-2 hover:text-ink dark:text-ink-muted-dark dark:hover:bg-surface-dark-2 dark:hover:text-ink-dark"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:text-ink-muted-dark dark:hover:bg-surface-dark-2 dark:hover:text-ink-dark dark:focus-visible:ring-offset-surface-dark"
             >
               <X aria-hidden className="h-4 w-4" />
             </button>
@@ -152,7 +152,7 @@ export function PTOViewModal({
                   <button
                     type="button"
                     onClick={() => void loadDetail()}
-                    className="ml-2 text-xs text-accent hover:underline"
+                    className="ml-2 text-xs text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:focus-visible:ring-offset-surface-dark"
                   >
                     Load note
                   </button>
@@ -175,7 +175,7 @@ export function PTOViewModal({
                   type="button"
                   onClick={() => setConfirming(false)}
                   disabled={busy}
-                  className="min-h-11 rounded border border-border bg-surface-3 px-3 py-2 text-sm text-ink transition-colors duration-150 hover:bg-surface-2 disabled:opacity-60 dark:border-border-dark dark:bg-surface-dark-3 dark:text-ink-dark dark:hover:bg-surface-dark-2"
+                  className="min-h-11 rounded border border-border bg-surface-3 px-3 py-2 text-sm text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60 dark:border-border-dark dark:bg-surface-dark-3 dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
                 >
                   Cancel
                 </button>
@@ -183,7 +183,7 @@ export function PTOViewModal({
                   type="button"
                   onClick={() => void handleDelete()}
                   disabled={busy}
-                  className="min-h-11 rounded bg-danger px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:opacity-90 disabled:opacity-60"
+                  className="min-h-11 rounded bg-danger px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60 dark:focus-visible:ring-offset-surface-dark"
                 >
                   {busy ? 'Deleting…' : 'Yes, delete'}
                 </button>
@@ -194,7 +194,7 @@ export function PTOViewModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="min-h-11 rounded border border-border px-3 py-2 text-sm text-ink transition-colors duration-150 hover:bg-surface-2 dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2"
+                className="min-h-11 rounded border border-border px-3 py-2 text-sm text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
               >
                 Close
               </button>
@@ -203,7 +203,7 @@ export function PTOViewModal({
                   <button
                     type="button"
                     onClick={() => onEdit(pto)}
-                    className="min-h-11 rounded bg-accent px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover"
+                    className="min-h-11 rounded bg-accent px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:focus-visible:ring-offset-surface-dark"
                   >
                     Edit
                   </button>
