@@ -6,8 +6,18 @@ import { STUB_PTO } from '../mocks/handlers';
 import type { CalendarDay } from '../../src/lib/calendar';
 import type { PTOWithUser } from '../../src/types/api';
 
-const IN_MONTH_DAY: CalendarDay = { iso: '2026-05-13', dayOfMonth: 13, isInMonth: true };
-const OUT_OF_MONTH_DAY: CalendarDay = { iso: '2026-05-31', dayOfMonth: 31, isInMonth: false };
+const IN_MONTH_DAY: CalendarDay = {
+  iso: '2026-05-13',
+  dayOfMonth: 13,
+  isInMonth: true,
+  isToday: false,
+};
+const OUT_OF_MONTH_DAY: CalendarDay = {
+  iso: '2026-05-31',
+  dayOfMonth: 31,
+  isInMonth: false,
+  isToday: false,
+};
 
 function ptoOn(iso: string): PTOWithUser {
   return { ...STUB_PTO, id: `pto-${iso}`, startDate: iso, endDate: iso };
@@ -57,10 +67,30 @@ describe('DayCell', () => {
   });
 
   describe('clickable weekday cells (onDayClick provided)', () => {
-    const MONDAY: CalendarDay = { iso: '2026-05-11', dayOfMonth: 11, isInMonth: true };
-    const SATURDAY: CalendarDay = { iso: '2026-05-16', dayOfMonth: 16, isInMonth: true };
-    const SUNDAY: CalendarDay = { iso: '2026-05-17', dayOfMonth: 17, isInMonth: true };
-    const OUT_OF_MONTH_MONDAY: CalendarDay = { iso: '2026-06-01', dayOfMonth: 1, isInMonth: false };
+    const MONDAY: CalendarDay = {
+      iso: '2026-05-11',
+      dayOfMonth: 11,
+      isInMonth: true,
+      isToday: false,
+    };
+    const SATURDAY: CalendarDay = {
+      iso: '2026-05-16',
+      dayOfMonth: 16,
+      isInMonth: true,
+      isToday: false,
+    };
+    const SUNDAY: CalendarDay = {
+      iso: '2026-05-17',
+      dayOfMonth: 17,
+      isInMonth: true,
+      isToday: false,
+    };
+    const OUT_OF_MONTH_MONDAY: CalendarDay = {
+      iso: '2026-06-01',
+      dayOfMonth: 1,
+      isInMonth: false,
+      isToday: false,
+    };
 
     it('fires onDayClick with the ISO when a weekday cell is clicked', async () => {
       const user = userEvent.setup();
@@ -161,7 +191,7 @@ describe('DayCell', () => {
     it('does not expose role=button or tabIndex when onDayClick is omitted', () => {
       render(
         <DayCell
-          day={{ iso: '2026-05-11', dayOfMonth: 11, isInMonth: true }}
+          day={{ iso: '2026-05-11', dayOfMonth: 11, isInMonth: true, isToday: false }}
           ptoList={[]}
           onChipClick={() => {}}
         />,
@@ -169,6 +199,42 @@ describe('DayCell', () => {
       const cell = screen.getByTestId('day-cell-2026-05-11');
       expect(cell.getAttribute('role')).toBeNull();
       expect(cell.tabIndex).toBe(-1);
+    });
+  });
+
+  describe('today highlight', () => {
+    it('renders the day number inside a blue circle when isToday is true', () => {
+      const today: CalendarDay = {
+        iso: '2026-05-13',
+        dayOfMonth: 13,
+        isInMonth: true,
+        isToday: true,
+      };
+      render(<DayCell day={today} ptoList={[]} onChipClick={() => {}} />);
+      const cell = screen.getByTestId('day-cell-2026-05-13');
+      const circle = cell.querySelector('.bg-blue-600.rounded-full');
+      expect(circle).not.toBeNull();
+      expect(circle).toHaveTextContent('13');
+      expect(circle).toHaveClass('bg-blue-600', 'text-white', 'rounded-full');
+    });
+
+    it('does not render the blue circle when isToday is false', () => {
+      render(<DayCell day={IN_MONTH_DAY} ptoList={[]} onChipClick={() => {}} />);
+      const cell = screen.getByTestId('day-cell-2026-05-13');
+      expect(cell.querySelector('.bg-blue-600.rounded-full')).toBeNull();
+    });
+
+    it('still renders chips correctly on the today cell', () => {
+      const today: CalendarDay = {
+        iso: '2026-05-13',
+        dayOfMonth: 13,
+        isInMonth: true,
+        isToday: true,
+      };
+      render(<DayCell day={today} ptoList={[ptoOn('2026-05-13')]} onChipClick={() => {}} />);
+      const cell = screen.getByTestId('day-cell-2026-05-13');
+      expect(cell.querySelector('.bg-blue-600.rounded-full')).toHaveTextContent('13');
+      expect(screen.getByRole('button', { name: /team lead/i })).toBeInTheDocument();
     });
   });
 });

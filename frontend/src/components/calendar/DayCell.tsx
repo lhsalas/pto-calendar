@@ -57,15 +57,21 @@ export function DayCell({ day, ptoList, onChipClick, onDayClick }: DayCellProps)
       {...cellProps}
     >
       <div className="flex items-center justify-between text-xs">
-        <span
-          className={`font-semibold ${
-            day.isInMonth
-              ? 'text-slate-700 dark:text-slate-300'
-              : 'text-slate-400 dark:text-slate-600'
-          }`}
-        >
-          {day.dayOfMonth}
-        </span>
+        {day.isToday ? (
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-xs font-semibold text-white">
+            {day.dayOfMonth}
+          </span>
+        ) : (
+          <span
+            className={`font-semibold ${
+              day.isInMonth
+                ? 'text-slate-700 dark:text-slate-300'
+                : 'text-slate-400 dark:text-slate-600'
+            }`}
+          >
+            {day.dayOfMonth}
+          </span>
+        )}
         {overflow > 0 ? (
           <span className="rounded bg-slate-100 px-1 text-[10px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
             +{overflow} more

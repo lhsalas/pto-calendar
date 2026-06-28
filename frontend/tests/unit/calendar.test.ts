@@ -41,6 +41,26 @@ describe('calendar utilities', () => {
       const { weeks } = grid({ year: 2026, month: 6 });
       expect(weeks[0]![0]!.iso).toBe('2026-06-29');
     });
+
+    it('marks exactly one cell as today when the input matches the current month', () => {
+      const today = todayIso();
+      const current = currentYearMonth();
+      const { weeks } = grid(current);
+      const all = weeks.flat();
+      expect(all).toHaveLength(42);
+      const todays = all.filter((d) => d.isToday);
+      expect(todays).toHaveLength(1);
+      expect(todays[0]!.iso).toBe(today);
+      expect(todays[0]!.isInMonth).toBe(true);
+    });
+
+    it('marks no cells as today when the input is a non-current month', () => {
+      const current = currentYearMonth();
+      const other = { year: current.year + 1, month: 0 };
+      const { weeks } = grid(other);
+      const all = weeks.flat();
+      expect(all.every((d) => d.isToday === false)).toBe(true);
+    });
   });
 
   describe('visibleGridRange', () => {
