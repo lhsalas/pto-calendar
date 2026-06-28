@@ -421,4 +421,85 @@ describe('CalendarPage', () => {
     const today = new Date().toISOString().slice(0, 10);
     expect((startInput as HTMLInputElement).value).toBe(today);
   });
+
+  it('opens the create modal with the clicked weekday as the start date', async () => {
+    server.use(http.get('/pto', () => HttpResponse.json([])));
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+    });
+    const cell = screen.getByTestId('day-cell-2026-06-15');
+    await user.click(cell);
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /add pto/i })).toBeVisible();
+    });
+    const startInput = screen.getByLabelText(/start date/i) as HTMLInputElement;
+    const endInput = screen.getByLabelText(/end date/i) as HTMLInputElement;
+    expect(startInput.value).toBe('2026-06-15');
+    expect(endInput.value).toBe('2026-06-15');
+  });
+
+  it('does not open the create modal when a Saturday cell is clicked', async () => {
+    server.use(http.get('/pto', () => HttpResponse.json([])));
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+    });
+    const sat = screen.getByTestId('day-cell-2026-06-20');
+    const sun = screen.getByTestId('day-cell-2026-06-21');
+    await user.click(sat);
+    await user.click(sun);
+    expect(screen.queryByRole('dialog', { name: /add pto/i })).not.toBeInTheDocument();
+  });
+
+  it('does not open the create modal when a chip is clicked (stopPropagation)', async () => {
+    const today = firstWeekdayInCurrentMonth();
+    const localPto = { ...STUB_PTO, startDate: today, endDate: today };
+    server.use(
+      http.get('/pto', () => HttpResponse.json([localPto])),
+      http.get('/pto/:id', () =>
+        HttpResponse.json({
+          id: localPto.id,
+          userId: localPto.user.id,
+          startDate: localPto.startDate,
+          endDate: localPto.endDate,
+          dayPart: localPto.dayPart,
+          note: null,
+          user: localPto.user,
+          createdAt: '2026-05-01T10:00:00.000Z',
+          updatedAt: '2026-05-01T10:00:00.000Z',
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /team lead/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /team lead/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /pto details/i })).toBeVisible();
+    });
+    expect(screen.queryByRole('dialog', { name: /add pto/i })).not.toBeInTheDocument();
+  });
+
+  it('reverts to the default start date after closing a cell-driven modal', async () => {
+    server.use(http.get('/pto', () => HttpResponse.json([])));
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('day-cell-2026-06-15'));
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /add pto/i })).toBeVisible();
+    });
+    await user.click(screen.getByRole('button', { name: /cancel/i }));
+    await user.click(screen.getByRole('button', { name: /^add pto$/i }));
+    const today = new Date().toISOString().slice(0, 10);
+    const startInput = screen.getByLabelText(/start date/i) as HTMLInputElement;
+    expect(startInput.value).toBe(today);
+  });
 });

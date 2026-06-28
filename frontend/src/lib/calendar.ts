@@ -82,6 +82,32 @@ export function firstOfMonthIso(yearMonth: YearMonth): string {
   return isoFromYmd(yearMonth.year, yearMonth.month, 1);
 }
 
+export function isWeekend(iso: string): boolean {
+  const parts = iso.split('-').map(Number);
+  if (parts.length !== 3) return false;
+  const [y, m, d] = parts as [number, number, number];
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return false;
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return dow === 0 || dow === 6;
+}
+
+export function formatLongDate(iso: string): string {
+  const parts = iso.split('-').map(Number);
+  if (parts.length !== 3) return iso;
+  const [y, m, d] = parts as [number, number, number];
+  const date = new Date(Date.UTC(y, m - 1, d));
+  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d) {
+    return iso;
+  }
+  return new Intl.DateTimeFormat('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(date);
+}
+
 export function addDays(iso: string, days: number): string {
   if (!ISO_DATE.test(iso)) return iso;
   const d = new Date(`${iso}T00:00:00Z`);

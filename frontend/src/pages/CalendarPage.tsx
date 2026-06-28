@@ -90,6 +90,13 @@ export function CalendarPage(): JSX.Element {
       ? firstOfMonthIso(yearMonth)
       : todayIso();
 
+  const [createDayStartDate, setCreateDayStartDate] = useState<string | undefined>(undefined);
+
+  const handleDayClick = useCallback((iso: string): void => {
+    setCreateDayStartDate(iso);
+    setCreateOpen(true);
+  }, []);
+
   async function handleCreate(payload: CreatePTORequest): Promise<void> {
     await create(payload);
     setCreateOpen(false);
@@ -183,7 +190,12 @@ export function CalendarPage(): JSX.Element {
             Loading…
           </p>
         ) : (
-          <MonthGrid weeks={gridData.weeks} ptoList={items} onChipClick={setViewing} />
+          <MonthGrid
+            weeks={gridData.weeks}
+            ptoList={items}
+            onChipClick={setViewing}
+            onDayClick={handleDayClick}
+          />
         )
       ) : (
         <UpcomingPtoList
@@ -200,9 +212,12 @@ export function CalendarPage(): JSX.Element {
 
       <PTOFormModal
         open={createOpen}
-        defaultStartDate={defaultCreateStartDate}
+        defaultStartDate={createDayStartDate ?? defaultCreateStartDate}
         onSubmit={handleCreate}
-        onClose={() => setCreateOpen(false)}
+        onClose={() => {
+          setCreateOpen(false);
+          setCreateDayStartDate(undefined);
+        }}
       />
       <PTOFormModal
         open={editing !== null}
