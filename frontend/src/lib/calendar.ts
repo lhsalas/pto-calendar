@@ -72,6 +72,16 @@ export function isCurrentYearMonth(yearMonth: YearMonth): boolean {
   return yearMonth.year === current.year && yearMonth.month === current.month;
 }
 
+export function compareYearMonth(a: YearMonth, b: YearMonth): -1 | 0 | 1 {
+  if (a.year !== b.year) return a.year < b.year ? -1 : 1;
+  if (a.month !== b.month) return a.month < b.month ? -1 : 1;
+  return 0;
+}
+
+export function firstOfMonthIso(yearMonth: YearMonth): string {
+  return isoFromYmd(yearMonth.year, yearMonth.month, 1);
+}
+
 export function addDays(iso: string, days: number): string {
   if (!ISO_DATE.test(iso)) return iso;
   const d = new Date(`${iso}T00:00:00Z`);

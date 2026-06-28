@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   addDays,
   addMonths,
+  compareYearMonth,
   currentYearMonth,
   dayCovers,
+  firstOfMonthIso,
   formatYearMonth,
   grid,
   initials,
@@ -81,6 +83,37 @@ describe('calendar utilities', () => {
       const current = currentYearMonth();
       expect(isCurrentYearMonth({ year: current.year - 1, month: current.month })).toBe(false);
       expect(isCurrentYearMonth({ year: current.year + 1, month: current.month })).toBe(false);
+    });
+  });
+
+  describe('compareYearMonth', () => {
+    it('returns 0 for equal year-months', () => {
+      expect(compareYearMonth({ year: 2026, month: 5 }, { year: 2026, month: 5 })).toBe(0);
+    });
+    it('returns -1 when the first month is earlier in the same year', () => {
+      expect(compareYearMonth({ year: 2026, month: 4 }, { year: 2026, month: 5 })).toBe(-1);
+    });
+    it('returns 1 when the first month is later in the same year', () => {
+      expect(compareYearMonth({ year: 2026, month: 6 }, { year: 2026, month: 5 })).toBe(1);
+    });
+    it('returns -1 across a year boundary when the first is in an earlier year', () => {
+      expect(compareYearMonth({ year: 2025, month: 11 }, { year: 2026, month: 0 })).toBe(-1);
+    });
+    it('returns 1 across a year boundary when the first is in a later year', () => {
+      expect(compareYearMonth({ year: 2026, month: 0 }, { year: 2025, month: 11 })).toBe(1);
+    });
+  });
+
+  describe('firstOfMonthIso', () => {
+    it('returns YYYY-MM-01 for a mid-year month', () => {
+      expect(firstOfMonthIso({ year: 2026, month: 6 })).toBe('2026-07-01');
+    });
+    it('zero-pads the month number', () => {
+      expect(firstOfMonthIso({ year: 2026, month: 0 })).toBe('2026-01-01');
+      expect(firstOfMonthIso({ year: 2026, month: 9 })).toBe('2026-10-01');
+    });
+    it('handles a December input', () => {
+      expect(firstOfMonthIso({ year: 2026, month: 11 })).toBe('2026-12-01');
     });
   });
 

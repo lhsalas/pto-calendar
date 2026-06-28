@@ -8,6 +8,7 @@ const DAY_PARTS: DayPart[] = ['morning', 'evening', 'all_day'];
 export interface PTOFormModalProps {
   open: boolean;
   initialPto?: PTOWithUser;
+  defaultStartDate?: string;
   onSubmit: (payload: CreatePTORequest) => Promise<void> | void;
   onClose: () => void;
 }
@@ -23,12 +24,15 @@ function isWeekend(dateStr: string): boolean {
 export function PTOFormModal({
   open,
   initialPto,
+  defaultStartDate,
   onSubmit,
   onClose,
 }: PTOFormModalProps): JSX.Element | null {
   const today = new Date().toISOString().slice(0, 10);
-  const [startDate, setStartDate] = useState<string>(initialPto?.startDate ?? today);
-  const [endDate, setEndDate] = useState<string>(initialPto?.endDate ?? today);
+  const initialStart = initialPto?.startDate ?? defaultStartDate ?? today;
+  const initialEnd = initialPto?.endDate ?? defaultStartDate ?? today;
+  const [startDate, setStartDate] = useState<string>(initialStart);
+  const [endDate, setEndDate] = useState<string>(initialEnd);
   const [dayPart, setDayPart] = useState<DayPart>(initialPto?.dayPart ?? 'all_day');
   const [note, setNote] = useState<string>(initialPto?.note ?? '');
   const [error, setError] = useState<string | null>(null);
@@ -37,12 +41,12 @@ export function PTOFormModal({
   useEffect(() => {
     if (open) {
       setError(null);
-      setStartDate(initialPto?.startDate ?? today);
-      setEndDate(initialPto?.endDate ?? today);
+      setStartDate(initialPto?.startDate ?? defaultStartDate ?? today);
+      setEndDate(initialPto?.endDate ?? defaultStartDate ?? today);
       setDayPart(initialPto?.dayPart ?? 'all_day');
       setNote(initialPto?.note ?? '');
     }
-  }, [open, initialPto, today]);
+  }, [open, initialPto, defaultStartDate, today]);
 
   function handleStartDateChange(value: string): void {
     setStartDate(value);

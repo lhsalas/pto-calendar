@@ -363,4 +363,62 @@ describe('CalendarPage', () => {
       expect(screen.getByText(/pto deleted/i)).toBeInTheDocument();
     });
   });
+
+  it('defaults the create-modal start date to today when viewing the current month', async () => {
+    server.use(http.get('/pto', () => HttpResponse.json([])));
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /^add pto$/i }));
+    const startInput = await screen.findByLabelText(/start date/i);
+    const today = new Date().toISOString().slice(0, 10);
+    expect((startInput as HTMLInputElement).value).toBe(today);
+  });
+
+  it('defaults the create-modal start date to the 1st of the viewed future month', async () => {
+    server.use(http.get('/pto', () => HttpResponse.json([])));
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+    await waitFor(() => {
+      expect(screen.getByTestId('header-label')).toHaveTextContent(/july 2026/i);
+    });
+    await user.click(screen.getByRole('button', { name: /^add pto$/i }));
+    const startInput = await screen.findByLabelText(/start date/i);
+    expect((startInput as HTMLInputElement).value).toBe('2026-07-01');
+  });
+
+  it('keeps the default at today when viewing a past month', async () => {
+    server.use(http.get('/pto', () => HttpResponse.json([])));
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /^previous$/i }));
+    await user.click(screen.getByRole('button', { name: /^add pto$/i }));
+    const startInput = await screen.findByLabelText(/start date/i);
+    const today = new Date().toISOString().slice(0, 10);
+    expect((startInput as HTMLInputElement).value).toBe(today);
+  });
+
+  it('keeps the default at today in list view regardless of the window', async () => {
+    server.use(http.get('/pto', () => HttpResponse.json([])));
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('view-option-list'));
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+    await user.click(screen.getByRole('button', { name: /^add pto$/i }));
+    const startInput = await screen.findByLabelText(/start date/i);
+    const today = new Date().toISOString().slice(0, 10);
+    expect((startInput as HTMLInputElement).value).toBe(today);
+  });
 });
