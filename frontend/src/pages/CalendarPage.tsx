@@ -10,7 +10,9 @@ import { ThemeToggle } from '../components/ThemeToggle';
 import {
   addDays,
   addMonths,
+  compareYearMonth,
   currentYearMonth,
+  firstOfMonthIso,
   formatYearMonth,
   grid,
   isCurrentYearMonth,
@@ -82,6 +84,11 @@ export function CalendarPage(): JSX.Element {
 
   const headerLabel = view === 'grid' ? formatYearMonth(yearMonth) : listRange.label;
   const todayDisabled = view === 'grid' ? isCurrentYearMonth(yearMonth) : listStart === todayIso();
+
+  const defaultCreateStartDate =
+    view === 'grid' && compareYearMonth(yearMonth, currentYearMonth()) === 1
+      ? firstOfMonthIso(yearMonth)
+      : todayIso();
 
   async function handleCreate(payload: CreatePTORequest): Promise<void> {
     await create(payload);
@@ -193,6 +200,7 @@ export function CalendarPage(): JSX.Element {
 
       <PTOFormModal
         open={createOpen}
+        defaultStartDate={defaultCreateStartDate}
         onSubmit={handleCreate}
         onClose={() => setCreateOpen(false)}
       />

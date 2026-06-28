@@ -11,6 +11,7 @@ interface RenderArgs {
   onClose?: ReturnType<typeof vi.fn>;
   open?: boolean;
   initialPto?: typeof STUB_PTO;
+  defaultStartDate?: string;
 }
 
 function renderModal({
@@ -18,6 +19,7 @@ function renderModal({
   onClose = vi.fn(),
   open = true,
   initialPto,
+  defaultStartDate,
 }: RenderArgs = {}): void {
   render(
     <PTOFormModal
@@ -25,6 +27,7 @@ function renderModal({
       onSubmit={onSubmit}
       onClose={onClose}
       {...(initialPto ? { initialPto } : {})}
+      {...(defaultStartDate ? { defaultStartDate } : {})}
     />,
   );
 }
@@ -234,5 +237,42 @@ describe('PTOFormModal', () => {
       /end date cannot fall on a weekend/i,
     );
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('prefills start and end dates from defaultStartDate when no initialPto is provided', () => {
+    renderModal({ defaultStartDate: '2026-09-01' });
+    const startInput = screen.getByLabelText(/start date/i) as HTMLInputElement;
+    const endInput = screen.getByLabelText(/end date/i) as HTMLInputElement;
+    expect(startInput.value).toBe('2026-09-01');
+    expect(endInput.value).toBe('2026-09-01');
+  });
+
+  it('ignores defaultStartDate when initialPto is provided', () => {
+    renderModal({
+      defaultStartDate: '2026-09-01',
+      initialPto: { ...STUB_PTO, startDate: '2026-05-11', endDate: '2026-05-15' },
+    });
+    const startInput = screen.getByLabelText(/start date/i) as HTMLInputElement;
+    const endInput = screen.getByLabelText(/end date/i) as HTMLInputElement;
+    expect(startInput.value).toBe('2026-05-11');
+    expect(endInput.value).toBe('2026-05-15');
+  });
+
+  it('resets to the latest defaultStartDate when reopened after the parent updates it', () => {
+    const { rerender } = render(
+      <PTOFormModal
+        open={false}
+        onSubmit={vi.fn()}
+        onClose={vi.fn()}
+        defaultStartDate="2026-09-01"
+      />,
+    );
+    rerender(
+      <PTOFormModal open onSubmit={vi.fn()} onClose={vi.fn()} defaultStartDate="2026-12-15" />,
+    );
+    const startInput = screen.getByLabelText(/start date/i) as HTMLInputElement;
+    const endInput = screen.getByLabelText(/end date/i) as HTMLInputElement;
+    expect(startInput.value).toBe('2026-12-15');
+    expect(endInput.value).toBe('2026-12-15');
   });
 });
