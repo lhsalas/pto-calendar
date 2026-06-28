@@ -44,11 +44,13 @@ body,
 body {
   margin: 0;
   font-family: var(--font-sans);
-  background-color: #f8fafc;
-  color: #0f172a;
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 html.dark body {
-  background-color: #020617;
-  color: #f1f5f9;
+  background-color: var(--color-surface-dark);
+  color: var(--color-ink-dark);
 }

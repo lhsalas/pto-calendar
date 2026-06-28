@@ -30,22 +30,22 @@ export function LoginPage(): JSX.Element {
   }
 
   return (
-    <main className="flex min-h-full flex-col items-center justify-center bg-slate-50 p-6 dark:bg-slate-950">
+    <main className="flex min-h-full flex-col items-center justify-center bg-surface p-6 dark:bg-surface-dark">
       <div className="absolute right-4 top-4">
         <ThemeToggle />
       </div>
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900"
+        className="w-full max-w-sm rounded-lg border border-border bg-surface-3 p-6 shadow-sm dark:border-border-dark dark:bg-surface-dark-3"
       >
-        <h1 className="mb-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
+        <h1 className="mb-1 font-display text-2xl font-semibold tracking-tight text-ink dark:text-ink-dark">
           PTO Calendar
         </h1>
-        <p className="mb-6 text-sm text-slate-500 dark:text-slate-400">
+        <p className="mb-6 text-sm text-ink-muted dark:text-ink-muted-dark">
           Sign in to manage your time off.
         </p>
 
-        <label className="mb-3 block text-sm font-medium text-slate-700 dark:text-slate-300">
+        <label className="mb-3 block text-sm font-medium text-ink dark:text-ink-dark">
           Email
           <input
             type="email"
@@ -53,11 +53,11 @@ export function LoginPage(): JSX.Element {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 block w-full min-h-11 rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+            className="mt-1 block w-full min-h-11 rounded border border-border bg-surface-2 px-3 py-2 text-sm text-ink focus:border-accent-500 focus:outline-none dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
           />
         </label>
 
-        <label className="mb-4 block text-sm font-medium text-slate-700 dark:text-slate-300">
+        <label className="mb-4 block text-sm font-medium text-ink dark:text-ink-dark">
           Password
           <input
             type="password"
@@ -65,12 +65,12 @@ export function LoginPage(): JSX.Element {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 block w-full min-h-11 rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+            className="mt-1 block w-full min-h-11 rounded border border-border bg-surface-2 px-3 py-2 text-sm text-ink focus:border-accent-500 focus:outline-none dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
           />
         </label>
 
         {error ? (
-          <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="mb-3 text-sm text-danger">
             {error}
           </p>
         ) : null}
@@ -78,7 +78,7 @@ export function LoginPage(): JSX.Element {
         <button
           type="submit"
           disabled={submitting}
-          className="min-h-11 w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+          className="min-h-11 w-full rounded bg-accent px-4 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover disabled:opacity-60"
         >
           {submitting ? 'Signing in…' : 'Sign in'}
         </button>

@@ -212,16 +212,16 @@ describe('DayCell', () => {
       };
       render(<DayCell day={today} ptoList={[]} onChipClick={() => {}} />);
       const cell = screen.getByTestId('day-cell-2026-05-13');
-      const circle = cell.querySelector('.bg-blue-600.rounded-full');
+      const circle = cell.querySelector('.bg-accent.rounded-full');
       expect(circle).not.toBeNull();
       expect(circle).toHaveTextContent('13');
-      expect(circle).toHaveClass('bg-blue-600', 'text-white', 'rounded-full');
+      expect(circle).toHaveClass('bg-accent', 'text-ink-inverse', 'rounded-full');
     });
 
     it('does not render the blue circle when isToday is false', () => {
       render(<DayCell day={IN_MONTH_DAY} ptoList={[]} onChipClick={() => {}} />);
       const cell = screen.getByTestId('day-cell-2026-05-13');
-      expect(cell.querySelector('.bg-blue-600.rounded-full')).toBeNull();
+      expect(cell.querySelector('.bg-accent.rounded-full')).toBeNull();
     });
 
     it('still renders chips correctly on the today cell', () => {
@@ -233,7 +233,7 @@ describe('DayCell', () => {
       };
       render(<DayCell day={today} ptoList={[ptoOn('2026-05-13')]} onChipClick={() => {}} />);
       const cell = screen.getByTestId('day-cell-2026-05-13');
-      expect(cell.querySelector('.bg-blue-600.rounded-full')).toHaveTextContent('13');
+      expect(cell.querySelector('.bg-accent.rounded-full')).toHaveTextContent('13');
       expect(screen.getByRole('button', { name: /team lead/i })).toBeInTheDocument();
     });
   });

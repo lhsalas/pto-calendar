@@ -1,4 +1,4 @@
-import { dayPartLabel, initials } from '../../lib/calendar';
+import { dayPartLabel, initials, readableTextOn } from '../../lib/calendar';
 import type { PTOWithUser } from '../../types/api';
 
 export interface PTOChipProps {
@@ -10,14 +10,15 @@ export function PTOChip({ pto, onClick }: PTOChipProps): JSX.Element {
   const isMultiDay = pto.startDate !== pto.endDate;
   const label = isMultiDay ? 'Full' : dayPartLabel(pto.dayPart);
   const userInitials = initials(pto.user.name);
+  const textColor = readableTextOn(pto.user.colorCode);
 
   return (
     <button
       type="button"
       onClick={() => onClick?.(pto)}
       title={`${pto.user.name} — ${label}`}
-      className="flex w-full items-center gap-1 rounded px-1.5 py-0.5 text-left text-xs text-white shadow-sm hover:opacity-90"
-      style={{ backgroundColor: pto.user.colorCode }}
+      className="flex w-full items-center gap-1 rounded px-1.5 py-0.5 text-left text-xs shadow-sm transition-opacity duration-150 hover:opacity-90"
+      style={{ backgroundColor: pto.user.colorCode, color: textColor }}
     >
       <span
         aria-hidden="true"

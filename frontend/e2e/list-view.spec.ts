@@ -5,7 +5,7 @@ const SEED = {
   dev1: { email: 'dev1@example.com', password: 'dev1-dev-password' },
 };
 
-function nextWeekdayFromToday(offsetDays: number): string {
+function nextWeekdayFromToday(offsetDays: number): { iso: string; label: string } {
   const now = new Date();
   const candidate = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + offsetDays),
@@ -13,7 +13,13 @@ function nextWeekdayFromToday(offsetDays: number): string {
   while (candidate.getUTCDay() === 0 || candidate.getUTCDay() === 6) {
     candidate.setUTCDate(candidate.getUTCDate() + 1);
   }
-  return candidate.toISOString().slice(0, 10);
+  const iso = candidate.toISOString().slice(0, 10);
+  const label = candidate.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+  return { iso, label };
 }
 
 async function login(page: Page, email: string, password: string): Promise<void> {
@@ -34,8 +40,8 @@ test.describe('Sprint 4 — list view', () => {
     const newDay = nextWeekdayFromToday(7);
 
     await page.getByRole('button', { name: /^add pto$/i }).click();
-    await page.getByLabel(/start date/i).fill(day);
-    await page.getByLabel(/end date/i).fill(day);
+    await page.getByLabel(/start date/i).fill(day.iso);
+    await page.getByLabel(/end date/i).fill(day.iso);
     await page.getByLabel(/day part/i).selectOption('morning');
     await page.getByRole('button', { name: /save pto/i }).click();
     await expect(page.getByRole('dialog')).not.toBeVisible();
@@ -48,18 +54,20 @@ test.describe('Sprint 4 — list view', () => {
 
     const row = page.locator('[data-testid^="upcoming-row-"]').first();
     await expect(row).toBeVisible();
-    await expect(row).toContainText(day);
+    await expect(row).toContainText(day.label);
     await row.locator('button').first().click();
     const viewModal = page.getByRole('dialog', { name: /pto details/i });
     await expect(viewModal).toBeVisible();
 
     await viewModal.getByRole('button', { name: /^edit$/i }).click();
     await expect(page.getByText(/edit pto/i)).toBeVisible();
-    await page.getByLabel(/start date/i).fill(newDay);
-    await page.getByLabel(/end date/i).fill(newDay);
+    await page.getByLabel(/start date/i).fill(newDay.iso);
+    await page.getByLabel(/end date/i).fill(newDay.iso);
     await page.getByRole('button', { name: /save pto/i }).click();
     await expect(page.getByText(/pto updated/i)).toBeVisible();
 
-    await expect(page.locator('[data-testid^="upcoming-row-"]').first()).toContainText(newDay);
+    await expect(page.locator('[data-testid^="upcoming-row-"]').first()).toContainText(
+      newDay.label,
+    );
   });
 });

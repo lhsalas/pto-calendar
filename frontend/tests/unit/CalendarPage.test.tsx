@@ -59,7 +59,7 @@ describe('CalendarPage', () => {
       expect(screen.getByText(/team lead/i)).toBeInTheDocument();
     });
     expect(screen.getByRole('heading', { name: /calendar/i })).toBeInTheDocument();
-    expect(screen.getByText(/showing 2026/i)).toBeInTheDocument();
+    expect(screen.getByTestId('range-label')).toHaveTextContent(/2026/i);
     expect(screen.getByRole('button', { name: /add pto/i })).toBeInTheDocument();
     const dayCells = await screen.findAllByTestId(/^day-cell-/, {}, { timeout: 2000 });
     expect(dayCells).toHaveLength(42);
