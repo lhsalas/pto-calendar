@@ -8,6 +8,7 @@ export default defineConfig({
     exclude: ['node_modules', 'dist', 'coverage', 'tests/unit/**'],
     testTimeout: 30000,
     hookTimeout: 30000,
+    setupFiles: ['./tests/setup.ts'],
     pool: 'forks',
     poolOptions: {
       forks: {
