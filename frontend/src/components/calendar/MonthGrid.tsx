@@ -8,9 +8,15 @@ export interface MonthGridProps {
   weeks: CalendarDay[][];
   ptoList: PTOWithUser[];
   onChipClick: (pto: PTOWithUser) => void;
+  onDayClick?: (iso: string) => void;
 }
 
-export function MonthGrid({ weeks, ptoList, onChipClick }: MonthGridProps): JSX.Element {
+export function MonthGrid({
+  weeks,
+  ptoList,
+  onChipClick,
+  onDayClick,
+}: MonthGridProps): JSX.Element {
   return (
     <div
       role="grid"
@@ -30,7 +36,13 @@ export function MonthGrid({ weeks, ptoList, onChipClick }: MonthGridProps): JSX.
       {weeks.map((week, rowIdx) => (
         <div key={rowIdx} role="row" className="grid grid-cols-7">
           {week.map((day) => (
-            <DayCell key={day.iso} day={day} ptoList={ptoList} onChipClick={onChipClick} />
+            <DayCell
+              key={day.iso}
+              day={day}
+              ptoList={ptoList}
+              onChipClick={onChipClick}
+              {...(onDayClick ? { onDayClick } : {})}
+            />
           ))}
         </div>
       ))}

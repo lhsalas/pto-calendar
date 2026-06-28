@@ -6,10 +6,12 @@ import {
   currentYearMonth,
   dayCovers,
   firstOfMonthIso,
+  formatLongDate,
   formatYearMonth,
   grid,
   initials,
   isCurrentYearMonth,
+  isWeekend,
   listWindow,
   ptoCoversDay,
   todayIso,
@@ -114,6 +116,39 @@ describe('calendar utilities', () => {
     });
     it('handles a December input', () => {
       expect(firstOfMonthIso({ year: 2026, month: 11 })).toBe('2026-12-01');
+    });
+  });
+
+  describe('isWeekend', () => {
+    it('returns false for a Monday', () => {
+      expect(isWeekend('2026-06-15')).toBe(false);
+    });
+    it('returns false for a Wednesday', () => {
+      expect(isWeekend('2026-06-17')).toBe(false);
+    });
+    it('returns false for a Friday', () => {
+      expect(isWeekend('2026-06-19')).toBe(false);
+    });
+    it('returns true for a Saturday', () => {
+      expect(isWeekend('2026-06-20')).toBe(true);
+    });
+    it('returns true for a Sunday', () => {
+      expect(isWeekend('2026-06-21')).toBe(true);
+    });
+    it('returns false for malformed input', () => {
+      expect(isWeekend('not-a-date')).toBe(false);
+    });
+  });
+
+  describe('formatLongDate', () => {
+    it('renders the long English date for a weekday', () => {
+      expect(formatLongDate('2026-06-15')).toBe('Monday, June 15, 2026');
+    });
+    it('renders the long English date for a weekend day', () => {
+      expect(formatLongDate('2026-06-20')).toBe('Saturday, June 20, 2026');
+    });
+    it('returns the input unchanged for malformed ISO', () => {
+      expect(formatLongDate('not-a-date')).toBe('not-a-date');
     });
   });
 
