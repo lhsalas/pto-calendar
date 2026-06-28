@@ -49,7 +49,7 @@ export function ViewToggle({ view, onViewChange }: ViewToggleProps): JSX.Element
             aria-label={opt.aria}
             data-testid={`view-option-${opt.value}`}
             onClick={() => onViewChange(opt.value)}
-            className={`inline-flex min-h-11 items-center gap-2 px-3 py-2 text-sm transition-colors duration-150 ${
+            className={`inline-flex min-h-11 items-center gap-2 px-3 py-2 text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:focus-visible:ring-offset-surface-dark ${
               selected
                 ? 'bg-ink text-ink-inverse dark:bg-ink-dark dark:text-surface-dark'
                 : 'bg-surface-3 text-ink hover:bg-surface-2 dark:bg-surface-dark-3 dark:text-ink-dark dark:hover:bg-surface-dark-2'

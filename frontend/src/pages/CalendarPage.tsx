@@ -138,7 +138,7 @@ export function CalendarPage(): JSX.Element {
           <button
             type="button"
             onClick={() => void logout()}
-            className="min-h-11 rounded border border-border px-3 py-2 transition-colors duration-150 hover:bg-surface-2 dark:border-border-dark dark:hover:bg-surface-dark-2"
+            className="min-h-11 rounded border border-border px-3 py-2 transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
           >
             Sign out
           </button>
@@ -155,7 +155,7 @@ export function CalendarPage(): JSX.Element {
         <button
           type="button"
           onClick={() => setCreateOpen(true)}
-          className="min-h-11 rounded bg-accent px-4 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover"
+          className="min-h-11 rounded bg-accent px-4 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:focus-visible:ring-offset-surface-dark"
         >
           Add PTO
         </button>
@@ -176,7 +176,11 @@ export function CalendarPage(): JSX.Element {
           className="mb-4 rounded border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger"
         >
           {error}{' '}
-          <button type="button" onClick={() => void refetch()} className="ml-2 underline">
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="ml-2 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:focus-visible:ring-offset-surface-dark"
+          >
             Retry
           </button>
         </div>

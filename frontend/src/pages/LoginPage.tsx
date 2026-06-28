@@ -53,7 +53,7 @@ export function LoginPage(): JSX.Element {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 block w-full min-h-11 rounded border border-border bg-surface-2 px-3 py-2 text-sm text-ink focus:border-accent-500 focus:outline-none dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
+            className="mt-1 block w-full min-h-11 rounded border border-border bg-surface-2 px-3 py-2 text-sm text-ink focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
           />
         </label>
 
@@ -65,7 +65,7 @@ export function LoginPage(): JSX.Element {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 block w-full min-h-11 rounded border border-border bg-surface-2 px-3 py-2 text-sm text-ink focus:border-accent-500 focus:outline-none dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
+            className="mt-1 block w-full min-h-11 rounded border border-border bg-surface-2 px-3 py-2 text-sm text-ink focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
           />
         </label>
 
@@ -78,7 +78,7 @@ export function LoginPage(): JSX.Element {
         <button
           type="submit"
           disabled={submitting}
-          className="min-h-11 w-full rounded bg-accent px-4 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover disabled:opacity-60"
+          className="min-h-11 w-full rounded bg-accent px-4 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60 dark:focus-visible:ring-offset-surface-dark"
         >
           {submitting ? 'Signing in…' : 'Sign in'}
         </button>

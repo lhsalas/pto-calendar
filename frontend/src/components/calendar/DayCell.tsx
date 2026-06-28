@@ -38,7 +38,7 @@ export function DayCell({ day, ptoList, onChipClick, onDayClick }: DayCellProps)
   }`;
 
   const interactiveClass = clickable
-    ? 'cursor-pointer transition-colors duration-150 hover:bg-accent-50 focus:outline-none dark:hover:bg-accent-900/30'
+    ? 'cursor-pointer transition-colors duration-150 hover:bg-accent-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:hover:bg-accent-900/30 dark:focus-visible:ring-offset-surface-dark'
     : '';
 
   const cellProps = clickable

@@ -217,6 +217,13 @@ describe('PTOFormModal', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('has a visible focus ring on the primary Save button', () => {
+    renderModal();
+    const save = screen.getByRole('button', { name: /save pto/i });
+    expect(save.className).toMatch(/focus-visible:ring-2/);
+    expect(save.className).toMatch(/focus-visible:ring-accent-500/);
+  });
+
   it('shows the "Edit PTO" title and prefills fields when initialPto is provided', async () => {
     renderModal({ initialPto: STUB_PTO });
     expect(screen.getByText(/edit pto/i)).toBeInTheDocument();

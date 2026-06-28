@@ -23,7 +23,7 @@ export default defineConfig({
     {
       name: 'mobile-chrome',
       use: { ...devices['Pixel 5'] },
-      testMatch: ['e2e/mobile-smoke.spec.ts', 'e2e/smoke.spec.ts'],
+      testMatch: ['e2e/mobile-smoke.spec.ts', 'e2e/focus-rings.spec.ts', 'e2e/smoke.spec.ts'],
     },
   ],
   webServer: {

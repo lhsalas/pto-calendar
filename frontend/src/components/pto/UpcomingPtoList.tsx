@@ -118,7 +118,7 @@ export function UpcomingPtoList({
                   <button
                     type="button"
                     onClick={() => onRowClick(pto)}
-                    className="flex flex-1 items-center gap-3 text-left hover:underline"
+                    className="flex flex-1 items-center gap-3 text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:focus-visible:ring-offset-surface-dark"
                   >
                     <span className="font-medium text-ink dark:text-ink-dark">{pto.user.name}</span>
                     <span className="font-mono text-xs tabular-nums text-ink-muted dark:text-ink-muted-dark">
@@ -133,14 +133,14 @@ export function UpcomingPtoList({
                       <button
                         type="button"
                         onClick={() => onEdit(pto)}
-                        className="min-h-9 rounded border border-border px-3 py-1.5 text-sm text-ink transition-colors duration-150 hover:bg-surface-2 dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2"
+                        className="min-h-9 rounded border border-border px-3 py-1.5 text-sm text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
                       >
                         Edit
                       </button>
                       <button
                         type="button"
                         onClick={() => void onDelete(pto)}
-                        className="min-h-9 rounded border border-danger/30 px-3 py-1.5 text-sm text-danger transition-colors duration-150 hover:bg-danger/10"
+                        className="min-h-9 rounded border border-danger/30 px-3 py-1.5 text-sm text-danger transition-colors duration-150 hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:focus-visible:ring-offset-surface-dark"
                       >
                         Delete
                       </button>
