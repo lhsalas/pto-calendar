@@ -7,6 +7,7 @@ export interface CalendarDay {
   iso: string;
   dayOfMonth: number;
   isInMonth: boolean;
+  isToday: boolean;
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -39,6 +40,7 @@ export function grid(yearMonth: YearMonth): { weeks: CalendarDay[][]; start: str
   const offsetToMonday = (firstDow - WEEK_STARTS_ON_MONDAY + 7) % 7;
   const gridStart = new Date(firstOfMonth);
   gridStart.setUTCDate(1 - offsetToMonday);
+  const today = todayIso();
 
   const weeks: CalendarDay[][] = [];
   for (let row = 0; row < GRID_ROWS; row += 1) {
@@ -51,6 +53,7 @@ export function grid(yearMonth: YearMonth): { weeks: CalendarDay[][]; start: str
         iso,
         dayOfMonth: day.getUTCDate(),
         isInMonth: day.getUTCMonth() === month && day.getUTCFullYear() === year,
+        isToday: iso === today,
       });
     }
     weeks.push(week);
