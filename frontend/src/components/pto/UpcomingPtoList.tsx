@@ -134,14 +134,14 @@ export function UpcomingPtoList({
                       <button
                         type="button"
                         onClick={() => onEdit(pto)}
-                        className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                        className="min-h-9 rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
                       >
                         Edit
                       </button>
                       <button
                         type="button"
                         onClick={() => void onDelete(pto)}
-                        className="rounded border border-red-300 px-2 py-0.5 text-xs text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/50"
+                        className="min-h-9 rounded border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/50"
                       >
                         Delete
                       </button>

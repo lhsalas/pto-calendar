@@ -122,10 +122,10 @@ export function CalendarPage(): JSX.Element {
   }
 
   return (
-    <div className="min-h-full bg-slate-50 p-6 dark:bg-slate-950">
-      <header className="mb-6 flex items-center justify-between">
+    <div className="min-h-full bg-slate-50 p-4 sm:p-6 lg:p-8 dark:bg-slate-950">
+      <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Calendar</h1>
-        <div className="flex items-center gap-4 text-sm text-slate-700 dark:text-slate-300">
+        <div className="flex flex-wrap items-center gap-3 text-sm text-slate-700 dark:text-slate-300">
           <ThemeToggle />
           <span>
             {user.name} <span className="text-slate-400 dark:text-slate-500">({user.role})</span>
@@ -133,21 +133,21 @@ export function CalendarPage(): JSX.Element {
           <button
             type="button"
             onClick={() => void logout()}
-            className="rounded border border-slate-300 px-3 py-1 hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800"
+            className="min-h-11 rounded border border-slate-300 px-3 py-2 hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800"
           >
             Sign out
           </button>
         </div>
       </header>
 
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-slate-600 dark:text-slate-400" data-testid="range-label">
           Showing {fetchStart} to {fetchEnd}
         </p>
         <button
           type="button"
           onClick={() => setCreateOpen(true)}
-          className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          className="min-h-11 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
         >
           Add PTO
         </button>

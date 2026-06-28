@@ -20,6 +20,11 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
+    {
+      name: 'mobile-chrome',
+      use: { ...devices['Pixel 5'] },
+      testMatch: ['e2e/mobile-smoke.spec.ts', 'e2e/smoke.spec.ts'],
+    },
   ],
   webServer: {
     command: 'npx vite',

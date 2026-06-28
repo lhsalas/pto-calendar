@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { DayPart, PTO, PTOWithUser, User } from '../../types/api';
 import { canModifyPto } from '../../lib/permissions';
+import { X } from '../icons';
+import { useModalA11y } from '../../hooks/useModalA11y';
 
 export interface PTOViewModalProps {
   pto: PTOWithUser;
@@ -74,14 +76,24 @@ export function PTOViewModal({
     }
   }
 
+  const cardRef = useModalA11y(true, onClose);
+
+  function handleBackdropClick(event: React.MouseEvent<HTMLDivElement>): void {
+    if (event.target === event.currentTarget) onClose();
+  }
+
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="pto-view-title"
+      onClick={handleBackdropClick}
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
     >
-      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+      <div
+        ref={cardRef}
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg border border-slate-200 bg-white p-6 shadow-lg dark:border-slate-700 dark:bg-slate-900"
+      >
         <div className="mb-4 flex items-center justify-between">
           <h2
             id="pto-view-title"
@@ -93,9 +105,9 @@ export function PTOViewModal({
             type="button"
             onClick={onClose}
             aria-label="Dismiss"
-            className="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-300"
           >
-            ×
+            <X aria-hidden className="h-4 w-4" />
           </button>
         </div>
 
@@ -154,7 +166,7 @@ export function PTOViewModal({
                 type="button"
                 onClick={() => setConfirming(false)}
                 disabled={busy}
-                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                className="min-h-11 rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
               >
                 Cancel
               </button>
@@ -162,7 +174,7 @@ export function PTOViewModal({
                 type="button"
                 onClick={() => void handleDelete()}
                 disabled={busy}
-                className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+                className="min-h-11 rounded bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
               >
                 {busy ? 'Deleting…' : 'Yes, delete'}
               </button>
@@ -173,7 +185,7 @@ export function PTOViewModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+              className="min-h-11 rounded border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               Close
             </button>
@@ -182,14 +194,14 @@ export function PTOViewModal({
                 <button
                   type="button"
                   onClick={() => onEdit(pto)}
-                  className="rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  className="min-h-11 rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
                 >
                   Edit
                 </button>
                 <button
                   type="button"
                   onClick={() => setConfirming(true)}
-                  className="rounded bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
+                  className="min-h-11 rounded bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
                 >
                   Delete
                 </button>
