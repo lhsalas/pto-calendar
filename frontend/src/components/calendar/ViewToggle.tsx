@@ -1,14 +1,28 @@
+import type { ReactNode } from 'react';
+import { CalendarIcon, ListIcon } from '../icons';
+
 export type ViewMode = 'grid' | 'list';
 
 interface Option {
   value: ViewMode;
   label: string;
   aria: string;
+  icon: ReactNode;
 }
 
 const OPTIONS: Option[] = [
-  { value: 'grid', label: 'Calendar', aria: 'Show month grid' },
-  { value: 'list', label: 'List', aria: 'Show upcoming PTO list' },
+  {
+    value: 'grid',
+    label: 'Calendar',
+    aria: 'Show month grid',
+    icon: <CalendarIcon aria-hidden className="h-4 w-4" />,
+  },
+  {
+    value: 'list',
+    label: 'List',
+    aria: 'Show upcoming PTO list',
+    icon: <ListIcon aria-hidden className="h-4 w-4" />,
+  },
 ];
 
 export interface ViewToggleProps {
@@ -35,13 +49,14 @@ export function ViewToggle({ view, onViewChange }: ViewToggleProps): JSX.Element
             aria-label={opt.aria}
             data-testid={`view-option-${opt.value}`}
             onClick={() => onViewChange(opt.value)}
-            className={`px-2.5 py-1 transition-colors ${
+            className={`inline-flex min-h-11 items-center gap-2 px-3 py-2 text-sm transition-colors ${
               selected
                 ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
                 : 'bg-white text-slate-700 hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
             }`}
           >
-            {opt.label}
+            {opt.icon}
+            <span>{opt.label}</span>
           </button>
         );
       })}
