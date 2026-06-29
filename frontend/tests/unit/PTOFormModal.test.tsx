@@ -265,6 +265,24 @@ describe('PTOFormModal', () => {
     expect(endInput.value).toBe('2026-05-15');
   });
 
+  it('renders the date inputs with color-scheme:dark in dark mode so the picker indicator is visible', () => {
+    document.documentElement.classList.add('dark');
+    renderModal();
+    const startInput = screen.getByTestId('pto-form-start-date');
+    const endInput = screen.getByTestId('pto-form-end-date');
+    expect(startInput.className).toMatch(/\[color-scheme:dark\]/);
+    expect(endInput.className).toMatch(/\[color-scheme:dark\]/);
+    document.documentElement.classList.remove('dark');
+  });
+
+  it('renders the date inputs with color-scheme:light in light mode so the picker indicator stays dark', () => {
+    renderModal();
+    const startInput = screen.getByTestId('pto-form-start-date');
+    const endInput = screen.getByTestId('pto-form-end-date');
+    expect(startInput.className).toMatch(/\[color-scheme:light\]/);
+    expect(endInput.className).toMatch(/\[color-scheme:light\]/);
+  });
+
   it('resets to the latest defaultStartDate when reopened after the parent updates it', () => {
     const { rerender } = render(
       <PTOFormModal
