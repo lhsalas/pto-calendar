@@ -42,7 +42,7 @@ test.describe('Issue #65 — editorial toast component', () => {
   test('success toast appears top-right with terracotta stripe, CheckCircle2 icon, and matches surface palette', async ({
     page,
   }) => {
-    const day = nthWeekdayInCurrentMonth(1);
+    const day = nthWeekdayInCurrentMonth(5);
     await login(page);
 
     await page.getByRole('button', { name: /^add pto$/i }).click();
@@ -75,7 +75,7 @@ test.describe('Issue #65 — editorial toast component', () => {
   });
 
   test('success toast auto-dismisses within ~5 seconds', async ({ page }) => {
-    const day = nthWeekdayInCurrentMonth(2);
+    const day = nthWeekdayInCurrentMonth(6);
     await login(page);
 
     await page.getByRole('button', { name: /^add pto$/i }).click();
