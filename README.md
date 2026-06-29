@@ -120,24 +120,38 @@ npm run dev
 
 Frontend runs on http://localhost:5173, backend on http://localhost:3000. Seeded credentials are printed by `npm run db:seed`.
 
+## Running with Docker (all-in-one)
+
+If you only have Docker installed (no Node.js / npm), you can run the entire stack with a single command:
+
+```bash
+npm run app:up          # or: docker compose -f docker-compose.app.yml up --build
+```
+
+This builds and starts four containers — Postgres, a one-shot migrate+seed job, the backend, and an nginx-served SPA. Only **host port 5173** is exposed; the database and backend live on an internal Docker network. The seeded users are created automatically; log in at <http://localhost:5173> with the credentials printed by `npm run db:seed` (also documented below). Stop with Ctrl+C and `npm run app:down` to remove the containers; add `-v` (`npm run app:reset`) to wipe the database volume too.
+
+The standalone host flow (`npm run dev`) and the dev-only Postgres (`npm run db:up`) are unchanged — the new compose file lives at `docker-compose.app.yml` and is purely additive.
+
 ## Scripts
 
-| Command                     | Effect                                            |
-| --------------------------- | ------------------------------------------------- |
-| `npm run dev`               | Run backend + frontend together (concurrently)    |
-| `npm run build`             | Production build for both workspaces              |
-| `npm run start`             | Start the compiled backend (`node dist/index.js`) |
-| `npm run lint`              | ESLint across both workspaces                     |
-| `npm run typecheck`         | `tsc --noEmit` in both workspaces                 |
-| `npm run format`            | Prettier write                                    |
-| `npm run format:check`      | Prettier check                                    |
-| `npm run test:coverage`     | Vitest with coverage for both workspaces          |
-| `npm run test:e2e`          | Playwright E2E suite                              |
-| `npm run db:up` / `db:down` | Docker compose for local Postgres                 |
-| `npm run db:migrate`        | `prisma migrate dev` (creates new migrations)     |
-| `npm run db:migrate:deploy` | `prisma migrate deploy` (production)              |
-| `npm run db:reset`          | Drop, recreate, migrate, and seed                 |
-| `npm run db:seed`           | Seed the dev users                                |
+| Command                       | Effect                                              |
+| ----------------------------- | --------------------------------------------------- |
+| `npm run dev`                 | Run backend + frontend together (concurrently)      |
+| `npm run build`               | Production build for both workspaces                |
+| `npm run start`               | Start the compiled backend (`node dist/index.js`)   |
+| `npm run lint`                | ESLint across both workspaces                       |
+| `npm run typecheck`           | `tsc --noEmit` in both workspaces                   |
+| `npm run format`              | Prettier write                                      |
+| `npm run format:check`        | Prettier check                                      |
+| `npm run test:coverage`       | Vitest with coverage for both workspaces            |
+| `npm run test:e2e`            | Playwright E2E suite                                |
+| `npm run db:up` / `db:down`   | Docker compose for local Postgres                   |
+| `npm run db:migrate`          | `prisma migrate dev` (creates new migrations)       |
+| `npm run db:migrate:deploy`   | `prisma migrate deploy` (production)                |
+| `npm run db:reset`            | Drop, recreate, migrate, and seed                   |
+| `npm run db:seed`             | Seed the dev users                                  |
+| `npm run app:up` / `app:down` | Docker compose all-in-one (db + backend + frontend) |
+| `npm run app:reset`           | All-in-one, plus drop the DB volume                 |
 
 The backend reads `backend/.env` automatically on `npm run dev` and `npm run test:integration`. No `source` step is required. Existing shell env vars (e.g. production overrides) always win over the file.
 

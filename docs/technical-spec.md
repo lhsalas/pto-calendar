@@ -599,7 +599,8 @@ See `testing-strategy.md` for the full automation plan: tooling matrix (Vitest, 
 - Internal-only deployment is sufficient for MVP
 - Back up database regularly
 - Configure environment variables for DB and auth secrets
-- Set `CORS_ORIGIN` to the frontend's production origin (e.g., `https://pto.internal.example.com`). Backends must run with `COOKIE_SECURE=true` and `COOKIE_DOMAIN` set to the backend's host so session cookies are set with the right scope across origins.
+- Set `CORS_ORIGIN` to the frontend's production origin (e.g., `https://pto.internal.example.com`). Backends must run with `COOKIE_SECURE=true` and `COOKIE_DOMAIN` set to the backend's host so session cookies are set with the right scope across origins
+- A self-contained local "clone-and-run" flow is provided via `docker-compose.app.yml`: Postgres + one-shot `migrate` service + backend + nginx-served frontend on a single Docker network with only host port `5173` exposed. nginx proxies `/auth`, `/pto`, `/health`, `/ready` to the backend and serves the SPA on `/`. See `README.md` §"Running with Docker (all-in-one)". This is a developer demo path and does not replace the TLS / real-secret deployment pattern described above
 
 ## 17. Confirmed Technical Decisions
 - Audit logs are stored internally only and are not exposed in the MVP UI

@@ -189,6 +189,7 @@ Confirmed MVP stack:
 - **`pino` + `pino-http`** for structured request logging with `X-Request-Id` correlation
 - **Custom lifecycle module** (`backend/src/lib/lifecycle.ts`) for graceful SIGTERM/SIGINT shutdown
 - **Shared Zod schemas** (`backend/src/services/{auth,pto}/schemas.ts`) for request validation, imported by routes and the validation layer
+- **Container images** (`backend/Dockerfile`, `frontend/Dockerfile`) for the all-in-one Docker Compose flow (`docker-compose.app.yml`) — Postgres + one-shot migrate+seed + backend (`node:20-alpine`) + nginx-served SPA (`nginx:alpine`); only host port 5173 is exposed. The host dev flow (`npm run dev`) and dev-only Postgres (`docker compose up -d db`) are unchanged and remain the canonical local setup; the compose file is purely additive
 
 Backend responsibilities:
 - Email/password authentication validation
