@@ -29,10 +29,14 @@ export default defineConfig({
         'src/types/**',
         'src/lib/prisma.ts',
         'src/lib/logger.ts',
+        'src/lib/lifecycle.ts',
         'src/middleware/**',
         'src/services/authorization/**',
         'src/services/users/**',
         'src/services/auth/**',
+        'src/services/pto/**',
+        'src/services/audit/**',
+        'src/services/calendar/**',
       ],
       thresholds: {
         'src/routes/auth.ts': {
@@ -42,6 +46,12 @@ export default defineConfig({
           functions: 80,
         },
         'src/routes/pto.ts': {
+          lines: 80,
+          statements: 80,
+          branches: 80,
+          functions: 80,
+        },
+        'src/routes/health.ts': {
           lines: 80,
           statements: 80,
           branches: 80,
