@@ -9,6 +9,7 @@ import {
   updatePto,
 } from '../services/pto/PTOService.js';
 import { listVisibleRange } from '../services/calendar/CalendarQuery.js';
+import { canViewNote } from '../services/authorization/AuthorizationService.js';
 import type { DayPart } from '../services/pto/validation.js';
 
 export const ptoRouter: Router = Router();
@@ -31,13 +32,6 @@ const RangeQuerySchema = z.object({
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const IdParamSchema = z.string().regex(UUID);
-
-function isOwnerOrLead(
-  actor: { id: string; role: 'member' | 'team_lead' },
-  ownerId: string,
-): boolean {
-  return actor.role === 'team_lead' || actor.id === ownerId;
-}
 
 ptoRouter.post('/', requireAuth, async (req, res, next) => {
   try {
@@ -70,7 +64,7 @@ ptoRouter.get('/:id', requireAuth, async (req, res, next) => {
       res.status(404).json({ error: { code: 'NOT_FOUND', message: 'PTO entry not found.' } });
       return;
     }
-    const includeNote = isOwnerOrLead(req.user!, pto.userId);
+    const includeNote = canViewNote(req.user!, pto);
     res.json({ ...pto, note: includeNote ? pto.note : null });
   } catch (err) {
     next(err);
