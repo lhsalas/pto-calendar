@@ -22,7 +22,6 @@ export default defineConfig({
         'src/lib/prisma.ts',
         'src/lib/logger.ts',
         'src/lib/rateLimit.ts',
-        'src/middleware/**',
         'src/routes/**',
       ],
       thresholds: {
@@ -39,6 +38,24 @@ export default defineConfig({
           functions: 100,
         },
         'src/services/users/**': {
+          lines: 100,
+          statements: 100,
+          branches: 100,
+          functions: 100,
+        },
+        'src/middleware/cookieSession.ts': {
+          lines: 80,
+          statements: 80,
+          branches: 80,
+          functions: 80,
+        },
+        'src/middleware/errorHandler.ts': {
+          lines: 80,
+          statements: 80,
+          branches: 80,
+          functions: 80,
+        },
+        'src/middleware/requireAuth.ts': {
           lines: 100,
           statements: 100,
           branches: 100,
