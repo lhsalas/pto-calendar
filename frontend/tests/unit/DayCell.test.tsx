@@ -203,7 +203,7 @@ describe('DayCell', () => {
   });
 
   describe('today highlight', () => {
-    it('renders the day number inside a blue circle when isToday is true', () => {
+    it('renders the day number inside a terracotta circle when isToday is true', () => {
       const today: CalendarDay = {
         iso: '2026-05-13',
         dayOfMonth: 13,
@@ -218,7 +218,7 @@ describe('DayCell', () => {
       expect(circle).toHaveClass('bg-accent', 'text-ink-inverse', 'rounded-full');
     });
 
-    it('does not render the blue circle when isToday is false', () => {
+    it('does not render the terracotta circle when isToday is false', () => {
       render(<DayCell day={IN_MONTH_DAY} ptoList={[]} onChipClick={() => {}} />);
       const cell = screen.getByTestId('day-cell-2026-05-13');
       expect(cell.querySelector('.bg-accent.rounded-full')).toBeNull();
