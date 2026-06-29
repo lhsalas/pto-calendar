@@ -80,10 +80,10 @@ export default defineConfig({
           functions: 100,
         },
         'src/services/pto/PTOService.ts': {
-          lines: 80,
-          statements: 80,
+          lines: 90,
+          statements: 90,
           branches: 80,
-          functions: 80,
+          functions: 90,
         },
         'src/services/calendar/CalendarQuery.ts': {
           lines: 80,
