@@ -21,6 +21,7 @@ export default defineConfig({
         'src/types/**',
         'src/lib/prisma.ts',
         'src/lib/logger.ts',
+        'src/lib/rateLimit.ts',
         'src/middleware/**',
         'src/routes/**',
       ],

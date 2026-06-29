@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -167,6 +167,65 @@ describe('Auth routes', () => {
 
       const meAfter = await agent.get('/auth/me');
       expect(meAfter.status).toBe(401);
+    });
+  });
+
+  describe('rate limiting', () => {
+    const originalAuthMax = process.env.AUTH_RATE_LIMIT_MAX;
+    const originalGlobalMax = process.env.RATE_LIMIT_MAX;
+
+    beforeEach(() => {
+      process.env.AUTH_RATE_LIMIT_MAX = '2';
+      process.env.RATE_LIMIT_MAX = '1000';
+      resetEnvForTests();
+    });
+
+    afterEach(() => {
+      if (originalAuthMax === undefined) delete process.env.AUTH_RATE_LIMIT_MAX;
+      else process.env.AUTH_RATE_LIMIT_MAX = originalAuthMax;
+      if (originalGlobalMax === undefined) delete process.env.RATE_LIMIT_MAX;
+      else process.env.RATE_LIMIT_MAX = originalGlobalMax;
+      resetEnvForTests();
+    });
+
+    it('returns 429 on the 3rd failed login within the window', async () => {
+      const localApp = createApp();
+      const attempts: Awaited<ReturnType<ReturnType<typeof request>['post']>>[] = [];
+      for (let i = 0; i < 3; i++) {
+        attempts.push(
+          await request(localApp)
+            .post('/auth/login')
+            .send({ email: SEED.lead.email, password: 'wrong-password' }),
+        );
+      }
+
+      expect(attempts[0]!.status).toBe(401);
+      expect(attempts[1]!.status).toBe(401);
+      expect(attempts[2]!.status).toBe(429);
+      expect(attempts[2]!.body).toEqual({
+        error: { code: 'RATE_LIMITED', message: 'Too many login attempts. Try again later.' },
+      });
+      expect(attempts[2]!.headers['retry-after']).toBeDefined();
+    });
+
+    it('does not count successful logins toward the limit', async () => {
+      const localApp = createApp();
+      const agent = request.agent(localApp);
+
+      await agent
+        .post('/auth/login')
+        .send({ email: SEED.lead.email, password: SEED.lead.password })
+        .expect(200);
+
+      await agent
+        .post('/auth/login')
+        .send({ email: SEED.lead.email, password: 'wrong-password' })
+        .expect(401);
+
+      const successAgain = await agent
+        .post('/auth/login')
+        .send({ email: SEED.lead.email, password: SEED.lead.password });
+      expect(successAgain.status).toBe(200);
     });
   });
 });

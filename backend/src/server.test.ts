@@ -35,4 +35,16 @@ describe('server', () => {
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('NOT_FOUND');
   });
+
+  it('applies helmet security headers to responses', async () => {
+    const app = createApp();
+    const res = await request(app).get('/health');
+    expect(res.status).toBe(200);
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.headers['x-frame-options']).toBe('SAMEORIGIN');
+    expect(res.headers['referrer-policy']).toBe('no-referrer');
+    expect(res.headers['strict-transport-security']).toMatch(/max-age=/);
+    expect(res.headers['cross-origin-opener-policy']).toBe('same-origin');
+    expect(res.headers['cross-origin-resource-policy']).toBe('same-origin');
+  });
 });

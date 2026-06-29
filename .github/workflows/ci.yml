@@ -150,6 +150,8 @@ jobs:
       SESSION_SECRET: ci-session-secret-that-is-long-enough-for-tests
       VITE_API_BASE_URL: http://localhost:3000
       BCRYPT_ROUNDS: '4'
+      RATE_LIMIT_MAX: '10000'
+      AUTH_RATE_LIMIT_MAX: '1000'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
