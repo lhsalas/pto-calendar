@@ -1,11 +1,13 @@
 import express from 'express';
 import type { Express } from 'express';
 import cors from 'cors';
-import { authRouter } from './routes/auth.js';
+import helmet from 'helmet';
+import { createAuthRouter } from './routes/auth.js';
 import { ptoRouter } from './routes/pto.js';
 import { cookieSessionMiddleware } from './middleware/cookieSession.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { logger } from './lib/logger.js';
+import { createGlobalLimiter, createLoginLimiter } from './lib/rateLimit.js';
 import { loadEnv } from './config/env.js';
 
 export function createApp(): Express {
@@ -13,6 +15,7 @@ export function createApp(): Express {
   const app = express();
 
   app.disable('x-powered-by');
+  app.use(helmet());
   app.use(
     cors({
       origin: env.CORS_ORIGIN,
@@ -21,12 +24,13 @@ export function createApp(): Express {
   );
   app.use(express.json({ limit: '100kb' }));
   app.use(cookieSessionMiddleware());
+  app.use(createGlobalLimiter());
 
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok' });
   });
 
-  app.use('/auth', authRouter);
+  app.use('/auth', createAuthRouter(createLoginLimiter()));
   app.use('/pto', ptoRouter);
 
   app.use((_req, res) => {

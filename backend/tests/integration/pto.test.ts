@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -277,6 +277,41 @@ describe('PTO routes', () => {
     it('returns 401 when not authenticated', async () => {
       const res = await request(app).get('/pto').query({ start: '2026-05-01', end: '2026-05-31' });
       expect(res.status).toBe(401);
+    });
+  });
+
+  describe('global rate limit', () => {
+    const originalGlobalMax = process.env.RATE_LIMIT_MAX;
+
+    beforeEach(() => {
+      process.env.RATE_LIMIT_MAX = '2';
+      resetEnvForTests();
+    });
+
+    afterEach(() => {
+      if (originalGlobalMax === undefined) {
+        delete process.env.RATE_LIMIT_MAX;
+      } else {
+        process.env.RATE_LIMIT_MAX = originalGlobalMax;
+      }
+      resetEnvForTests();
+    });
+
+    it('returns 429 after the configured number of requests in the window', async () => {
+      const localApp = createApp();
+      const agent = request.agent(localApp);
+      await login(agent, SEED.lead.email, SEED.lead.password);
+
+      const range = { start: '2026-05-01', end: '2026-05-31' };
+      const r1 = await agent.get('/pto').query(range);
+      const r2 = await agent.get('/pto').query(range);
+
+      expect(r1.status).toBe(200);
+      expect(r2.status).toBe(429);
+      expect(r2.body).toEqual({
+        error: { code: 'RATE_LIMITED', message: 'Too many requests. Try again later.' },
+      });
+      expect(r2.headers['retry-after']).toBeDefined();
     });
   });
 });
