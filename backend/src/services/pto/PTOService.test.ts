@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HttpError } from '../../middleware/errorHandler.js';
-import { deletePto, getPtoById, toPublicPto, updatePto } from './PTOService.js';
+import {
+  createPto,
+  deletePto,
+  findOverlapping,
+  getPtoById,
+  toPublicPto,
+  updatePto,
+} from './PTOService.js';
 
 vi.mock('../../lib/prisma.js', () => {
   const pTORequest = {
@@ -256,6 +263,166 @@ describe('PTOService extended', () => {
         createdAt: '2026-05-01T10:00:00.000Z',
         updatedAt: '2026-05-01T10:00:00.000Z',
       });
+    });
+  });
+
+  describe('findOverlapping', () => {
+    it('returns the overlapping row when one exists', async () => {
+      const overlapRow = {
+        id: 'existing',
+        userId: USER_ID,
+        startDate: new Date('2026-05-11T00:00:00.000Z'),
+        endDate: new Date('2026-05-11T00:00:00.000Z'),
+        dayPart: 'morning' as const,
+        note: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      mockFindFirst.mockResolvedValueOnce(overlapRow);
+      const result = await findOverlapping(USER_ID, '2026-05-11', '2026-05-12');
+      expect(result).toBe(overlapRow);
+    });
+
+    it('returns null when no overlap exists', async () => {
+      mockFindFirst.mockResolvedValueOnce(null);
+      const result = await findOverlapping(USER_ID, '2026-06-01', '2026-06-05');
+      expect(result).toBeNull();
+    });
+
+    it('builds a where-clause filtering by userId and overlapping dates', async () => {
+      mockFindFirst.mockResolvedValueOnce(null);
+      await findOverlapping(USER_ID, '2026-05-11', '2026-05-13');
+
+      const call = mockFindFirst.mock.calls[0]![0] as { where: Record<string, unknown> };
+      expect(call.where).toMatchObject({ userId: USER_ID });
+      const andClause = call.where['AND'] as Array<Record<string, unknown>>;
+      expect(andClause).toHaveLength(2);
+      expect(andClause[0]).toHaveProperty('startDate.lte');
+      expect(andClause[1]).toHaveProperty('endDate.gte');
+    });
+
+    it('includes id NOT in the where-clause when excludeId is provided', async () => {
+      mockFindFirst.mockResolvedValueOnce(null);
+      await findOverlapping(USER_ID, '2026-05-11', '2026-05-13', PTO_ID);
+
+      const call = mockFindFirst.mock.calls[0]![0] as { where: Record<string, unknown> };
+      expect(call.where['id']).toEqual({ not: PTO_ID });
+    });
+
+    it('omits id from the where-clause when excludeId is not provided', async () => {
+      mockFindFirst.mockResolvedValueOnce(null);
+      await findOverlapping(USER_ID, '2026-05-11', '2026-05-13');
+
+      const call = mockFindFirst.mock.calls[0]![0] as { where: Record<string, unknown> };
+      expect(call.where).not.toHaveProperty('id');
+    });
+  });
+
+  describe('createPto', () => {
+    it('returns the created row on the happy path', async () => {
+      mockFindFirst.mockResolvedValueOnce(null);
+      const createdRow = {
+        id: PTO_ID,
+        userId: USER_ID,
+        startDate: new Date('2026-05-11T00:00:00.000Z'),
+        endDate: new Date('2026-05-11T00:00:00.000Z'),
+        dayPart: 'morning' as const,
+        note: 'Doctor',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      mockCreate.mockResolvedValueOnce(createdRow);
+
+      const result = await createPto(USER_ID, {
+        startDate: '2026-05-11',
+        endDate: '2026-05-11',
+        dayPart: 'morning',
+        note: 'Doctor',
+      });
+
+      expect(result).toBe(createdRow);
+      expect(mockCreate).toHaveBeenCalledTimes(1);
+      const createArg = mockCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+      expect(createArg.data).toMatchObject({
+        userId: USER_ID,
+        dayPart: 'morning',
+        note: 'Doctor',
+      });
+    });
+
+    it('throws 409 CONFLICT when an overlap is detected', async () => {
+      mockFindFirst.mockResolvedValueOnce({ id: 'another-id' });
+
+      await expect(
+        createPto(USER_ID, {
+          startDate: '2026-05-11',
+          endDate: '2026-05-11',
+          dayPart: 'morning',
+        }),
+      ).rejects.toMatchObject({ status: 409, code: 'CONFLICT' });
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    it('propagates HttpError from validatePtoPayload and skips both findFirst and create', async () => {
+      await expect(
+        createPto(USER_ID, {
+          startDate: '2026-05-09',
+          endDate: '2026-05-09',
+          dayPart: 'morning',
+        }),
+      ).rejects.toBeInstanceOf(HttpError);
+      expect(mockFindFirst).not.toHaveBeenCalled();
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    it('normalizes the payload via validatePtoPayload before calling create', async () => {
+      mockFindFirst.mockResolvedValueOnce(null);
+      const createdRow = {
+        id: PTO_ID,
+        userId: USER_ID,
+        startDate: new Date('2026-05-11T00:00:00.000Z'),
+        endDate: new Date('2026-05-15T00:00:00.000Z'),
+        dayPart: 'all_day' as const,
+        note: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      mockCreate.mockResolvedValueOnce(createdRow);
+
+      await createPto(USER_ID, {
+        startDate: '2026-05-11',
+        endDate: '2026-05-15',
+        dayPart: 'morning',
+      });
+
+      expect(mockCreate).toHaveBeenCalledTimes(1);
+      const createArg = mockCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+      expect(createArg.data['dayPart']).toBe('all_day');
+    });
+
+    it('stores null note when note is empty string', async () => {
+      mockFindFirst.mockResolvedValueOnce(null);
+      const createdRow = {
+        id: PTO_ID,
+        userId: USER_ID,
+        startDate: new Date('2026-05-11T00:00:00.000Z'),
+        endDate: new Date('2026-05-11T00:00:00.000Z'),
+        dayPart: 'morning' as const,
+        note: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      mockCreate.mockResolvedValueOnce(createdRow);
+
+      await createPto(USER_ID, {
+        startDate: '2026-05-11',
+        endDate: '2026-05-11',
+        dayPart: 'morning',
+        note: '',
+      });
+
+      const createArg = mockCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
+      expect(createArg.data['note']).toBeNull();
     });
   });
 });
