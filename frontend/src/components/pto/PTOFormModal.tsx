@@ -134,7 +134,8 @@ export function PTOFormModal({
                   onChange={(e: ChangeEvent<HTMLInputElement>) =>
                     handleStartDateChange(e.target.value)
                   }
-                  className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm tabular-nums text-ink focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
+                  data-testid="pto-form-start-date"
+                  className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm tabular-nums text-ink [color-scheme:light] focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark dark:[color-scheme:dark]"
                 />
               </label>
               <label className="block text-sm font-medium text-ink dark:text-ink-dark">
@@ -145,7 +146,8 @@ export function PTOFormModal({
                   value={endDate}
                   min={startDate}
                   onChange={(e: ChangeEvent<HTMLInputElement>) => setEndDate(e.target.value)}
-                  className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm tabular-nums text-ink focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
+                  data-testid="pto-form-end-date"
+                  className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm tabular-nums text-ink [color-scheme:light] focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark dark:[color-scheme:dark]"
                 />
               </label>
             </div>
