@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { HttpError } from '../../middleware/errorHandler.js';
-import {
-  isWeekend,
-  normalizeDayPart,
-  validatePtoPayload,
-  type CreatePtoInput,
-  type DayPart,
-} from './validation.js';
+import { isWeekend, normalizeDayPart, validatePtoPayload, type DayPart } from './validation.js';
+import type { CreatePtoInput } from './schemas.js';
 
 const VALID_SINGLE = { startDate: '2026-05-11', endDate: '2026-05-11' } as const; // Monday
 const VALID_MULTI = { startDate: '2026-05-11', endDate: '2026-05-15' } as const; // Mon-Fri

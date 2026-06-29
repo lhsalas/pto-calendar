@@ -50,6 +50,18 @@ export default defineConfig({
           branches: 100,
           functions: 100,
         },
+        'src/services/pto/schemas.ts': {
+          lines: 100,
+          statements: 100,
+          branches: 100,
+          functions: 100,
+        },
+        'src/services/auth/schemas.ts': {
+          lines: 100,
+          statements: 100,
+          branches: 100,
+          functions: 100,
+        },
         'src/services/pto/PTOService.ts': {
           lines: 80,
           statements: 80,

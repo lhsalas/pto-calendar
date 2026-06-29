@@ -1,15 +1,10 @@
 import { Router, type RequestHandler } from 'express';
-import { z } from 'zod';
 import { getCurrentUser, login } from '../services/auth/AuthService.js';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { LoginSchema } from '../services/auth/schemas.js';
 
 export function createAuthRouter(loginLimiter: RequestHandler): Router {
   const router: Router = Router();
-
-  const LoginSchema = z.object({
-    email: z.string().email(),
-    password: z.string().min(1),
-  });
 
   router.post('/login', loginLimiter, async (req, res, next) => {
     try {

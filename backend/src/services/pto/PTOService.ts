@@ -3,7 +3,8 @@ import { prisma } from '../../lib/prisma.js';
 import { HttpError } from '../../middleware/errorHandler.js';
 import { canModifyPTO, type ActorLike } from '../authorization/AuthorizationService.js';
 import { record as recordAudit } from '../audit/AuditLogService.js';
-import { validatePtoPayload, type CreatePtoInput, type ValidatedPto } from './validation.js';
+import { validatePtoPayload, type ValidatedPto } from './validation.js';
+import type { CreatePtoInput } from './schemas.js';
 
 export type PublicPto = Pick<
   PTORequest,

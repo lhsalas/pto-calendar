@@ -1,4 +1,5 @@
 import { HttpError } from '../../middleware/errorHandler.js';
+import { ISO_DATE, type CreatePtoInput } from './schemas.js';
 
 export type DayPart = 'morning' | 'evening' | 'all_day';
 
@@ -6,21 +7,12 @@ const DAY_PARTS: readonly DayPart[] = ['morning', 'evening', 'all_day'];
 
 export const NOTE_MAX_LENGTH = 500;
 
-export interface CreatePtoInput {
-  startDate: string;
-  endDate: string;
-  dayPart?: DayPart;
-  note?: string;
-}
-
 export interface ValidatedPto {
   startDate: string;
   endDate: string;
   dayPart: DayPart;
   note: string | null;
 }
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function isWeekend(dateStr: string): boolean {
   const parts = dateStr.split('-').map(Number);
