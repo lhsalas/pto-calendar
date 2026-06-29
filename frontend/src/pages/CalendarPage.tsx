@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../context/useAuth';
 import { usePtoList } from '../hooks/usePtoList';
+import { useToast } from '../hooks/useToast';
 import { PTOFormModal } from '../components/pto/PTOFormModal';
 import { PTOViewModal } from '../components/pto/PTOViewModal';
 import { UpcomingPtoList } from '../components/pto/UpcomingPtoList';
@@ -44,12 +45,28 @@ export function CalendarPage(): JSX.Element {
   const [createOpen, setCreateOpen] = useState<boolean>(false);
   const [viewing, setViewing] = useState<PTOWithUser | null>(null);
   const [editing, setEditing] = useState<PTOWithUser | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const { push: pushToast } = useToast();
+  const lastErrorRef = useRef<string | null>(null);
 
-  function showToast(message: string): void {
-    setToast(message);
-    window.setTimeout(() => setToast(null), 3000);
-  }
+  useEffect(() => {
+    if (!error) {
+      lastErrorRef.current = null;
+      return;
+    }
+    if (error === lastErrorRef.current) return;
+    lastErrorRef.current = error;
+    pushToast({
+      tone: 'error',
+      title: 'Could not load PTO.',
+      description: 'Tap retry to try again.',
+      action: {
+        label: 'Retry',
+        onClick: () => {
+          void refetch();
+        },
+      },
+    });
+  }, [error, pushToast, refetch]);
 
   const handlePrev = useCallback((): void => {
     if (view === 'grid') {
@@ -100,7 +117,7 @@ export function CalendarPage(): JSX.Element {
   async function handleCreate(payload: CreatePTORequest): Promise<void> {
     await create(payload);
     setCreateOpen(false);
-    showToast('PTO saved.');
+    pushToast({ tone: 'success', title: 'PTO saved.' });
   }
 
   async function handleUpdate(payload: CreatePTORequest): Promise<void> {
@@ -108,13 +125,13 @@ export function CalendarPage(): JSX.Element {
     await update(editing.id, payload);
     setEditing(null);
     setViewing(null);
-    showToast('PTO updated.');
+    pushToast({ tone: 'success', title: 'PTO updated.' });
   }
 
   async function handleDelete(pto: PTOWithUser): Promise<void> {
     await remove(pto.id);
     setViewing(null);
-    showToast('PTO deleted.');
+    pushToast({ tone: 'success', title: 'PTO deleted.' });
   }
 
   if (!user) {
@@ -160,31 +177,6 @@ export function CalendarPage(): JSX.Element {
           Add PTO
         </button>
       </div>
-
-      {toast ? (
-        <div
-          role="status"
-          className="mb-4 rounded border border-success/30 bg-success/10 px-3 py-2 text-sm text-success"
-        >
-          {toast}
-        </div>
-      ) : null}
-
-      {error ? (
-        <div
-          role="alert"
-          className="mb-4 rounded border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger"
-        >
-          {error}{' '}
-          <button
-            type="button"
-            onClick={() => void refetch()}
-            className="ml-2 underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:focus-visible:ring-offset-surface-dark"
-          >
-            Retry
-          </button>
-        </div>
-      ) : null}
 
       <CalendarHeader
         label={headerLabel}
