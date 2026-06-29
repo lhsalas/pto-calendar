@@ -41,24 +41,37 @@ This document defines the testing and automation strategy for the PTO calendar M
 
 Coverage is enforced on PRs via CI. Thresholds are set in `vitest.config.ts`.
 
-| Path | Lines | Branches | Notes |
-|---|---|---|---|
-| `src/services/AuthorizationService.*` | 100% | 100% | Highest-risk surface |
-| `src/services/pto/validation.*` | 100% | 100% | All PTO business rules |
-| `src/services/pto/PTOService.*` | 80% | 80% | CRUD + overlap checks |
-| `src/services/calendar/CalendarQuery.*` | 80% | 80% | Overlap SQL + expansion |
-| `src/services/audit/AuditLogService.*` | 80% | 80% | Required for audit correctness |
-| Other backend services | tracked | tracked | Reported, not blocking |
-| Frontend critical pages (`pages/CalendarPage.tsx`) | 80% | tracked | Reported and blocking; threshold is added to `frontend/vitest.config.ts` when Sprint 3 lands the page with its first component test, and removed until then so it doesn't fail Phase 0 scaffolding |
-| Frontend critical components (`components/pto/PTOFormModal.tsx`, `components/calendar/DayCell.tsx`) | 80% | tracked | Reported and blocking; thresholds are inert until those files exist (Sprint 2 / Sprint 3) |
-| Other frontend | tracked | tracked | Reported, not blocking |
+| Path | Lines | Branches | Functions | Statements | Notes |
+|---|---|---|---|---|---|
+| `src/services/authorization/**` | 100% | 100% | 100% | 100% | Highest-risk surface; centralized note-visibility + modification logic |
+| `src/services/pto/validation.ts` | 100% | 100% | 100% | 100% | All PTO business rules |
+| `src/services/pto/schemas.ts` | 100% | 100% | 100% | 100% | Shared Zod schemas (route ↔ validation) |
+| `src/services/auth/schemas.ts` | 100% | 100% | 100% | 100% | Shared Zod login schema |
+| `src/services/auth/**` | 100% | 100% | 100% | 100% | `AuthService` + login schema |
+| `src/services/users/**` | 100% | 100% | 100% | 100% | `UserService` |
+| `src/middleware/requireAuth.ts` | 100% | 100% | 100% | 100% | Auth gate |
+| `src/middleware/cookieSession.ts` | 80% | 80% | 80% | 80% | Cookie-session factory |
+| `src/middleware/errorHandler.ts` | 80% | 80% | 80% | 80% | Centralized error formatter |
+| `src/lib/lifecycle.ts` | 100% | 100% | 100% | 100% | Graceful shutdown (signal handlers + drain + force-exit) |
+| `src/services/pto/PTOService.ts` | 90% | 80% | 90% | 90% | CRUD + overlap checks; create/overlap paths have direct unit coverage |
+| `src/services/calendar/CalendarQuery.ts` | 80% | 80% | 80% | 80% | Overlap SQL + expansion |
+| `src/services/audit/AuditLogService.ts` | 80% | 80% | 80% | 80% | Required for audit correctness |
+| Other backend services | tracked | tracked | tracked | tracked | Reported, not blocking |
+| Frontend critical pages (`pages/CalendarPage.tsx`) | 80% | tracked | tracked | tracked | Reported and blocking |
+| Frontend critical components (`components/pto/PTOFormModal.tsx`, `components/calendar/DayCell.tsx`) | 80% | tracked | tracked | tracked | Reported and blocking |
+| Other frontend | tracked | tracked | tracked | tracked | Reported, not blocking |
+
+Note: `lib/rateLimit.ts` is excluded from coverage entirely (factory wrapper around `express-rate-limit`; no branching logic to test).
 
 A PR fails if coverage on a **blocking** path drops below its threshold.
 
 ## 6. Backend Test Conventions
 
 ### 6.1 Unit tests
-- Cover pure functions and helpers: `validatePtoPayload`, `canModifyPTO`, `expandPTOToDates`, `isWeekend`, `normalizeDayPart`.
+- Cover pure functions and helpers: `validatePtoPayload`, `canModifyPTO`, `canViewNote` (note-visibility helper that delegates to `canModifyPTO`), `createPto`, `findOverlapping`, `expandPTOToDates`, `isWeekend`, `normalizeDayPart`.
+- Cover every shared Zod schema in `services/pto/schemas.ts` and `services/auth/schemas.ts` with accept/reject path tests (schemas are the contract between routes and the validation layer).
+- Cover the middleware layer (`cookieSession`, `errorHandler`, `requireAuth`) at the unit level by mocking the relevant module boundaries — these are no longer covered only transitively through the server test.
+- Cover `lib/lifecycle.ts` (`installShutdown` + `shutdown`) directly: SIGTERM/SIGINT drain path, uncaughtException/unhandledRejection force-exit path, `SHUTDOWN_TIMEOUT_MS` grace timer via `vi.useFakeTimers`, `prisma.$disconnect` rejection path, and `server.closeAllConnections()` (Node 18+) guard.
 - No DB or network access.
 - Use table-driven tests for boundary cases.
 - Tests must not mutate `process.env` directly without restoring it. Cache env state via `beforeAll`/`afterAll` (capture the original values, set required vars in `beforeAll`, restore originals in `afterAll`), calling `resetEnvForTests()` (or the equivalent env-cache reset helper) after setting and after restoring so the `loadEnv()` cache doesn't leak between files. This prevents one test file's env from influencing another's cached configuration.
@@ -119,8 +132,22 @@ Keep the E2E suite small and focused on critical user journeys. Heavy logic cove
 8. **Permission enforcement**: member sees no edit/delete on another member's PTO; team lead does.
 9. **Month navigation**: prev/next buttons refetch and update grid.
 
+Additional shipped journeys (frontend enhancements #18–#26):
+- **Default start date** (`e2e/default-start-date.spec.ts`): create modal pre-fills with the 1st of the viewed future month (or today for current/past month) in grid view, and today in list view.
+- **Click-to-create** (`e2e/click-to-create-pto.spec.ts`): clicking a weekday cell in grid view opens the create modal pre-filled with that day; weekend cells are non-interactive; chip clicks bubble-stop to the view modal.
+- **Today highlight** (`e2e/critical-journeys.spec.ts`): today's cell is rendered with a filled accent circle on the day number, and the "Today" nav button is disabled on the current month.
+- **List view** (`e2e/list-view.spec.ts`): list mode shows today through today + 90 days, grouped by month; 90-day window shifts with Next/Previous/Today.
+- **Focus rings** (`e2e/focus-rings.spec.ts`): Tab focus produces a visible `box-shadow` ring on inputs, buttons, chips, calendar cells, and the modal close button.
+- **Mobile smoke** (`e2e/mobile-smoke.spec.ts`): 375px viewport — page padding shrinks, header wraps, calendar scrolls inside its own container with a sticky weekday header, modal opens and locks body scroll, ≥44px tap targets.
+- **Dark mode** (`e2e/dark-mode.spec.ts`): System theme resolves correctly and toggling persists across reloads with no FOUC.
+- **Favicon** (`e2e/smoke.spec.ts`): `<link rel="icon">` href ends with `/favicon.svg`.
+
 ### 8.3 Configuration
-- `playwright.config.ts` uses a `webServer` block that boots the backend and frontend in test mode.
+- `playwright.config.ts` uses a `webServer` block that boots only the Vite frontend (`npx vite` on :5173). The backend is started separately by CI (via `npm run dev -w backend` in the background, polling `/health`) and locally via `npm run dev` + the backend already running on :3000.
+- Two projects:
+  - `chromium` (Desktop Chrome) — runs every `e2e/*.spec.ts` and is the only project that drives state-changing flows (create/edit/delete PTO).
+  - `mobile-chrome` (Pixel 5) — `testMatch` is whitelisted to `e2e/mobile-smoke.spec.ts`, `e2e/focus-rings.spec.ts`, and `e2e/smoke.spec.ts` only. The whitelist keeps the mobile run from racing against desktop tests that share the dev `pto` database (since the mobile project reuses the same DB).
+- `workers=1` in CI to keep the shared Postgres deterministic; locally the default worker count is used.
 - Reuses seeded fixtures from `tests/fixtures/`.
 - Auth state stored in `storageState` to skip re-login between tests within a file.
 - Trace + video captured on failure, uploaded as CI artifacts.
@@ -216,6 +243,22 @@ Jobs (run in order, with `needs:` dependencies):
 | 4.1 Team-lead override | E2E #8; integration test for team-lead update/delete of others |
 | 4.2 Non-owner protection | E2E #8; integration test for 403 cases |
 | 4.3 Auth required | Integration test for 401 on all PTO endpoints |
+| #18 Default start date | E2E `default-start-date.spec.ts` |
+| #19 Click weekday to create | E2E `click-to-create-pto.spec.ts` |
+| #21 Today highlight | E2E `critical-journeys.spec.ts` (today cell) |
+| #22 Design tokens | Smoke-rendered component tests (no separate spec) |
+| #23 Mobile a11y + modal a11y | E2E `mobile-smoke.spec.ts` (Pixel 5); unit tests for `useModalA11y` (8) |
+| #24 Editorial palette + motion | E2E `dark-mode.spec.ts`; visual assertions via chip color sampling |
+| #25 Focus rings | E2E `focus-rings.spec.ts` (chromium + mobile-chrome) |
+| #26 Favicon | E2E `smoke.spec.ts` (link tag check) |
+| #28 B1 Helmet + rate limit | Unit test for helmet header set; integration test for 429 on login; env override used in CI |
+| #31 B2 Graceful shutdown | Unit test for `lib/lifecycle.ts` (10 tests): SIGTERM/SIGINT, uncaughtException, fake-timer timeout |
+| #33 B3 `/health` + `/ready` | Integration tests in `server.test.ts` (7): success, DB throw, DB hang, warning log, autologging skip |
+| #29 B4 Request logging | Integration tests in `server.test.ts` (7): `X-Request-Id` echo, inbound passthrough, structured line per request |
+| #30 B5 `canViewNote` | Integration test for note redaction when requester is neither owner nor team lead |
+| #32 B6 Shared Zod schemas | Unit tests for `services/pto/schemas.ts` (11) + `services/auth/schemas.ts` (4) |
+| #34 B7 Middleware unit coverage | Unit tests for `middleware/cookieSession.ts` (5) + `errorHandler.ts` (5) + `requireAuth.ts` (4) |
+| #27 B8 `PTOService` create + overlap unit coverage | Unit tests for `createPto` + `findOverlapping` in `PTOService.test.ts` (10 new tests) |
 
 ## 14. Flaky-Test Policy
 

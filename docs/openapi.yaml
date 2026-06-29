@@ -1,8 +1,22 @@
 openapi: 3.0.3
 info:
   title: PTO / Vacation Calendar API
-  version: 1.0.0
-  description: API for managing PTO requests in a shared team calendar.
+  version: 1.1.0
+  description: |
+    API for managing PTO requests in a shared team calendar.
+
+    ## Operational notes
+    - Every response carries an `X-Request-Id` header (UUID v4) that mirrors
+      an inbound `X-Request-Id` when the client supplied one. Use this to
+      correlate with server logs.
+    - Two unauthenticated probes are exposed for orchestrators: `GET /health`
+      (liveness, no DB) and `GET /ready` (readiness, DB probe).
+    - All routes are subject to a global IP rate limiter
+      (`RATE_LIMIT_MAX` per `RATE_LIMIT_WINDOW_MS`). `POST /auth/login` is
+      additionally subject to a stricter login limiter
+      (`AUTH_RATE_LIMIT_MAX` per window) that counts failed attempts only.
+      Both return `429 Too Many Requests` with `Retry-After` and the body
+      `{ "error": { "code": "RATE_LIMITED", "message": "..." } }`.
 servers:
   - url: https://api.example.com
     description: Production
@@ -14,11 +28,19 @@ paths:
   /health:
     get:
       security: []
-      summary: Health check
+      summary: Liveness probe
       tags: [Health]
+      description: |
+        Always returns 200 with `{ "status": "ok" }` while the process is
+        responsive. Does not check the database. Use this to decide whether
+        to restart the process.
       responses:
         '200':
-          description: Service is healthy
+          description: Service is alive
+          headers:
+            X-Request-Id:
+              description: Correlation ID echoed from the request, or a generated UUID v4.
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
@@ -28,11 +50,68 @@ paths:
                   status:
                     type: string
                     enum: [ok]
+  /ready:
+    get:
+      security: []
+      summary: Readiness probe
+      tags: [Health]
+      description: |
+        Runs `SELECT 1` against the database with a `READY_TIMEOUT_MS` race
+        timer. Returns 200 when the DB responds in time, 503 otherwise.
+        Use this to decide whether to route traffic.
+      responses:
+        '200':
+          description: Service is ready to serve traffic
+          headers:
+            X-Request-Id:
+              description: Correlation ID echoed from the request, or a generated UUID v4.
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, db, uptime]
+                properties:
+                  status:
+                    type: string
+                    enum: [ready]
+                  db:
+                    type: string
+                    enum: [ok]
+                  uptime:
+                    type: number
+                    description: Process uptime in seconds.
+        '503':
+          description: Service is not ready (DB unreachable or probe timed out)
+          headers:
+            X-Request-Id:
+              description: Correlation ID echoed from the request, or a generated UUID v4.
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                notReady:
+                  value:
+                    error:
+                      code: NOT_READY
+                      message: 'Database is not reachable'
+                      details:
+                        db: unreachable
+                        reason: timeout
+                        timeoutMs: 5000
   /auth/login:
     post:
       security: []
       summary: Log in a user
       tags: [Auth]
+      description: |
+        Subject to the strict login limiter (`AUTH_RATE_LIMIT_MAX` failed
+        attempts per `RATE_LIMIT_WINDOW_MS` per IP, with
+        `skipSuccessfulRequests: true`). Also subject to the global limiter.
+        On rate-limit hit, returns `429` with `Retry-After` and the body
+        `{ "error": { "code": "RATE_LIMITED", "message": "..." } }`.
       requestBody:
         required: true
         content:
@@ -42,6 +121,10 @@ paths:
       responses:
         '200':
           description: Logged in successfully
+          headers:
+            X-Request-Id:
+              description: Correlation ID echoed from the request, or a generated UUID v4.
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
@@ -51,10 +134,31 @@ paths:
                     $ref: '#/components/schemas/User'
         '401':
           description: Invalid credentials
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too many requests (login or global limiter tripped)
+          headers:
+            Retry-After:
+              description: Seconds until the limiter window resets.
+              schema: { type: integer, minimum: 0 }
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                rateLimited:
+                  value:
+                    error:
+                      code: RATE_LIMITED
+                      message: 'Too many login attempts. Please try again later.'
   /auth/logout:
     post:
       summary: Log out current user
@@ -62,6 +166,9 @@ paths:
       responses:
         '204':
           description: Logged out
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
   /auth/me:
     get:
       summary: Get current authenticated user
@@ -69,12 +176,18 @@ paths:
       responses:
         '200':
           description: Current user
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/User'
         '401':
           description: Not authenticated
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
@@ -83,6 +196,7 @@ paths:
     get:
       summary: List PTO entries overlapping a visible calendar date range
       tags: [PTO]
+      description: Subject to the global rate limiter; may return `429`.
       parameters:
         - in: query
           name: start
@@ -103,6 +217,9 @@ paths:
       responses:
         '200':
           description: PTO entries overlapping the requested visible calendar date range
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
@@ -111,19 +228,28 @@ paths:
                   $ref: '#/components/schemas/PTOWithUser'
         '400':
           description: Invalid date range parameter
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: Not authenticated
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
     post:
       summary: Create PTO entry for current user
       tags: [PTO]
+      description: Subject to the global rate limiter; may return `429`.
       requestBody:
         required: true
         content:
@@ -133,33 +259,49 @@ paths:
       responses:
         '201':
           description: PTO created
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/PTO'
         '400':
           description: Validation error
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: Not authenticated
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: PTO overlaps an existing PTO entry for the same user
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /pto/{id}:
     get:
       summary: Get PTO by id
       tags: [PTO]
+      description: Subject to the global rate limiter; may return `429`.
       parameters:
+        - $ref: '#/components/parameters/RequestIdHeader'
         - in: path
           name: id
           required: true
@@ -169,26 +311,39 @@ paths:
       responses:
         '200':
           description: PTO details
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/PTOWithUser'
         '401':
           description: Not authenticated
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: PTO not found
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
     put:
       summary: Update PTO by id
       tags: [PTO]
+      description: Subject to the global rate limiter; may return `429`.
       parameters:
+        - $ref: '#/components/parameters/RequestIdHeader'
         - in: path
           name: id
           required: true
@@ -204,38 +359,57 @@ paths:
       responses:
         '200':
           description: PTO updated
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/PTO'
         '400':
           description: Validation error
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: Not authenticated
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
           description: Not allowed to modify PTO
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: PTO not found
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
     delete:
       summary: Delete PTO by id
       tags: [PTO]
+      description: Subject to the global rate limiter; may return `429`.
       parameters:
+        - $ref: '#/components/parameters/RequestIdHeader'
         - in: path
           name: id
           required: true
@@ -245,30 +419,75 @@ paths:
       responses:
         '204':
           description: PTO deleted
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
         '401':
           description: Not authenticated
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
           description: Not allowed to delete PTO
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: PTO not found
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
 components:
+  responses:
+    RateLimited:
+      description: |
+        Too many requests. Returned by the global limiter on every route and
+        by the stricter login limiter on `POST /auth/login`.
+      headers:
+        Retry-After:
+          description: Seconds until the limiter window resets.
+          schema: { type: integer, minimum: 0 }
+        X-Request-Id:
+          description: Correlation ID echoed from the request, or a generated UUID v4.
+          schema: { type: string, format: uuid }
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            rateLimited:
+              value:
+                error:
+                  code: RATE_LIMITED
+                  message: 'Too many requests. Try again later.'
   securitySchemes:
     cookieAuth:
       type: apiKey
       in: cookie
       name: session
+  parameters:
+    RequestIdHeader:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: Optional client-supplied correlation ID; echoed in the response header and used in logs.
+      schema:
+        type: string
+        format: uuid
   schemas:
     Role:
       type: string
@@ -409,6 +628,16 @@ components:
           properties:
             code:
               type: string
+              description: |
+                Machine-readable error code. Common values:
+                  - `UNAUTHENTICATED` (401)
+                  - `FORBIDDEN` (403)
+                  - `VALIDATION_ERROR` (400)
+                  - `NOT_FOUND` (404)
+                  - `CONFLICT` (409)
+                  - `RATE_LIMITED` (429) — see `Retry-After` header
+                  - `NOT_READY` (503) — readiness probe only
+                  - `INTERNAL_ERROR` (500)
               example: FORBIDDEN
             message:
               type: string

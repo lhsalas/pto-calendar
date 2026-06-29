@@ -43,7 +43,7 @@ All project documentation lives under [`docs/`](docs/).
 ### 6. Testing & Automation Strategy
 
 - **File:** `docs/testing-strategy.md`
-- **Purpose:** Tooling matrix, test pyramid, coverage targets (≥80% on critical services), GitHub Actions CI pipeline, ephemeral Postgres for integration tests, Playwright E2E scope, pre-commit hooks, and merge policy.
+- **Purpose:** Tooling matrix, test pyramid, coverage targets (≥80% on critical services, ≥90% on `PTOService`, 100% on authorization, validation, schemas, middleware, and lifecycle), GitHub Actions CI pipeline, ephemeral Postgres for integration tests, Playwright E2E scope (desktop + mobile-chrome projects), pre-commit hooks, and merge policy.
 
 ## Functional Summary
 
@@ -64,14 +64,19 @@ The app is intended to support:
 - Edit/delete permissions restricted to owner or team lead
 - Light / Dark / System theme toggle (persisted in `localStorage`; default is System and follows `prefers-color-scheme`; no flash of incorrect theme on load)
 - Self-hosted typography (IBM Plex Sans body, Fraunces display, IBM Plex Mono for tabular dates) and a Tailwind v4 `@theme` block with the warm-editorial palette tokens defined (consumed in PR C); `lucide-react` icon set re-exported from `src/components/icons.tsx`; `motion` package installed for upcoming animations
-- Responsive layout (page padding shrinks on phones, top header wraps, grid scrolls horizontally only inside its own container with a sticky weekday header); all primary interactive elements meet ≥44px tap targets (44px on buttons, 36px on destructive confirm pair); modals (Add/Edit PTO + PTO details) support Escape-to-close, backdrop-click-to-close, body-scroll-lock, and focus trapping with auto-focus of the first focusable element
-- Editorial / paper-planner visual identity: warm cream surface (#FBF8F1), terracotta accent (#B5533A), Fraunces serif for the month label and login h1, IBM Plex Sans for body UI, IBM Plex Mono with tabular-nums for every date display; raw ISO date strings are formatted via `Intl.DateTimeFormat`; loading state is an `aria-busy` skeleton; modals fade-and-slide in via `motion`
+- Responsive layout (page padding shrinks on phones, top header wraps, grid scrolls horizontally only inside its own container with a sticky weekday header); all primary interactive elements meet ≥44px tap targets (44px on buttons, 36px on destructive confirm pair); modals (Add/Edit PTO + PTO details) support Escape-to-close, backdrop-click-to-close, body-scroll-lock, and focus trapping with auto-focus of the first focusable element. The shared a11y logic is encapsulated in `frontend/src/hooks/useModalA11y.ts` (generic over the modal root element) and unit-tested at 100% (`useModalA11y.test.tsx`, 8 tests).
+- Editorial / paper-planner visual identity: warm cream surface (#FBF8F1), terracotta accent (#B5533A), Fraunces serif for the month label and login h1, IBM Plex Sans for body UI, IBM Plex Mono with tabular-nums for every date display; raw ISO date strings are formatted via `Intl.DateTimeFormat`; loading state is an `aria-busy` skeleton; modals fade-and-slide in via `motion`. Design tokens (palette, typography, radii, motion) are defined once in a Tailwind v4 `@theme` block in `frontend/src/index.css` and consumed by every component.
 - Persistent keyboard focus indicators: every input and `<button>` carries a `focus:ring-2` (inputs) or `focus-visible:ring-2 ring-accent-500` (buttons) so the keyboard user always sees where focus lives; ring offset matches the page surface so it reads as part of the layout; chips, calendar cells, modal ×, list-row opens, and Retry link all participate
 - Tab favicon: a single 723-byte SVG under `frontend/public/favicon.svg` — calendar-grid mark (rounded-rect page outline, two binding stubs, header divider, 3×3 day grid, one filled "today" square) — single mid-tone terracotta (#B5533A) fill, tab-only, no PNG/apple-touch-icon/manifest/OG
 - Production hardening (backend): `helmet` mounted globally for the canonical security headers (CSP, HSTS, `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, COOP/CORP/OAC); stricter login limiter on `POST /auth/login` (5 failed attempts per 15 min per IP, `skipSuccessfulRequests: true`); broader global limiter across the rest of the API (100 requests per 15 min per IP); both respond with `{ error: { code: 'RATE_LIMITED', message } }` and `Retry-After`. All three limits are env-driven (`RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_MAX`); defaults are conservative for production but the dev `.env` and CI bump them so e2e suites don't trip the limiter.
 - Graceful shutdown (backend): SIGTERM/SIGINT triggers `shutdown(server, prisma)` which drains `server.close()`, then disconnects the global Prisma client, with a `SHUTDOWN_TIMEOUT_MS` (default 10s) fallback that force-exits 1 if drain hangs. `server.closeAllConnections()` (Node 18+) closes idle keep-alives. `uncaughtException` and `unhandledRejection` handlers log `logger.fatal` and call `process.exit(1)`. Lifecycle is extracted to `backend/src/lib/lifecycle.ts` and unit-tested at 100% coverage (`lifecycle.test.ts`).
 - Health vs readiness (backend): `GET /health` is a no-DB liveness probe that always returns 200 + `{ status: 'ok' }` so orchestrators can restart hung instances; `GET /ready` runs `prisma.$queryRaw\`SELECT 1\``with a`READY_TIMEOUT_MS`(default 5s) race-timer and returns 200 +`{ status: 'ready', db: 'ok', uptime }`on success or 503 +`{ error: { code: 'NOT_READY', ... } }`on failure or timeout. Both endpoints are unauthenticated and registered before`authRouter`/`ptoRouter`. Extracted to `backend/src/routes/health.ts`; covered by `server.test.ts` (7 tests including DB-throw and DB-hang cases).
 - Request logging (backend): `pino-http` mounted globally between `express.json` and `cookieSession` so request-scoped logs are available everywhere. Every response echoes an `X-Request-Id` header (UUID v4 generated by `crypto.randomUUID()`, or the inbound `X-Request-Id` if the client sent one). Every non-probe request produces exactly one structured log line with `req.{id,method,url}`, `res.statusCode`, and `responseTime` on response finish; `/health` and `/ready` are skipped via `autoLogging.ignore` so probes don't spam logs. `errorHandler` middleware logs `reqId` with any unhandled error so operators can correlate.
+- Authorization centralization (backend): the `GET /pto/:id` route uses the shared `canViewNote(actor, pto)` helper from `services/authorization/AuthorizationService` (which delegates to `canModifyPTO`) to decide whether to redact the `note` field. There is no longer a route-local `isOwnerOrLead` helper — all note-visibility logic flows through the authorization service.
+- Shared Zod validation (backend): Zod schemas are defined once per domain — `backend/src/services/pto/schemas.ts` (`CreatePtoSchema`, `RangeQuerySchema`, `IdParamSchema`, `DayPartSchema`, `ISO_DATE`) and `backend/src/services/auth/schemas.ts` (`LoginSchema`). Both route files import from these and infer their request types directly, so there are no `as` casts or duplicated validation rules. `validation.ts` re-uses `ISO_DATE` and `CreatePtoInput` from the same source. Both schema modules are unit-tested at 100% coverage (4 + 11 tests).
+- Middleware direct unit coverage (backend): `cookieSession.ts`, `errorHandler.ts`, and `requireAuth.ts` each have a dedicated unit suite (5 + 5 + 4 tests, 100% on `requireAuth`, 80% on `cookieSession`/`errorHandler`). The middleware layer is no longer covered only via the server-level integration tests.
+- `PTOService` direct unit coverage (backend): the create-path and overlap-check helpers (`createPto`, `findOverlapping`) now have direct unit tests (10 new tests in `PTOService.test.ts`), pushing the per-file threshold from 80% to **90% lines/statements/functions** (branches remain at 80% due to a small uncovered defensive branch in the update path).
+- Playwright project split (frontend): `frontend/playwright.config.ts` runs two projects — a desktop `chromium` (all `e2e/*.spec.ts`) and a `mobile-chrome` project (Pixel 5) whose `testMatch` is whitelisted to `e2e/mobile-smoke.spec.ts`, `e2e/focus-rings.spec.ts`, and `e2e/smoke.spec.ts` only. The whitelist keeps the mobile run from racing against desktop tests that share the dev `pto` database. `workers=1` in CI.
 
 ## Confirmed MVP Stack
 
@@ -93,12 +98,13 @@ The app is intended to support:
 
 ## Suggested Next Steps
 
-- Review and confirm open product decisions in `docs/plan.md`
-- Approve technical choices in `docs/technical-spec.md`
-- Validate schema and API contract
-- Prioritize backlog items for the first sprint
-- Scaffold `backend/` and `frontend/` workspaces
-- Start implementation with auth, PTO CRUD, and calendar view
+All 16 tracked enhancements (8 frontend issues #18–#26 and 8 backend hardening issues B1–B8) are shipped. Reasonable follow-ups for the next iteration:
+
+- **Security beyond helmet:** add a CSRF token strategy for cookie-session flows, swap seed credentials for SSO when an IdP is available, and add an `IP allowlist` opt-in for `/ready` + `/health` from internal probe networks.
+- **Observability:** wire `pino-http` logs into a structured log sink (Loki/CloudWatch) and expose a `/metrics` endpoint (Prometheus format) that surfaces request count, rate-limit hits, `/ready` latency, and DB query time.
+- **Calendar features:** public-holiday overlay (read-only), iCal export of the visible month, and team-lead "PTO conflict warnings" when more than N% of the team is out on the same day.
+- **API surface:** support `?userId=` filter on `GET /pto` for team-lead dashboards, and add a soft-delete + audit-restore path for accidentally-deleted PTO entries.
+- **Frontend polish:** Storybook for the component library, animated month transitions via `motion`, and a keyboard-shortcut overlay.
 
 ## Getting Started
 
@@ -163,24 +169,29 @@ This produces `backend/dist/` (Node service) and `frontend/dist/` (static SPA).
 
 Configure the environment from `backend/.env.example`:
 
-| Variable         | Production value                                      |
-| ---------------- | ----------------------------------------------------- |
-| `NODE_ENV`       | `production`                                          |
-| `PORT`           | `3000`                                                |
-| `DATABASE_URL`   | `postgresql://user:pass@host:5432/pto`                |
-| `SESSION_SECRET` | `openssl rand -base64 32` (≥32 chars)                 |
-| `COOKIE_SECURE`  | `true`                                                |
-| `COOKIE_DOMAIN`  | API host (e.g., `api.pto.internal.example.com`)       |
-| `CORS_ORIGIN`    | SPA origin (e.g., `https://pto.internal.example.com`) |
-| `BCRYPT_ROUNDS`  | `12` (production; tests use `4`)                      |
-| `LOG_LEVEL`      | `info`                                                |
+| Variable               | Production value                                       |
+| ---------------------- | ------------------------------------------------------ |
+| `NODE_ENV`             | `production`                                           |
+| `PORT`                 | `3000`                                                 |
+| `DATABASE_URL`         | `postgresql://user:pass@host:5432/pto`                 |
+| `SESSION_SECRET`       | `openssl rand -base64 32` (≥32 chars)                  |
+| `COOKIE_SECURE`        | `true`                                                 |
+| `COOKIE_DOMAIN`        | API host (e.g., `api.pto.internal.example.com`)        |
+| `CORS_ORIGIN`          | SPA origin (e.g., `https://pto.internal.example.com`)  |
+| `BCRYPT_ROUNDS`        | `12` (production; tests use `4`)                       |
+| `LOG_LEVEL`            | `info`                                                 |
+| `RATE_LIMIT_WINDOW_MS` | `900000` (15 min) — global limiter window              |
+| `RATE_LIMIT_MAX`       | `100` — global requests per window per IP              |
+| `AUTH_RATE_LIMIT_MAX`  | `5` — failed-login attempts per window per IP          |
+| `SHUTDOWN_TIMEOUT_MS`  | `10000` — graceful shutdown deadline before force-exit |
+| `READY_TIMEOUT_MS`     | `5000` — `/ready` DB probe race timer                  |
 
 ```bash
 cd backend
 node dist/index.js
 ```
 
-The server now exposes the API at `/health`, `/auth/*`, and `/pto/*`.
+The server now exposes the API at `/health`, `/ready`, `/auth/*`, and `/pto/*`.
 
 ### 4. Reverse proxy
 
@@ -191,6 +202,7 @@ pto.internal.example.com {
   route /auth/* localhost:3000
   route /pto/* localhost:3000
   route /health localhost:3000
+  route /ready localhost:3000
   reverse_proxy localhost:5173
 }
 ```
@@ -205,6 +217,7 @@ server {
   location /auth/ { proxy_pass http://localhost:3000; }
   location /pto/  { proxy_pass http://localhost:3000; }
   location /health { proxy_pass http://localhost:3000; }
+  location /ready  { proxy_pass http://localhost:3000; }
   location /      { root /srv/pto/frontend/dist; try_files $uri /index.html; }
 }
 ```
@@ -230,6 +243,7 @@ The `build` and `e2e` jobs in `.github/workflows/ci.yml` run against an ephemera
 - Audit logging is included in MVP and stored internally only
 - Calendar PTO data is fetched for the full visible grid range, including adjacent-month days
 - Dark mode is class-based via Tailwind v4 `@custom-variant dark`; a tiny pre-paint script in `index.html` applies the `.dark` class to `<html>` to avoid FOUC when the system prefers dark
+- Production hardening (helmet, rate limiting, request logging with `X-Request-Id`, graceful shutdown, liveness `/health` + readiness `/ready`, shared Zod schemas, centralized `canViewNote`) is in scope and shipped for MVP — see `docs/technical-spec.md` §13 and `docs/backlog.md` Epic 6 for the full list
 
 ## Deliverables in This Repo
 
@@ -242,11 +256,9 @@ The `build` and `e2e` jobs in `.github/workflows/ci.yml` run against an ephemera
 
 ## Optional Next Artifacts
 
-If needed, the following can be added next:
-
-- Wireframes or low-fidelity mockups
-- Architecture diagram
-- ER diagram
-- Postman collection
-- Seed data script
-- Initial project scaffold
+- Wireframes or low-fidelity mockups (not currently tracked; design is encoded directly in the Tailwind v4 `@theme` tokens and the component library)
+- Architecture diagram (the runtime topology is two artifacts behind a reverse proxy — see `## Production Deployment`)
+- ER diagram (the schema is in `docs/schema.sql` and `backend/prisma/schema.prisma`)
+- Postman / Insomnia collection (the OpenAPI contract at `docs/openapi.yaml` is the source of truth; importable into either tool)
+- Seed data script (already shipped as `npm run db:seed -w backend`; idempotent and re-runnable)
+- Storybook for the frontend component library
