@@ -63,6 +63,8 @@ Coverage is enforced on PRs via CI. Thresholds are set in `vitest.config.ts`.
 
 Note: `lib/rateLimit.ts` is excluded from coverage entirely (factory wrapper around `express-rate-limit`; no branching logic to test).
 
+> **Coverage partition (single source of truth).** Each backend source file is gated by exactly one coverage config. Service-layer files (`lib/lifecycle.ts`, `services/pto/**`, `services/audit/**`, `services/calendar/**`) are measured by the **unit** run (`backend/vitest.config.ts`) and excluded from the integration config because their branches (SIGTERM/SIGINT handlers, Zod validation, audit `listForEntity`, calendar SQL) are either unsafe to exercise via real HTTP requests or duplicated by the unit suite. HTTP routes + `lib/rateLimit.ts` are measured by the **integration** run (`backend/vitest.integration.config.ts`) and excluded from the unit config because they require a live Prisma + Express stack to exercise meaningfully. The PR-comment coverage summary aggregates only the integration partition; per-file thresholds inside each config are the real gate.
+
 A PR fails if coverage on a **blocking** path drops below its threshold.
 
 ## 6. Backend Test Conventions
