@@ -5,6 +5,8 @@ import { http, HttpResponse } from 'msw';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from '../../src/context/AuthContext';
 import { ThemeProvider } from '../../src/context/ThemeContext';
+import { ToastProvider } from '../../src/context/ToastProvider';
+import { ToastViewport } from '../../src/components/common/ToastViewport';
 import { CalendarPage } from '../../src/pages/CalendarPage';
 import { RequireAuth } from '../../src/routes/RequireAuth';
 import { LoginPage } from '../../src/pages/LoginPage';
@@ -30,17 +32,20 @@ function renderPage(): ReturnType<typeof render> {
     <MemoryRouter initialEntries={['/calendar']}>
       <ThemeProvider>
         <AuthProvider>
-          <Routes>
-            <Route
-              path="/calendar"
-              element={
-                <RequireAuth>
-                  <CalendarPage />
-                </RequireAuth>
-              }
-            />
-            <Route path="/login" element={<LoginPage />} />
-          </Routes>
+          <ToastProvider>
+            <Routes>
+              <Route
+                path="/calendar"
+                element={
+                  <RequireAuth>
+                    <CalendarPage />
+                  </RequireAuth>
+                }
+              />
+              <Route path="/login" element={<LoginPage />} />
+            </Routes>
+            <ToastViewport />
+          </ToastProvider>
         </AuthProvider>
       </ThemeProvider>
     </MemoryRouter>,
@@ -275,7 +280,7 @@ describe('CalendarPage', () => {
     });
   });
 
-  it('surfaces the error message and a retry button when the list fetch fails', async () => {
+  it('surfaces the error toast with a Retry action when the list fetch fails', async () => {
     server.use(
       http.get('/pto', () =>
         HttpResponse.json(
@@ -285,10 +290,9 @@ describe('CalendarPage', () => {
       ),
     );
     renderPage();
-    await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent(/server down/i);
-    });
-    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/could not load pto/i);
+    expect(screen.getByTestId('toast-action')).toBeInTheDocument();
   });
 
   it('logs the user out when Sign out is clicked', async () => {
@@ -359,9 +363,25 @@ describe('CalendarPage', () => {
     });
     await user.click(screen.getByRole('button', { name: /^delete$/i }));
     await user.click(screen.getByRole('button', { name: /yes, delete/i }));
-    await waitFor(() => {
-      expect(screen.getByText(/pto deleted/i)).toBeInTheDocument();
-    });
+    const toast = await screen.findByTestId('toast-success');
+    expect(toast).toHaveTextContent(/pto deleted/i);
+  });
+
+  it('pushes an error toast with Retry when the list fetch fails, and Retry triggers refetch', async () => {
+    let attempt = 0;
+    server.use(
+      http.get('/pto', () => {
+        attempt += 1;
+        return HttpResponse.json({ error: { code: 'INTERNAL', message: 'boom' } }, { status: 500 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    const toast = await screen.findByTestId('toast-error');
+    expect(toast).toHaveTextContent(/could not load pto/i);
+    const retry = await screen.findByTestId('toast-action');
+    await user.click(retry);
+    expect(attempt).toBeGreaterThanOrEqual(2);
   });
 
   it('defaults the create-modal start date to today when viewing the current month', async () => {

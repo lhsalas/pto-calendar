@@ -472,6 +472,13 @@ For each day in the visible calendar grid:
 - Edit/delete shown only when current user is owner or team lead
 - Confirm before delete
 
+### 11.6 Toast notifications
+- Page-level feedback (create / update / delete / list-fetch errors) is delivered through a single toast system, not inline banners.
+- Files: `frontend/src/context/ToastContext.ts` (types + context), `frontend/src/context/ToastProvider.tsx` (state + dedupe + cap + auto-dismiss timers), `frontend/src/hooks/useToast.ts` (imperative `push` / `dismiss`), `frontend/src/components/common/Toast.tsx` (single toast), `frontend/src/components/common/ToastViewport.tsx` (fixed top-right region, `AnimatePresence` stack, `Escape` key handler), mounted in `frontend/src/App.tsx` inside `<ToastProvider>`.
+- Tones: `success` (terracotta left-stripe, `CheckCircle2` icon) and `error` (danger left-stripe, `XCircle` icon). Success uses `role="status" aria-live="polite"`; error uses `role="alert" aria-live="assertive"` and moves focus to the close button so SR / keyboard users can act immediately.
+- Queue: newest on top, max 3 visible (oldest auto-evicted), same `tone+title` dedupes in place (refreshes timestamp and content).
+- Motion: `motion/react` slide+fade enter (~180ms) and exit (~120ms); hairline progress bar driven by `requestAnimationFrame`; pauses on `hover` or `focus-within` and resumes on leave; `prefers-reduced-motion` reduces to opacity-only.
+
 ## 12. Query and Rendering Logic
 
 ### 12.1 Visible date-range overlap query

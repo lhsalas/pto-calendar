@@ -162,6 +162,9 @@ Each displayed PTO item should show:
 - Otherwise:
   - view-only display
 
+### 7.5 Toast notifications (feedback)
+- All page-level feedback (create / update / delete / list-fetch errors) is delivered through a unified toast system (`success` + `error` tones), not inline banners. The viewport is a fixed top-right region with a 3-item cap, slide+fade enter/exit, and a hairline progress bar that pauses on hover or focus-within. Error toasts can carry a `Retry` action (e.g. for `usePtoList` load failures).
+
 ## 8. Recommended Technical Design
 
 ### 8.1 Frontend
