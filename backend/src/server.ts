@@ -2,6 +2,8 @@ import express from 'express';
 import type { Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import { randomUUID } from 'node:crypto';
+import { pinoHttp } from 'pino-http';
 import { createAuthRouter } from './routes/auth.js';
 import { ptoRouter } from './routes/pto.js';
 import { healthRouter } from './routes/health.js';
@@ -24,6 +26,20 @@ export function createApp(): Express {
     }),
   );
   app.use(express.json({ limit: '100kb' }));
+  app.use(
+    pinoHttp({
+      logger,
+      genReqId: (req, res) => {
+        const headerId = req.headers['x-request-id'];
+        const id = typeof headerId === 'string' && headerId.length > 0 ? headerId : randomUUID();
+        res.setHeader('X-Request-Id', id);
+        return id;
+      },
+      autoLogging: {
+        ignore: (req) => req.url === '/health' || req.url === '/ready',
+      },
+    }),
+  );
   app.use(cookieSessionMiddleware());
   app.use(createGlobalLimiter());
 
