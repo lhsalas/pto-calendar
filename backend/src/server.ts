@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { createAuthRouter } from './routes/auth.js';
 import { ptoRouter } from './routes/pto.js';
+import { healthRouter } from './routes/health.js';
 import { cookieSessionMiddleware } from './middleware/cookieSession.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { logger } from './lib/logger.js';
@@ -26,9 +27,7 @@ export function createApp(): Express {
   app.use(cookieSessionMiddleware());
   app.use(createGlobalLimiter());
 
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok' });
-  });
+  app.use(healthRouter);
 
   app.use('/auth', createAuthRouter(createLoginLimiter()));
   app.use('/pto', ptoRouter);

@@ -25,6 +25,8 @@ const EnvSchema = z.object({
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
 
   SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+
+  READY_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
