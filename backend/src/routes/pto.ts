@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import { z } from 'zod';
 import { requireAuth } from '../middleware/requireAuth.js';
 import {
   createPto,
@@ -10,36 +9,14 @@ import {
 } from '../services/pto/PTOService.js';
 import { listVisibleRange } from '../services/calendar/CalendarQuery.js';
 import { canViewNote } from '../services/authorization/AuthorizationService.js';
-import type { DayPart } from '../services/pto/validation.js';
+import { CreatePtoSchema, IdParamSchema, RangeQuerySchema } from '../services/pto/schemas.js';
 
 export const ptoRouter: Router = Router();
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-const DayPartSchema = z.enum(['morning', 'evening', 'all_day']);
-
-const CreatePtoSchema = z.object({
-  startDate: z.string().regex(ISO_DATE),
-  endDate: z.string().regex(ISO_DATE),
-  dayPart: DayPartSchema.optional(),
-  note: z.string().max(500).optional(),
-});
-
-const RangeQuerySchema = z.object({
-  start: z.string().regex(ISO_DATE),
-  end: z.string().regex(ISO_DATE),
-});
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const IdParamSchema = z.string().regex(UUID);
 
 ptoRouter.post('/', requireAuth, async (req, res, next) => {
   try {
     const input = CreatePtoSchema.parse(req.body);
-    const created = await createPto(
-      req.user!.id,
-      input as { startDate: string; endDate: string; dayPart?: DayPart; note?: string },
-    );
+    const created = await createPto(req.user!.id, input);
     res.status(201).json(toPublicPto(created));
   } catch (err) {
     next(err);
@@ -75,11 +52,7 @@ ptoRouter.put('/:id', requireAuth, async (req, res, next) => {
   try {
     const id = IdParamSchema.parse(req.params.id);
     const input = CreatePtoSchema.parse(req.body);
-    const updated = await updatePto(
-      req.user!,
-      id,
-      input as { startDate: string; endDate: string; dayPart?: DayPart; note?: string },
-    );
+    const updated = await updatePto(req.user!, id, input);
     res.json(toPublicPto(updated));
   } catch (err) {
     next(err);
