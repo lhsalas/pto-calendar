@@ -1,0 +1,71 @@
+name: pto-calendar-app
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: pto-calendar-app-db
+    environment:
+      POSTGRES_USER: pto
+      POSTGRES_PASSWORD: pto
+      POSTGRES_DB: pto
+    volumes:
+      - pto_pgdata_app:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U pto -d pto
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command:
+      - sh
+      - -c
+      - 'npx prisma migrate deploy --schema=backend/prisma/schema.prisma && npx tsx backend/prisma/seed.ts'
+    environment:
+      DATABASE_URL: postgresql://pto:pto@db:5432/pto?schema=public
+      BCRYPT_ROUNDS: '10'
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      DATABASE_URL: postgresql://pto:pto@db:5432/pto?schema=public
+      SESSION_SECRET: pto-calendar-dev-session-secret-at-least-32-chars-long
+      COOKIE_SECURE: 'false'
+      COOKIE_DOMAIN: ''
+      CORS_ORIGIN: http://localhost:5173
+      BCRYPT_ROUNDS: '10'
+      LOG_LEVEL: info
+      RATE_LIMIT_MAX: '100'
+      AUTH_RATE_LIMIT_MAX: '5'
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - '5173:80'
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  pto_pgdata_app:
