@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/useAuth';
 import { usePtoList } from '../hooks/usePtoList';
 import { useToast } from '../hooks/useToast';
@@ -23,6 +24,7 @@ import {
 } from '../lib/calendar';
 import type { ViewMode } from '../components/calendar/ViewToggle';
 import type { CreatePTORequest, PTOWithUser } from '../types/api';
+import { canManageUsers } from '../lib/permissions';
 
 const LIST_WINDOW_DAYS = 90;
 
@@ -148,6 +150,15 @@ export function CalendarPage(): JSX.Element {
         <h1 className="font-display text-xl font-semibold tracking-tight">Calendar</h1>
         <div className="flex flex-wrap items-center gap-3 text-sm text-ink-muted dark:text-ink-muted-dark">
           <ThemeToggle />
+          {canManageUsers(user) ? (
+            <Link
+              to="/admin/users"
+              data-testid="manage-users-link"
+              className="min-h-11 rounded border border-border px-3 py-2 text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
+            >
+              Manage users
+            </Link>
+          ) : null}
           <span>
             {user.name}{' '}
             <span className="text-ink-muted/70 dark:text-ink-muted-dark/70">({user.role})</span>

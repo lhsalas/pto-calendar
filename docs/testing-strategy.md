@@ -143,6 +143,7 @@ Additional shipped journeys (frontend enhancements #18–#26):
 - **Mobile smoke** (`e2e/mobile-smoke.spec.ts`): 375px viewport — page padding shrinks, header wraps, calendar scrolls inside its own container with a sticky weekday header, modal opens and locks body scroll, ≥44px tap targets.
 - **Dark mode** (`e2e/dark-mode.spec.ts`): System theme resolves correctly and toggling persists across reloads with no FOUC.
 - **Favicon** (`e2e/smoke.spec.ts`): `<link rel="icon">` href ends with `/favicon.svg`.
+- **Admin users surface** (`e2e/admin-users.spec.ts`, chromium-only): the team-lead link from the calendar reaches `/admin/users`, the user list renders, "Create user" surfaces the one-time setup link, and the "Back to calendar" link returns to the calendar. The spec cleans up created users in `test.afterAll` via `PrismaClient` using the `e2e-admin-users-` email prefix.
 
 ### 8.3 Configuration
 - `playwright.config.ts` uses a `webServer` block that boots only the Vite frontend (`npx vite` on :5173). The backend is started separately by CI (via `npm run dev -w backend` in the background, polling `/health`) and locally via `npm run dev` + the backend already running on :3000.
