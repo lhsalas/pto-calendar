@@ -79,6 +79,14 @@ The app is intended to support:
 - `PTOService` direct unit coverage (backend): the create-path and overlap-check helpers (`createPto`, `findOverlapping`) now have direct unit tests (10 new tests in `PTOService.test.ts`), pushing the per-file threshold from 80% to **90% lines/statements/functions** (branches remain at 80% due to a small uncovered defensive branch in the update path).
 - Playwright project split (frontend): `frontend/playwright.config.ts` runs two projects — a desktop `chromium` (all `e2e/*.spec.ts`) and a `mobile-chrome` project (Pixel 5) whose `testMatch` is whitelisted to `e2e/mobile-smoke.spec.ts`, `e2e/focus-rings.spec.ts`, and `e2e/smoke.spec.ts` only. The whitelist keeps the mobile run from racing against desktop tests that share the dev `pto` database. `workers=1` in CI.
 
+## Screenshots
+
+The two calendar surfaces, captured from the running dev stack at 1440×900 in light mode:
+
+| Grid view (month)                                                      | List view (next 90 days)                                               |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| ![Calendar grid view](./frontend/public/screenshots/calendar-grid.png) | ![Calendar list view](./frontend/public/screenshots/calendar-list.png) |
+
 ## Confirmed MVP Stack
 
 - **Frontend:** React + TypeScript using Vite
