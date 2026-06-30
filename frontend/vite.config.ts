@@ -8,6 +8,11 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
+    // Dev proxy allowlist (everything else falls through to Vite's SPA
+    // fallback, which returns HTML and breaks our `apiRequest<…>()` JSON
+    // parses as "Malformed response from server"). Add a new entry per
+    // backend router prefix: `/auth`, `/pto`, and `/users` are the
+    // team-lead admin surface (CreateUserResponse / ResetPasswordResponse).
     proxy: {
       '/api': {
         target: backendTarget,
@@ -19,6 +24,10 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/pto': {
+        target: backendTarget,
+        changeOrigin: true,
+      },
+      '/users': {
         target: backendTarget,
         changeOrigin: true,
       },

@@ -10,8 +10,10 @@ import { ToastViewport } from '../../src/components/common/ToastViewport';
 import { CalendarPage } from '../../src/pages/CalendarPage';
 import { RequireAuth } from '../../src/routes/RequireAuth';
 import { LoginPage } from '../../src/pages/LoginPage';
+import { AdminUsersPage } from '../../src/pages/admin/AdminUsersPage';
 import { server } from '../mocks/server';
-import { STUB_PTO } from '../mocks/handlers';
+import type { User } from '../../src/types/api';
+import { STUB_PTO, STUB_USER } from '../mocks/handlers';
 import { authenticated } from '../mocks/handlers';
 
 function firstWeekdayInCurrentMonth(): string {
@@ -42,6 +44,14 @@ function renderPage(): ReturnType<typeof render> {
                   </RequireAuth>
                 }
               />
+              <Route
+                path="/admin/users"
+                element={
+                  <RequireAuth>
+                    <AdminUsersPage />
+                  </RequireAuth>
+                }
+              />
               <Route path="/login" element={<LoginPage />} />
             </Routes>
             <ToastViewport />
@@ -55,6 +65,43 @@ function renderPage(): ReturnType<typeof render> {
 describe('CalendarPage', () => {
   beforeEach(() => {
     server.use(authenticated);
+  });
+
+  it('shows the Manage users link for team_lead', async () => {
+    server.use(http.get('/pto', () => HttpResponse.json([])));
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId('manage-users-link')).toBeInTheDocument();
+    });
+    const link = screen.getByTestId('manage-users-link');
+    expect(link).toHaveAttribute('href', '/admin/users');
+  });
+
+  it('hides the Manage users link for member', async () => {
+    const member: User = { ...STUB_USER, role: 'member' };
+    server.use(http.get('/auth/me', () => HttpResponse.json(member)));
+    server.use(http.get('/pto', () => HttpResponse.json([])));
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /calendar/i })).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('manage-users-link')).not.toBeInTheDocument();
+  });
+
+  it('navigates to /admin/users when Manage users is clicked', async () => {
+    server.use(
+      http.get('/pto', () => HttpResponse.json([])),
+      http.get('/users', () => HttpResponse.json([STUB_USER])),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId('manage-users-link')).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('manage-users-link'));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /manage users/i })).toBeInTheDocument();
+    });
   });
 
   it('shows the signed-in user and an empty grid when no PTOs are returned', async () => {
