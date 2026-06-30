@@ -16,7 +16,8 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     let cancelled = false;
     apiRequest<User>('/auth/me')
       .then((user) => {
-        if (!cancelled) setState({ user, status: 'authenticated', error: null });
+        if (cancelled) return;
+        setState({ user, status: 'authenticated', error: null });
       })
       .catch((err: unknown) => {
         if (cancelled) return;
