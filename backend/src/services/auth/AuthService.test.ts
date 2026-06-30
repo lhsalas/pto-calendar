@@ -89,6 +89,52 @@ describe('AuthService', () => {
 
       expect(unknownEmailError.message).toBe(badPasswordError.message);
     });
+
+    it('equalizes login timing for the unknown-email and bad-password branches', async () => {
+      const REPEAT = 4;
+      const timings: { unknown: number; bad: number } = { unknown: 0, bad: 0 };
+
+      for (let i = 0; i < REPEAT; i++) {
+        vi.mocked(UserService.getUserWithCredentialsByEmail).mockResolvedValueOnce(null);
+        const t1 = Date.now();
+        await login('ghost@example.com', PASSWORD).catch(() => undefined);
+        timings.unknown += Date.now() - t1;
+
+        vi.mocked(UserService.getUserWithCredentialsByEmail).mockResolvedValueOnce(FULL_USER);
+        const t2 = Date.now();
+        await login('alice@example.com', 'wrong-password').catch(() => undefined);
+        timings.bad += Date.now() - t2;
+      }
+
+      const unknownAvg = timings.unknown / REPEAT;
+      const badAvg = timings.bad / REPEAT;
+      const differential = Math.abs(unknownAvg - badAvg);
+      // 50ms is generous — bcrypt.compare dominates both paths so the
+      // residual differential is the DB lookup time only. The bound is
+      // a regression guard, not a tight SLA.
+      expect(differential).toBeLessThan(50);
+    });
+
+    it('equalizes login timing for the empty-password branch (no DB hit)', async () => {
+      const REPEAT = 4;
+      const timings: { empty: number; bad: number } = { empty: 0, bad: 0 };
+
+      for (let i = 0; i < REPEAT; i++) {
+        const t1 = Date.now();
+        await login('alice@example.com', '').catch(() => undefined);
+        timings.empty += Date.now() - t1;
+
+        vi.mocked(UserService.getUserWithCredentialsByEmail).mockResolvedValueOnce(FULL_USER);
+        const t2 = Date.now();
+        await login('alice@example.com', 'wrong-password').catch(() => undefined);
+        timings.bad += Date.now() - t2;
+      }
+
+      const emptyAvg = timings.empty / REPEAT;
+      const badAvg = timings.bad / REPEAT;
+      const differential = Math.abs(emptyAvg - badAvg);
+      expect(differential).toBeLessThan(50);
+    });
   });
 
   describe('getCurrentUser', () => {

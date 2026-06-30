@@ -166,7 +166,7 @@ Operational probes (unauthenticated, registered before `authRouter`/`ptoRouter`)
 ### 7.1 Authentication APIs
 
 #### POST /auth/login
-Authenticates a user. Subject to the strict login limiter (default 5 failed attempts per 15 min per IP, `skipSuccessfulRequests: true`) in addition to the global limiter; rate-limit overflow returns `429` + `Retry-After` + `{ "error": { "code": "RATE_LIMITED", "message": "..." } }`.
+Authenticates a user. Subject to the strict login limiter (default 5 failed attempts per 15 min per IP, `skipSuccessfulRequests: true`) in addition to the global limiter; rate-limit overflow returns `429` + `Retry-After` + `{ "error": { "code": "RATE_LIMITED", "message": "..." } }`. The error message is byte-identical for unknown email, bad password, and empty password; the unknown-email and empty-password paths run a dummy `bcrypt.compare` against a module-level precomputed hash (`backend/src/services/auth/AuthService.ts`) so response time does not leak which branch fired. The same dummy-compare covers the `passwordHash == null` case once the self-service setup flow (#62) lands.
 
 Request:
 ```json
