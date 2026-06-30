@@ -53,7 +53,7 @@ describe('Health routes', () => {
       expect(res.body.uptime).toBeGreaterThanOrEqual(0);
     });
 
-    it('returns 503 NOT_READY with a reason when the database query fails', async () => {
+    it('returns 503 NOT_READY without leaking the DB error message on failure', async () => {
       vi.spyOn(appPrisma, '$queryRaw').mockRejectedValueOnce(new Error('boom'));
       const res = await request(app).get('/ready');
       expect(res.status).toBe(503);
@@ -61,9 +61,12 @@ describe('Health routes', () => {
         error: {
           code: 'NOT_READY',
           message: 'Database unavailable',
-          details: { db: 'unreachable', reason: 'boom' },
+          details: { db: 'unreachable' },
         },
       });
+      const blob = JSON.stringify(res.body);
+      expect(blob).not.toContain('boom');
+      expect(blob).not.toContain('reason');
     });
   });
 });
