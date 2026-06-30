@@ -186,19 +186,18 @@ describe('PTOFormModal', () => {
     );
 
     const onSubmit = vi.fn(async () => {
-      const res = await fetch('/pto', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          startDate: '2026-05-11',
-          endDate: '2026-05-11',
-          dayPart: 'morning',
-        }),
-      });
-      if (!res.ok) {
-        const body = (await res.json()) as { error: { message: string } };
-        throw new Error(body.error.message);
+      const { apiRequest } = await import('../../src/api/client');
+      try {
+        await apiRequest('/pto', {
+          method: 'POST',
+          body: {
+            startDate: '2026-05-11',
+            endDate: '2026-05-11',
+            dayPart: 'morning',
+          },
+        });
+      } catch (err) {
+        throw err instanceof Error ? err : new Error(String(err));
       }
     });
 

@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import type { DayPart, PTO, PTOWithUser, User } from '../../types/api';
 import { canModifyPto } from '../../lib/permissions';
 import { formatRangeLabel } from '../../lib/calendar';
+import { apiRequest } from '../../api/client';
 import { X } from '../icons';
 import { useModalA11y } from '../../hooks/useModalA11y';
 
@@ -45,10 +46,9 @@ export function PTOViewModal({
 
   async function loadDetail(): Promise<void> {
     try {
-      const detail = await fetch(`/pto/${pto.id}`, { credentials: 'include' }).then(async (res) => {
-        if (!res.ok) throw new Error('Could not load PTO details.');
-        return (await res.json()) as PTO & { user: PTOWithUser['user'] };
-      });
+      const detail = await apiRequest<PTO & { user: PTOWithUser['user'] }>(
+        `/pto/${encodeURIComponent(pto.id)}`,
+      );
       setFullPto({
         id: detail.id,
         user: pto.user,
