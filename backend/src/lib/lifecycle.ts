@@ -31,12 +31,21 @@ export async function shutdown(
   timer.unref();
 
   let closeError: Error | undefined;
-  await new Promise<void>((resolve) => {
+  const closePromise = new Promise<void>((resolve) => {
     server.close((err) => {
       closeError = err ?? undefined;
       resolve();
     });
   });
+
+  // Close idle keep-alive peers immediately so the server.close() callback
+  // can resolve without waiting for the keep-alive timeout. In-flight
+  // requests still complete naturally; only idle sockets are terminated.
+  if (typeof server.closeIdleConnections === 'function') {
+    server.closeIdleConnections();
+  }
+
+  await closePromise;
 
   if (typeof server.closeAllConnections === 'function') {
     server.closeAllConnections();
