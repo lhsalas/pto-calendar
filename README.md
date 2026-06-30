@@ -172,7 +172,21 @@ Sign in as the team lead to see (and edit) every member's PTO; sign in as a memb
 
 ## Production Deployment
 
-The MVP deploys as two artifacts (the Node API and a static SPA) fronted by a reverse proxy. The proxy terminates TLS, serves the SPA, and forwards `/auth/*` and `/pto/*` to the Node service so the session cookie's origin matches the API host.
+The MVP deploys as three artifacts (the Node API, a static SPA, and nginx) fronted by Caddy as the TLS-terminating reverse proxy. The recommended production topology is **Caddy → nginx → backend**, with nginx serving the static SPA and proxying `/auth/*`, `/pto/*`, `/health`, `/ready` to the Node service. Caddy terminates TLS, sets the HSTS header, and forwards `X-Forwarded-{For,Proto,Host}` to nginx. nginx emits the rest of the defense-in-depth security headers (CSP, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options`). HSTS must NOT be duplicated on nginx (Caddy owns it).
+
+The full `docker-compose.prod.yml` ships with this layout and can be brought up with:
+
+```bash
+HOST=pto.example.com \
+ACME_EMAIL=ops@example.com \
+SESSION_SECRET="$(openssl rand -base64 32)" \
+CORS_ORIGIN=https://pto.example.com \
+  docker compose -f docker-compose.prod.yml up -d
+```
+
+`HOST`, `ACME_EMAIL`, `SESSION_SECRET`, and `CORS_ORIGIN` are required; the process refuses to start without them (Caddyfile uses `{$HOST:localhost}` with a localhost fallback for dev, and `docker-compose.prod.yml` uses `${HOST:?HOST is required}` for prod).
+
+A `npm run prod:config:check` script (see `infra/tests/prod-headers.test.mjs`) statically asserts that the configured headers, HSTS placement, `X-Forwarded-Proto`/`-Host` forwarding on every proxy_pass, the Caddy reverse-proxy + HSTS directives, and the inline-script CSP hash all line up — run it before any production deploy.
 
 ### 1. Provision a Postgres instance
 
@@ -228,17 +242,7 @@ The server now exposes the API at `/health`, `/ready`, `/auth/*`, and `/pto/*`.
 
 ### 4. Reverse proxy
 
-Use any reverse proxy that can route by path. Example for Caddy:
-
-```
-pto.internal.example.com {
-  route /auth/* localhost:3000
-  route /pto/* localhost:3000
-  route /health localhost:3000
-  route /ready localhost:3000
-  reverse_proxy localhost:5173
-}
-```
+The shipped Caddyfile + nginx.conf implement the Caddy → nginx → backend layout. To customize, edit the Caddyfile (`{$HOST}` and `{$ACME_EMAIL}` are required), then `docker compose -f docker-compose.prod.yml up -d --build caddy nginx`. Run `npm run prod:config:check` after any change to validate the static config invariants.
 
 Or Nginx:
 

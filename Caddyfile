@@ -1,0 +1,27 @@
+# Production Caddyfile for the Caddy -> nginx -> backend topology.
+#
+# Caddy terminates TLS (automatic Let's Encrypt via the global `email`),
+# sets HSTS, and forwards X-Forwarded-{For,Proto,Host} to nginx.
+# nginx serves the SPA and proxies /auth, /pto, /health, /ready to the
+# backend (see frontend/nginx.conf). The backend reads the real client IP
+# from X-Forwarded-For via app.set('trust proxy', 2).
+#
+# HOST and ACME_EMAIL must be supplied at deploy time. Example:
+#   HOST=pto.example.com ACME_EMAIL=ops@example.com \
+#     docker compose -f docker-compose.prod.yml up -d
+
+{
+    email {$ACME_EMAIL:ops@example.com}
+}
+
+{$HOST:localhost} {
+    encode zstd gzip
+    reverse_proxy nginx:80 {
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
+    }
+    # HSTS: 1 year, includeSubDomains, preload-eligible. nginx must NOT
+    # duplicate this header.
+    header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+}

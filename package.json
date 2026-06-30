@@ -23,6 +23,7 @@
     "app:up": "docker compose -f docker-compose.app.yml up --build",
     "app:down": "docker compose -f docker-compose.app.yml down",
     "app:reset": "docker compose -f docker-compose.app.yml down -v && docker compose -f docker-compose.app.yml up --build",
+    "prod:config:check": "node infra/tests/prod-headers.test.mjs",
     "db:migrate": "npm run db:migrate -w backend",
     "db:seed": "npm run db:seed -w backend",
     "prisma:generate": "npm run prisma:generate -w backend",
