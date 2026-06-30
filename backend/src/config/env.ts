@@ -68,6 +68,8 @@ const EnvSchema = z
     SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
 
     READY_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
+
+    AUTH_USER_CACHE_TTL_MS: z.coerce.number().int().positive().default(15_000),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV !== 'production') return;
