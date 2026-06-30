@@ -539,7 +539,7 @@ function expandPTOToDates(pto) {
 ### 13.3 Reliability
 - Failed requests return clear errors with machine-readable codes (`UNAUTHENTICATED`, `FORBIDDEN`, `VALIDATION_ERROR`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `NOT_READY`, `INTERNAL_ERROR`)
 - Database writes are transactional where needed (PTO create/update run inside a single Prisma operation; audit-log writes are best-effort and do not block the response)
-- Graceful shutdown on SIGTERM/SIGINT: `shutdown(server, prisma)` drains `server.close()`, then disconnects the global Prisma client, with a `SHUTDOWN_TIMEOUT_MS` (default 10s) fallback that force-exits 1 if drain hangs. `uncaughtException` and `unhandledRejection` handlers log `logger.fatal` and call `process.exit(1)`. Lifecycle is extracted to `backend/src/lib/lifecycle.ts` and unit-tested at 100%
+- Graceful shutdown on SIGTERM/SIGINT: `shutdown(server, prisma)` calls `server.closeIdleConnections()` first to drop idle keep-alive peers immediately (so `server.close()` does not block on the keep-alive timeout), awaits the `server.close()` callback, calls `server.closeAllConnections()` to terminate any stragglers, then disconnects the global Prisma client, with a `SHUTDOWN_TIMEOUT_MS` (default 10s) fallback that force-exits 1 if the drain hangs. `uncaughtException` and `unhandledRejection` handlers log `logger.fatal` and call `process.exit(1)`. Lifecycle is extracted to `backend/src/lib/lifecycle.ts` and unit-tested at 100%
 
 ### 13.4 Maintainability
 - Strong typing — Zod schemas infer request types directly so routes and the validation layer cannot drift apart

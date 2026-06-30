@@ -4,7 +4,7 @@ import type { PrismaClient } from '@prisma/client';
 import { installShutdown, shutdown } from './lifecycle.js';
 import { resetEnvForTests } from '../config/env.js';
 
-type MockServer = Pick<Server, 'close' | 'closeAllConnections'>;
+type MockServer = Pick<Server, 'close' | 'closeAllConnections' | 'closeIdleConnections'>;
 
 function createMockServer(
   opts: { closeBehavior?: (cb: (err?: Error) => void) => void } = {},
@@ -17,7 +17,8 @@ function createMockServer(
     cb();
   });
   const closeAllConnections = vi.fn();
-  return { close, closeAllConnections } as unknown as MockServer;
+  const closeIdleConnections = vi.fn();
+  return { close, closeAllConnections, closeIdleConnections } as unknown as MockServer;
 }
 
 function createMockPrisma(): PrismaClient {
@@ -110,6 +111,51 @@ describe('shutdown', () => {
 
     await shutdown('SIGTERM', server as unknown as Server, prisma);
 
+    expect(server.closeAllConnections).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls closeIdleConnections BEFORE awaiting the server.close callback', async () => {
+    const calls: string[] = [];
+    let pendingCb: ((err?: Error) => void) | undefined;
+    const server = {
+      close: vi.fn((cb: (err?: Error) => void) => {
+        calls.push('close-called');
+        pendingCb = cb;
+      }),
+      closeIdleConnections: vi.fn(() => {
+        calls.push('closeIdleConnections');
+      }),
+      closeAllConnections: vi.fn(() => {
+        calls.push('closeAllConnections');
+      }),
+    } as unknown as MockServer;
+    const prisma = createMockPrisma();
+
+    const promise = shutdown('SIGTERM', server as unknown as Server, prisma);
+    promise.catch(() => undefined);
+
+    // give the microtask queue a chance to run so closeIdleConnections is observed
+    await new Promise((r) => setImmediate(r));
+
+    expect(calls).toEqual(['close-called', 'closeIdleConnections']);
+    expect(server.closeAllConnections).not.toHaveBeenCalled();
+
+    pendingCb!();
+    await promise;
+
+    expect(server.closeAllConnections).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call closeIdleConnections if the server does not implement it', async () => {
+    const server = {
+      close: vi.fn((cb: (err?: Error) => void) => cb()),
+      closeAllConnections: vi.fn(),
+    } as unknown as MockServer;
+    const prisma = createMockPrisma();
+
+    await shutdown('SIGTERM', server as unknown as Server, prisma);
+
+    expect(server.close).toHaveBeenCalledTimes(1);
     expect(server.closeAllConnections).toHaveBeenCalledTimes(1);
   });
 
