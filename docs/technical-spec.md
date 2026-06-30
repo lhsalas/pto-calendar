@@ -526,7 +526,8 @@ function expandPTOToDates(pto) {
 - All APIs authenticated **except** the operational probes `GET /health` and `GET /ready`, which are intentionally unauthenticated for orchestrators
 - Authorization enforced server-side via the centralized `AuthorizationService` (`canModifyPTO`, `canViewNote`)
 - Input validation and sanitization via shared Zod schemas imported by both the routes and the validation layer (single source of truth — `services/{auth,pto}/schemas.ts`)
-- bcrypt password hashing (`BCRYPT_ROUNDS` env var; 12 in production, 4 in tests/CI)
+- bcrypt password hashing (`BCRYPT_ROUNDS` env var; minimum 10 enforced in production, 4 in tests/CI; recommended 12)
+- `SESSION_SECRET` is validated at boot: must be ≥32 characters, must not be a known placeholder string, and must have Shannon entropy ≥ 3.5 bits/char. Comma-separated values are supported for graceful key rotation (the new key signs, older keys verify). In `NODE_ENV=production` the process refuses to start if `SESSION_SECRET` is a placeholder, fails the entropy check, or if `COOKIE_SECURE` is not `true`
 - HTTP-only secure cookie sessions (`cookie-session`)
 - Cross-origin requests are allowed via the `cors` middleware using the `CORS_ORIGIN` env var allowlist. Credentials are permitted (`credentials: true`) so the HTTP-only cookie session works across origins in production. The allowlist is enforced server-side
 - `helmet` mounted globally for canonical security headers: Content-Security-Policy, Strict-Transport-Security, `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, Cross-Origin-Opener-Policy, Cross-Origin-Resource-Policy, Origin-Agent-Cluster

@@ -37,7 +37,7 @@ describe('cookieSessionMiddleware', () => {
   });
 
   it('uses SESSION_SECRET as a single keys entry', () => {
-    process.env.SESSION_SECRET = 'a'.repeat(32);
+    process.env.SESSION_SECRET = 'aB1!cD2@eF3#gH4$iJ5%kL6&mN7*oP8+';
     process.env.COOKIE_SECURE = 'false';
     process.env.COOKIE_DOMAIN = '';
     process.env.COOKIE_MAX_AGE_MS = '86400000';
@@ -45,11 +45,11 @@ describe('cookieSessionMiddleware', () => {
 
     cookieSessionMiddleware();
     const opts = capturedOptions[0]!;
-    expect(opts.keys).toEqual(['a'.repeat(32)]);
+    expect(opts.keys).toEqual(['aB1!cD2@eF3#gH4$iJ5%kL6&mN7*oP8+']);
   });
 
   it('sets the canonical cookie options (secure=true, custom maxAge)', () => {
-    process.env.SESSION_SECRET = 'b'.repeat(32);
+    process.env.SESSION_SECRET = 'bB1!cD2@eF3#gH4$iJ5%kL6&mN7*oP8+';
     process.env.COOKIE_SECURE = 'true';
     process.env.COOKIE_DOMAIN = '';
     process.env.COOKIE_MAX_AGE_MS = '3600000';
@@ -65,7 +65,7 @@ describe('cookieSessionMiddleware', () => {
   });
 
   it('omits domain when COOKIE_DOMAIN is empty', () => {
-    process.env.SESSION_SECRET = 'c'.repeat(32);
+    process.env.SESSION_SECRET = 'cC1!dD2@eF3#gH4$iJ5%kL6&mN7*oP8+';
     process.env.COOKIE_SECURE = 'false';
     process.env.COOKIE_DOMAIN = '';
     resetEnvForTests();
@@ -76,7 +76,7 @@ describe('cookieSessionMiddleware', () => {
   });
 
   it('includes domain when COOKIE_DOMAIN is set', () => {
-    process.env.SESSION_SECRET = 'd'.repeat(32);
+    process.env.SESSION_SECRET = 'dD1!eE2@fF3#gH4$iJ5%kL6&mN7*oP8+';
     process.env.COOKIE_SECURE = 'true';
     process.env.COOKIE_DOMAIN = 'example.com';
     resetEnvForTests();
@@ -87,7 +87,7 @@ describe('cookieSessionMiddleware', () => {
   });
 
   it('reflects COOKIE_SECURE=false in the options', () => {
-    process.env.SESSION_SECRET = 'e'.repeat(32);
+    process.env.SESSION_SECRET = 'eE1!fF2@gG3#hH4$iJ5%kL6&mN7*oP8+';
     process.env.COOKIE_SECURE = 'false';
     process.env.COOKIE_DOMAIN = '';
     resetEnvForTests();

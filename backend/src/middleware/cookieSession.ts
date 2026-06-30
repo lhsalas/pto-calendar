@@ -9,7 +9,7 @@ export interface SessionUser {
 
 export function cookieSessionMiddleware(): RequestHandler {
   const env = loadEnv();
-  const keys = [env.SESSION_SECRET];
+  const keys = env.SESSION_SECRET;
   return cookieSession({
     name: 'session',
     keys,
