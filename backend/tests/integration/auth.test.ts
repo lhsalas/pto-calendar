@@ -5,6 +5,7 @@ import { PrismaClient } from '@prisma/client';
 import { createApp } from '../../src/server.js';
 import { resetEnvForTests } from '../../src/config/env.js';
 import { prisma as appPrisma } from '../../src/lib/prisma.js';
+import { __resetAuthUserCacheForTests } from '../../src/middleware/requireAuth.js';
 import { runSeed } from '../../prisma/seed.js';
 
 const prisma = new PrismaClient();
@@ -34,6 +35,10 @@ describe('Auth routes', () => {
   afterAll(async () => {
     await prisma.$disconnect();
     await appPrisma.$disconnect();
+  });
+
+  beforeEach(() => {
+    __resetAuthUserCacheForTests();
   });
 
   describe('POST /auth/login', () => {
@@ -167,6 +172,67 @@ describe('Auth routes', () => {
 
       const meAfter = await agent.get('/auth/me');
       expect(meAfter.status).toBe(401);
+    });
+  });
+
+  describe('stale-session revalidation', () => {
+    it('returns 401 and clears the session when the user is deleted from the DB', async () => {
+      const agent = request.agent(app);
+      await agent
+        .post('/auth/login')
+        .send({ email: SEED.dev1.email, password: SEED.dev1.password })
+        .expect(200);
+
+      const meBefore = await agent.get('/auth/me');
+      expect(meBefore.status).toBe(200);
+      expect(meBefore.body.email).toBe(SEED.dev1.email);
+
+      await prisma.user.delete({ where: { email: SEED.dev1.email } });
+
+      const meAfter = await agent.get('/auth/me');
+      expect(meAfter.status).toBe(401);
+      expect(meAfter.body.error.code).toBe('UNAUTHENTICATED');
+
+      // restore for other tests in the file
+      await runSeed(prisma);
+    });
+
+    it('reflects a role demotion in req.user after the cache TTL elapses', async () => {
+      const originalTtl = process.env.AUTH_USER_CACHE_TTL_MS;
+      process.env.AUTH_USER_CACHE_TTL_MS = '50';
+      resetEnvForTests();
+      __resetAuthUserCacheForTests();
+
+      const agent = request.agent(app);
+      await agent
+        .post('/auth/login')
+        .send({ email: SEED.lead.email, password: SEED.lead.password })
+        .expect(200);
+
+      // demote the lead before the first authenticated request so the very
+      // first requireAuth revalidation observes the new role
+      await prisma.user.update({
+        where: { email: SEED.lead.email },
+        data: { role: 'member' },
+      });
+
+      // wait past the cache TTL so the next /auth/me re-validates
+      await new Promise((r) => setTimeout(r, 80));
+      __resetAuthUserCacheForTests();
+
+      const meAfter = await agent.get('/auth/me');
+      expect(meAfter.status).toBe(200);
+      expect(meAfter.body.role).toBe('member');
+
+      // restore
+      await prisma.user.update({
+        where: { email: SEED.lead.email },
+        data: { role: 'team_lead' },
+      });
+      if (originalTtl === undefined) delete process.env.AUTH_USER_CACHE_TTL_MS;
+      else process.env.AUTH_USER_CACHE_TTL_MS = originalTtl;
+      resetEnvForTests();
+      __resetAuthUserCacheForTests();
     });
   });
 
