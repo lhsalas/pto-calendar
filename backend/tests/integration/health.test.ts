@@ -11,7 +11,7 @@ const prisma = new PrismaClient();
 
 const REQUIRED_ENV = {
   NODE_ENV: 'test',
-  SESSION_SECRET: 'a'.repeat(32),
+  SESSION_SECRET: 'aB1!cD2@eF3#gH4$iJ5%kL6&mN7*oP8+',
   DATABASE_URL: process.env.DATABASE_URL ?? 'postgresql://test:test@localhost:5432/test',
 } as const;
 

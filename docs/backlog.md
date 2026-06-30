@@ -405,3 +405,4 @@ A backlog item is done when:
 - Documentation is updated where needed
 - Feature works in a deployed test environment
 - Production hardening (helmet, rate limiting, graceful shutdown, liveness + readiness probes, request logging with `X-Request-Id`, shared Zod schemas, centralized `canViewNote`, direct unit coverage for all middleware and the `PTOService` create path) is live and reflected in the docs
+- Boot-time env validation: `SESSION_SECRET` must be ≥32 chars, must not be a known placeholder, and must have Shannon entropy ≥ 3.5 bits/char; `NODE_ENV=production` additionally requires `COOKIE_SECURE=true` and `BCRYPT_ROUNDS>=10`. Comma-separated `SESSION_SECRET` values are supported for graceful key rotation. `backend/src/config/env.ts` and `backend/src/config/sessionSecret.ts` carry the rules; `backend/src/config/env.test.ts` covers every branch.
