@@ -26,6 +26,7 @@
     "prod:config:check": "node infra/tests/prod-headers.test.mjs",
     "db:migrate": "npm run db:migrate -w backend",
     "db:seed": "npm run db:seed -w backend",
+    "db:bootstrap": "npm run db:bootstrap -w backend",
     "prisma:generate": "npm run prisma:generate -w backend",
     "prepare": "husky || true"
   },

@@ -210,7 +210,16 @@ This produces `backend/dist/` (Node service) and `frontend/dist/` (static SPA).
 
 ### 3. Start the backend in production mode
 
-Configure the environment from `backend/.env.example`:
+For a brand-new production database, run `npm run db:bootstrap` once (instead of `npm run db:seed`) to create the single team lead with a one-time setup link. The script reads `LEAD_EMAIL` (required), optional `LEAD_NAME` / `LEAD_COLOR_CODE` / `APP_PUBLIC_BASE_URL` (or `--base-url` flag), and prints the setup link to stdout. Idempotent: if the lead already has a password, it's a no-op; if the lead exists with no password, it regenerates the token and prints the new link. See [`backend/prisma/bootstrap.ts`](backend/prisma/bootstrap.ts) for the exact contract.
+
+```bash
+LEAD_EMAIL=lead@yourcompany.com \
+APP_PUBLIC_BASE_URL=https://pto.yourcompany.com \
+  npm run db:bootstrap
+# prints: https://pto.yourcompany.com/setup-account?token=...
+```
+
+Configure the rest of the environment from `backend/.env.example`:
 
 | Variable                 | Production value                                                                                                                      |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
