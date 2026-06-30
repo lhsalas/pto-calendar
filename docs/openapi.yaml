@@ -192,6 +192,164 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /auth/setup-account:
+    post:
+      summary: Redeem a one-time setup token and set the initial password
+      tags: [Auth]
+      description: |
+        Public endpoint. The lead creates a user via `POST /users` and shares
+        the returned one-time `setupToken` link with the new member; the member
+        opens `/setup-account?token=...` and submits a password. The token is
+        sha256-hashed in the database, expires after `SETUP_TOKEN_TTL_MS`
+        (default 24h), and is single-use. Rate-limited by the same login
+        limiter as `POST /auth/login`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetupAccountRequest'
+      responses:
+        '200':
+          description: Password set, session established, user returned.
+          headers:
+            Set-Cookie:
+              description: session cookie issued via `cookie-session`.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '400':
+          description: Validation error (token or password missing/invalid).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '401':
+          description: Token is missing/expired/already-spent. Identical response to avoid enumeration.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429':
+          description: Setup-account rate limit tripped.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /users:
+    get:
+      summary: List users (team lead only)
+      tags: [Users]
+      description: Returns the public user list. Requires team lead.
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: User list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+        '401':
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: Authenticated but not a team lead.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    post:
+      summary: Create a user (team lead only)
+      tags: [Users]
+      description: |
+        Team-lead only. Creates a member with `passwordHash: null` and a fresh
+        one-time setup token; returns the user + plaintext `setupToken` +
+        `expiresAt`. The setup link is shown ONCE in the admin UI for the lead
+        to copy.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: User created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateUserResponse'
+        '400':
+          description: Validation error.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '401':
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: Authenticated but not a team lead.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '409':
+          description: Email already exists (lowercased uniqueness).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /users/{id}/reset-password:
+    post:
+      summary: Reset a user's password (team lead only)
+      tags: [Users]
+      description: |
+        Team-lead only. Clears the target user's `passwordHash`, issues a fresh
+        one-time setup token, and returns the new plaintext token. Blocks
+        self-reset and reset of the only team_lead in the system.
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Reset token issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResetPasswordResponse'
+        '400':
+          description: Attempted to reset the only team_lead (refused) or reset self.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '401':
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '403':
+          description: Authenticated but not a team lead.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404':
+          description: User not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /pto:
     get:
       summary: List PTO entries overlapping a visible calendar date range
@@ -491,7 +649,7 @@ components:
   schemas:
     Role:
       type: string
-      enum: [member, team_lead]
+      enum: [member, team_lead, admin]
     DayPart:
       type: string
       enum: [morning, evening, all_day]
@@ -582,6 +740,59 @@ components:
           format: email
         password:
           type: string
+    Password:
+      type: string
+      format: password
+      minLength: 8
+      maxLength: 72
+      description: |
+        Plaintext password. Must be 8-72 characters (bcrypt's hard cap). Never
+        echoed in any response body.
+    SetupAccountRequest:
+      type: object
+      required: [token, password]
+      properties:
+        token:
+          type: string
+          minLength: 32
+          maxLength: 128
+        password:
+          $ref: '#/components/schemas/Password'
+    CreateUserRequest:
+      type: object
+      required: [email, name]
+      properties:
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+    CreateUserResponse:
+      type: object
+      required: [user, setupToken, expiresAt]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        setupToken:
+          type: string
+          description: |
+            One-time plaintext setup token. Shown ONCE to the team lead and never
+            recoverable from the server. The new member redeems it at
+            /setup-account?token=...
+        expiresAt:
+          type: string
+          format: date-time
+    ResetPasswordResponse:
+      type: object
+      required: [setupToken, expiresAt]
+      properties:
+        setupToken:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
     CreatePTORequest:
       type: object
       description: Single-day PTO requires dayPart. Multi-day PTO is normalized to all_day. Weekend date selections and overlaps for the same user are rejected.

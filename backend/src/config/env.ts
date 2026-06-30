@@ -71,6 +71,8 @@ const EnvSchema = z
 
     AUTH_USER_CACHE_TTL_MS: z.coerce.number().int().positive().default(15_000),
 
+    SETUP_TOKEN_TTL_MS: z.coerce.number().int().positive().default(86_400_000),
+
     TRUST_PROXY_HOPS: z.coerce.number().int().min(0).optional(),
   })
   .superRefine((env, ctx) => {

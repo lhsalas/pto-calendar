@@ -4,7 +4,7 @@ import { loadEnv } from '../config/env.js';
 
 export interface SessionUser {
   id: string;
-  role: 'member' | 'team_lead';
+  role: 'member' | 'team_lead' | 'admin';
 }
 
 export function cookieSessionMiddleware(): RequestHandler {

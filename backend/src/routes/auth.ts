@@ -2,6 +2,7 @@ import { Router, type RequestHandler } from 'express';
 import { getCurrentUser, login } from '../services/auth/AuthService.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { LoginSchema } from '../services/auth/schemas.js';
+import { setupAccount, SetupAccountSchema } from '../services/users/UserService.js';
 
 export function createAuthRouter(loginLimiter: RequestHandler): Router {
   const router: Router = Router();
@@ -12,6 +13,25 @@ export function createAuthRouter(loginLimiter: RequestHandler): Router {
       const user = await login(email, password);
       req.session = { user: { id: user.id, role: user.role } } as typeof req.session;
       res.json({ user });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/setup-account', loginLimiter, async (req, res, next) => {
+    try {
+      const { token, password } = SetupAccountSchema.parse(req.body);
+      const { user } = await setupAccount({ token, password });
+      req.session = { user: { id: user.id, role: user.role } } as typeof req.session;
+      res.json({
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          colorCode: user.colorCode,
+        },
+      });
     } catch (err) {
       next(err);
     }

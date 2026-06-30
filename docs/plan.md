@@ -368,15 +368,16 @@ Recommendation:
 ## 15. Confirmed Product Decisions
 - PTO is informational only; no approval workflow for MVP
 - Overlapping PTO entries for the same user are not allowed
-- PTO cannot start or end on weekends, but weekends inside a multi-day PTO range count and are displayed
+- PTO cannot start or end on a weekend, but weekends inside a multi-day PTO range count and are displayed
 - Public holidays are out of scope for MVP
-- PTO notes are visible only to the owner and team leads
+- PTO notes are visible only to the owner or team leads
 - Multiple team leads are supported
 - Audit logging for update/delete actions is included in MVP and stored internally only
 - Calendar PTO data is fetched for the full visible grid range, including adjacent-month days
-- Production hardening (helmet + rate limiting + structured request logging + graceful shutdown + liveness/readiness probes) is in scope and shipped for MVP
+- Production hardening (helmet, rate limiting, structured request logging, graceful shutdown, liveness/readiness probes) is in scope and shipped for MVP
 - `/health` and `/ready` are intentionally unauthenticated orchestrator probes; every other API requires authentication
 - Note-visibility is enforced via a single `canViewNote` helper in `AuthorizationService`; no route-local re-implementations
+- The single team lead (default `lead@example.com`) creates new members; the new member sets their own password via a one-time setup link. No email delivery. A team lead can also reset a member's password (same one-time flow). An `admin` Role enum value exists for forward compatibility but no `admin` user is seeded; the active gate is `team_lead`
 - Request validation is defined once via shared Zod schemas (`services/{auth,pto}/schemas.ts`); routes and the validation layer import from the same source
 
 ## 16. Recommended MVP Definition

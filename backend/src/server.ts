@@ -6,6 +6,7 @@ import { pinoHttp, type Options as PinoHttpOptions } from 'pino-http';
 import { createAuthRouter } from './routes/auth.js';
 import { ptoRouter } from './routes/pto.js';
 import { healthRouter } from './routes/health.js';
+import { createUsersRouter } from './routes/users.js';
 import { cookieSessionMiddleware } from './middleware/cookieSession.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { logger } from './lib/logger.js';
@@ -48,6 +49,7 @@ export function createApp(): Express {
 
   app.use('/auth', createAuthRouter(createLoginLimiter()));
   app.use('/pto', ptoRouter);
+  app.use('/users', createUsersRouter());
 
   app.use((_req, res) => {
     res.status(404).json({

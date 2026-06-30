@@ -37,6 +37,69 @@ export const authenticated = http.get('/auth/me', () => HttpResponse.json(STUB_U
 
 export const loginOk = http.post('/auth/login', () => HttpResponse.json({ user: STUB_USER }));
 
+export const setupAccountOk = http.post('/auth/setup-account', () =>
+  HttpResponse.json({ user: STUB_USER }),
+);
+
+export const setupAccountBadToken = http.post('/auth/setup-account', () =>
+  HttpResponse.json(
+    {
+      error: {
+        code: 'UNAUTHENTICATED',
+        message: 'Setup link is invalid or has already been used.',
+      },
+    },
+    { status: 401 },
+  ),
+);
+
+export const usersList = http.get('/users', () => HttpResponse.json([STUB_USER, STUB_OTHER_USER]));
+
+export const usersListForbidden = http.get('/users', () =>
+  HttpResponse.json(
+    { error: { code: 'FORBIDDEN', message: 'You do not have permission to manage users.' } },
+    { status: 403 },
+  ),
+);
+
+export const createUserOk = http.post('/users', () =>
+  HttpResponse.json(
+    {
+      user: {
+        id: '33333333-3333-3333-3333-333333333333',
+        name: 'New Member',
+        email: 'newmember@example.com',
+        role: 'member',
+        colorCode: '#8B5CF6',
+      },
+      setupToken: 'a'.repeat(64),
+      expiresAt: '2026-07-01T00:00:00.000Z',
+    },
+    { status: 201 },
+  ),
+);
+
+export const createUserConflict = http.post('/users', () =>
+  HttpResponse.json(
+    { error: { code: 'CONFLICT', message: 'A user with that email already exists.' } },
+    { status: 409 },
+  ),
+);
+
+export const resetPasswordOk = http.post(/\/users\/[^/]+\/reset-password$/, () =>
+  HttpResponse.json({
+    setupToken: 'b'.repeat(64),
+    expiresAt: '2026-07-01T00:00:00.000Z',
+  }),
+);
+
+export const resetPasswordSelf = http.post(/\/users\/[^/]+\/reset-password$/, () =>
+  HttpResponse.json(
+    { error: { code: 'VALIDATION_ERROR', message: 'You cannot reset your own password here.' } },
+    { status: 400 },
+  ),
+);
+
 export const loginUnauthorized = http.post('/auth/login', () =>
   HttpResponse.json(
     { error: { code: 'UNAUTHENTICATED', message: 'Invalid email or password.' } },
