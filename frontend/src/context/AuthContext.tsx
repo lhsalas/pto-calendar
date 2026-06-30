@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { apiRequest, ApiError } from '../api/client';
-import type { LoginRequest, LoginResponse, User } from '../types/api';
+import type { LoginRequest, LoginResponse, SetupAccountRequest, User } from '../types/api';
 import { AuthContext } from './authContextValue';
 import type { AuthContextValue, AuthState } from './authContextValue';
 
@@ -52,9 +52,24 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     setState({ user: null, status: 'unauthenticated', error: null });
   }, []);
 
+  const setupAccount = useCallback(async (input: SetupAccountRequest) => {
+    setState((prev) => ({ ...prev, error: null }));
+    try {
+      const res = await apiRequest<LoginResponse>('/auth/setup-account', {
+        method: 'POST',
+        body: input,
+      });
+      setState({ user: res.user, status: 'authenticated', error: null });
+    } catch (err) {
+      const message = err instanceof ApiError ? err.body.message : 'Setup failed';
+      setState((prev) => ({ ...prev, error: message }));
+      throw err;
+    }
+  }, []);
+
   const value = useMemo<AuthContextValue>(
-    () => ({ ...state, login, logout }),
-    [state, login, logout],
+    () => ({ ...state, login, logout, setupAccount }),
+    [state, login, logout, setupAccount],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -1,4 +1,4 @@
-export type Role = 'member' | 'team_lead';
+export type Role = 'member' | 'team_lead' | 'admin';
 
 export type DayPart = 'morning' | 'evening' | 'all_day';
 
@@ -73,4 +73,25 @@ export interface ErrorBody {
 
 export interface ErrorResponse {
   error: ErrorBody;
+}
+
+export interface CreateUserRequest {
+  email: string;
+  name: string;
+}
+
+export interface CreateUserResponse {
+  user: User;
+  setupToken: string;
+  expiresAt: string;
+}
+
+export interface ResetPasswordResponse {
+  setupToken: string;
+  expiresAt: string;
+}
+
+export interface SetupAccountRequest {
+  token: string;
+  password: string;
 }

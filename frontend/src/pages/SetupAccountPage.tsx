@@ -1,29 +1,43 @@
-import { useEffect, useState } from 'react';
-import type { ChangeEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import type { ChangeEvent, FormEvent } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ApiError } from '../api/client';
 import { useAuth } from '../context/useAuth';
 import { ThemeToggle } from '../components/ThemeToggle';
 
-export function LoginPage(): JSX.Element {
-  const { login, error, status } = useAuth();
+export function SetupAccountPage(): JSX.Element {
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get('token') ?? '';
+  const { setupAccount } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    if (status === 'authenticated') {
-      navigate('/calendar', { replace: true });
-    }
-  }, [status, navigate]);
-
-  async function handleSubmit(event: ChangeEvent<HTMLFormElement>): Promise<void> {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    setError(null);
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+    if (password !== confirm) {
+      setError('Passwords do not match.');
+      return;
+    }
     setSubmitting(true);
     try {
-      await login({ email, password });
-    } catch {
-      // Error is exposed via AuthContext; nothing to do here.
+      await setupAccount({ token, password });
+      navigate('/calendar', { replace: true });
+    } catch (err) {
+      const message =
+        err instanceof ApiError && err.status === 401
+          ? 'This setup link is invalid or has already been used.'
+          : err instanceof Error
+            ? err.message
+            : 'Could not set password.';
+      setError(message);
     } finally {
       setSubmitting(false);
     }
@@ -39,34 +53,36 @@ export function LoginPage(): JSX.Element {
         className="w-full max-w-sm rounded-lg border border-border bg-surface-3 p-6 shadow-sm dark:border-border-dark dark:bg-surface-dark-3"
       >
         <h1 className="mb-1 font-display text-2xl font-semibold tracking-tight text-ink dark:text-ink-dark">
-          PTO Calendar
+          Set your password
         </h1>
         <p className="mb-6 text-sm text-ink-muted dark:text-ink-muted-dark">
-          Sign in to manage your time off.
+          Welcome! Pick a password to finish creating your account.
         </p>
 
         <label className="mb-3 block text-sm font-medium text-ink dark:text-ink-dark">
-          Email
+          Password
           <input
-            type="email"
-            autoComplete="username"
+            type="password"
+            autoComplete="new-password"
             required
-            maxLength={254}
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            minLength={8}
+            maxLength={72}
+            value={password}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
             className="mt-1 block w-full min-h-11 rounded border border-border bg-surface-2 px-3 py-2 text-sm text-ink focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
           />
         </label>
 
         <label className="mb-4 block text-sm font-medium text-ink dark:text-ink-dark">
-          Password
+          Confirm password
           <input
             type="password"
-            autoComplete="current-password"
+            autoComplete="new-password"
             required
+            minLength={8}
             maxLength={72}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            value={confirm}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setConfirm(e.target.value)}
             className="mt-1 block w-full min-h-11 rounded border border-border bg-surface-2 px-3 py-2 text-sm text-ink focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
           />
         </label>
@@ -79,22 +95,11 @@ export function LoginPage(): JSX.Element {
 
         <button
           type="submit"
-          disabled={submitting}
+          disabled={submitting || !token}
           className="min-h-11 w-full rounded bg-accent px-4 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60 dark:focus-visible:ring-offset-surface-dark"
         >
-          {submitting ? 'Signing in…' : 'Sign in'}
+          {submitting ? 'Setting password…' : 'Set password'}
         </button>
-
-        <p className="mt-4 text-center text-xs text-ink-muted dark:text-ink-muted-dark">
-          Have a setup link?{' '}
-          <Link
-            to="/setup-account"
-            className="text-ink underline hover:text-accent dark:text-ink-dark dark:hover:text-accent"
-          >
-            Set your password
-          </Link>
-          .
-        </p>
       </form>
     </main>
   );

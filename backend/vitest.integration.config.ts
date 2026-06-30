@@ -51,6 +51,12 @@ export default defineConfig({
           branches: 80,
           functions: 80,
         },
+        'src/routes/users.ts': {
+          lines: 80,
+          statements: 80,
+          branches: 80,
+          functions: 80,
+        },
         'src/routes/health.ts': {
           lines: 80,
           statements: 80,

@@ -11,6 +11,7 @@ datasource db {
 enum Role {
   member
   team_lead
+  admin
 }
 
 enum DayPart {
@@ -20,14 +21,16 @@ enum DayPart {
 }
 
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  name         String   @db.VarChar(120)
-  email        String   @unique @db.VarChar(255)
-  role         Role
-  colorCode    String   @map("color_code") @db.VarChar(20)
-  passwordHash String   @map("password_hash")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id                 String    @id @default(uuid()) @db.Uuid
+  name               String    @db.VarChar(120)
+  email              String    @unique @db.VarChar(255)
+  role               Role
+  colorCode          String    @map("color_code") @db.VarChar(20)
+  passwordHash       String?   @map("password_hash")
+  setupTokenHash     String?   @map("setup_token_hash") @db.VarChar(64)
+  setupTokenExpiresAt DateTime? @map("setup_token_expires_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
   ptoRequests PTORequest[]
   auditLogs   AuditLog[]   @relation("AuditActor")

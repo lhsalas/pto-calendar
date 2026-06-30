@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import type { LoginRequest, User } from '../types/api';
+import type { LoginRequest, SetupAccountRequest, User } from '../types/api';
 
 export interface AuthState {
   user: User | null;
@@ -10,6 +10,7 @@ export interface AuthState {
 export interface AuthContextValue extends AuthState {
   login: (credentials: LoginRequest) => Promise<void>;
   logout: () => Promise<void>;
+  setupAccount: (input: SetupAccountRequest) => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined);

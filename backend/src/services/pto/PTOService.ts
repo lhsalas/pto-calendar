@@ -1,7 +1,7 @@
 import type { DayPart, PTORequest, Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { HttpError } from '../../middleware/errorHandler.js';
-import { canModifyPTO, type ActorLike } from '../authorization/AuthorizationService.js';
+import { canModifyPTO, type ActorContext } from '../authorization/AuthorizationService.js';
 import { record as recordAudit } from '../audit/AuditLogService.js';
 import { validatePtoPayload, type ValidatedPto } from './validation.js';
 import type { CreatePtoInput } from './schemas.js';
@@ -111,7 +111,7 @@ export async function createPto(userId: string, input: CreatePtoInput): Promise<
 }
 
 export async function updatePto(
-  actor: ActorLike,
+  actor: ActorContext,
   id: string,
   input: CreatePtoInput,
 ): Promise<PublicPto> {
@@ -170,7 +170,7 @@ export async function updatePto(
   return updated;
 }
 
-export async function deletePto(actor: ActorLike, id: string): Promise<void> {
+export async function deletePto(actor: ActorContext, id: string): Promise<void> {
   const existing = await prisma.pTORequest.findUnique({
     where: { id },
     select: { id: true, userId: true },

@@ -12,9 +12,11 @@ CREATE TABLE users (
   id UUID PRIMARY KEY,
   name VARCHAR(120) NOT NULL,
   email VARCHAR(255) NOT NULL UNIQUE,
-  role VARCHAR(20) NOT NULL CHECK (role IN ('member', 'team_lead')),
+  role VARCHAR(20) NOT NULL CHECK (role IN ('member', 'team_lead', 'admin')),
   color_code VARCHAR(20) NOT NULL,
-  password_hash TEXT NOT NULL,
+  password_hash TEXT NULL,
+  setup_token_hash VARCHAR(64) NULL,
+  setup_token_expires_at TIMESTAMP NULL,
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );

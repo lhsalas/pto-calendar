@@ -23,6 +23,8 @@ const FULL_USER = {
   role: 'member' as const,
   colorCode: '#3B82F6',
   passwordHash: '',
+  setupTokenHash: null,
+  setupTokenExpiresAt: null,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
