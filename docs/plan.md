@@ -291,7 +291,7 @@ Recommendation:
 - Centralize note-visibility logic via `canViewNote(actor, pto)` in `AuthorizationService` (delegates to `canModifyPTO`); no route-local `isOwnerOrLead` helpers
 - `helmet` mounted globally for canonical security headers (CSP, HSTS, `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, COOP/CORP/OAC)
 - Per-IP rate limiting on `POST /auth/login` (`AUTH_RATE_LIMIT_MAX` failed attempts per `RATE_LIMIT_WINDOW_MS`, `skipSuccessfulRequests: true`) and globally across the rest of the API (`RATE_LIMIT_MAX` per window). Both return `429 RATE_LIMITED` + `Retry-After`
-- Structured request logging via `pino-http` with `X-Request-Id` correlation IDs on every response; `/health` and `/ready` are skipped via `autoLogging.ignore`
+- Structured request logging via `pino-http` with `X-Request-Id` correlation IDs on every response; `/health` and `/ready` are skipped via `autoLogging.ignore`. The base `pino` logger applies a `redact` configuration that strips session cookies, `Set-Cookie`, `Authorization`, and `password`/`passwordHash`/`token`/`secret` fields from every log line, and the custom `req`/`res` serializers drop the `headers` field entirely.
 - Graceful shutdown on SIGTERM/SIGINT — drains the HTTP server, disconnects Prisma, with a `SHUTDOWN_TIMEOUT_MS` fallback. `uncaughtException` and `unhandledRejection` handlers log `fatal` and `process.exit(1)`
 - Audit logging covers **all** PTO update and delete actions, including owner self-edits; logs are stored internally only and not exposed in the MVP UI
 
@@ -340,7 +340,7 @@ Recommendation:
 - Per-IP rate limiting on login + global rate limiter across the API
 - Graceful shutdown on SIGTERM/SIGINT with `SHUTDOWN_TIMEOUT_MS` fallback
 - Liveness `/health` + readiness `/ready` probes (DB probe raced against `READY_TIMEOUT_MS`)
-- Structured request logging via `pino-http` with `X-Request-Id` correlation IDs
+- Structured request logging via `pino-http` with `X-Request-Id` correlation IDs; the base `pino` logger redacts session cookies, `Set-Cookie`, `Authorization`, and `password`/`passwordHash`/`token`/`secret` fields, and the custom `req`/`res` serializers drop `headers` entirely
 - Centralized `canViewNote` authorization helper in `AuthorizationService`
 - Shared Zod schemas between route handlers and the validation layer
 - Direct unit coverage for middleware (`cookieSession`, `errorHandler`, `requireAuth`) and `PTOService` create + overlap paths

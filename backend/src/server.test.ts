@@ -243,6 +243,49 @@ describe('server', () => {
       expect(errorLogs).toHaveLength(1);
       expect(errorLogs[0]!['reqId']).toBe('99999999-aaaa-bbbb-cccc-dddddddddddd');
     });
+
+    it('does NOT include req.headers or res.headers on the request-completion log', async () => {
+      queryRawMock.mockResolvedValue([{ '?column?': 1 }]);
+      const app = createApp();
+      await request(app)
+        .post('/auth/login')
+        .set('Cookie', 'session=secret-cookie-value')
+        .send({ email: 'nobody@example.com', password: 'wrong' });
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      const completionLogs = parseLogs().filter(
+        (l) => l.msg === 'request completed' || l.msg === 'request errored',
+      );
+      expect(completionLogs.length).toBeGreaterThan(0);
+      for (const log of completionLogs) {
+        const req = log['req'] as Record<string, unknown>;
+        const resLog = log['res'] as Record<string, unknown>;
+        expect(req['headers']).toBeUndefined();
+        expect(resLog['headers']).toBeUndefined();
+      }
+    });
+
+    it('does NOT leak session cookie, Set-Cookie, or login body in any captured log line', async () => {
+      queryRawMock.mockResolvedValue([{ '?column?': 1 }]);
+      const app = createApp();
+      const password = 'correct-horse-battery-staple';
+      const email = 'leak-test@example.com';
+      const res = await request(app)
+        .post('/auth/login')
+        .set('Cookie', 'session=super-secret-cookie-value')
+        .send({ email, password });
+      expect([401, 500]).toContain(res.status);
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      const blob = capturedLogs.lines.join('');
+      expect(blob).not.toContain('super-secret-cookie-value');
+      expect(blob).not.toMatch(/session=/);
+      expect(blob.toLowerCase()).not.toContain('set-cookie');
+      expect(blob).not.toContain(password);
+      expect(blob).not.toContain(email);
+    });
   });
 
   it('returns 404 for unknown routes', async () => {
