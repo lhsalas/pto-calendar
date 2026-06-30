@@ -161,7 +161,7 @@ Global middleware order:
 Operational probes (unauthenticated, registered before `authRouter`/`ptoRouter`):
 
 - `GET /health` — liveness. Always returns `200` + `{ "status": "ok" }` while the process is responsive; no DB check.
-- `GET /ready` — readiness. Runs `prisma.$queryRaw\`SELECT 1\`` with a `READY_TIMEOUT_MS` (default 5s) race-timer. Returns `200` + `{ "status": "ready", "db": "ok", "uptime": <seconds> }` on success, `503` + `{ "error": { "code": "NOT_READY", "details": { "db": "unreachable", "reason": "...", "timeoutMs": ... } } }` on failure or timeout.
+- `GET /ready` — readiness. Runs `prisma.$queryRaw\`SELECT 1\`` with a `READY_TIMEOUT_MS` (default 5s) race-timer. Returns `200` + `{ "status": "ready", "db": "ok", "uptime": <seconds> }` on success, `503` + `{ "error": { "code": "NOT_READY", "details": { "db": "unreachable" } } }` on failure or timeout. The DB error message is logged server-side via `logger.warn({ err }, 'Readiness check failed')` but never returned to the client (no host/DSN leak).
 
 ### 7.1 Authentication APIs
 

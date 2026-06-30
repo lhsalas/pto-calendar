@@ -116,7 +116,7 @@ describe('server', () => {
         error: {
           code: 'NOT_READY',
           message: 'Database unavailable',
-          details: { db: 'unreachable', reason: 'connection refused' },
+          details: { db: 'unreachable' },
         },
       });
     });
@@ -139,7 +139,7 @@ describe('server', () => {
       expect(elapsed).toBeLessThan(600);
       expect(res.body.error.code).toBe('NOT_READY');
       expect(res.body.error.details.db).toBe('unreachable');
-      expect(res.body.error.details.reason).toContain('timed out');
+      expect(res.body.error.details.reason).toBeUndefined();
 
       if (original === undefined) delete process.env.READY_TIMEOUT_MS;
       else process.env.READY_TIMEOUT_MS = original;

@@ -24,13 +24,12 @@ healthRouter.get('/ready', async (_req, res) => {
       uptime: process.uptime(),
     });
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
     logger.warn({ err }, 'Readiness check failed');
     res.status(503).json({
       error: {
         code: 'NOT_READY',
         message: 'Database unavailable',
-        details: { db: 'unreachable', reason },
+        details: { db: 'unreachable' },
       },
     });
   } finally {
