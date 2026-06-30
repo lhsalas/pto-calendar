@@ -293,5 +293,43 @@ describe('Auth routes', () => {
         .send({ email: SEED.lead.email, password: SEED.lead.password });
       expect(successAgain.status).toBe(200);
     });
+
+    it('keyGenerator splits buckets by X-Forwarded-For when trust proxy is enabled', async () => {
+      const originalAuthMax = process.env.AUTH_RATE_LIMIT_MAX;
+      const originalTrust = process.env.TRUST_PROXY_HOPS;
+      process.env.AUTH_RATE_LIMIT_MAX = '2';
+      process.env.TRUST_PROXY_HOPS = '2';
+      resetEnvForTests();
+      const localApp = createApp();
+
+      const a1 = await request(localApp)
+        .post('/auth/login')
+        .set('X-Forwarded-For', '198.51.100.10')
+        .send({ email: SEED.lead.email, password: 'wrong-password' });
+      const a2 = await request(localApp)
+        .post('/auth/login')
+        .set('X-Forwarded-For', '198.51.100.10')
+        .send({ email: SEED.lead.email, password: 'wrong-password' });
+      const a3 = await request(localApp)
+        .post('/auth/login')
+        .set('X-Forwarded-For', '198.51.100.10')
+        .send({ email: SEED.lead.email, password: 'wrong-password' });
+
+      expect(a1.status).toBe(401);
+      expect(a2.status).toBe(401);
+      expect(a3.status).toBe(429);
+
+      const b1 = await request(localApp)
+        .post('/auth/login')
+        .set('X-Forwarded-For', '198.51.100.20')
+        .send({ email: SEED.lead.email, password: 'wrong-password' });
+      expect(b1.status).toBe(401);
+
+      if (originalAuthMax === undefined) delete process.env.AUTH_RATE_LIMIT_MAX;
+      else process.env.AUTH_RATE_LIMIT_MAX = originalAuthMax;
+      if (originalTrust === undefined) delete process.env.TRUST_PROXY_HOPS;
+      else process.env.TRUST_PROXY_HOPS = originalTrust;
+      resetEnvForTests();
+    });
   });
 });

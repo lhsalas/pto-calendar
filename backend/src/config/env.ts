@@ -70,6 +70,8 @@ const EnvSchema = z
     READY_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
 
     AUTH_USER_CACHE_TTL_MS: z.coerce.number().int().positive().default(15_000),
+
+    TRUST_PROXY_HOPS: z.coerce.number().int().min(0).optional(),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV !== 'production') return;
@@ -96,7 +98,11 @@ const EnvSchema = z
     }
   });
 
-export type Env = z.infer<typeof EnvSchema>;
+export type EnvInput = z.infer<typeof EnvSchema>;
+
+export interface Env extends EnvInput {
+  TRUST_PROXY_HOPS: number;
+}
 
 let cached: Env | undefined;
 
@@ -109,7 +115,9 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
       .join('\n');
     throw new Error(`Invalid environment configuration:\n${issues}`);
   }
-  cached = parsed.data;
+  const trustProxyHops =
+    parsed.data.TRUST_PROXY_HOPS ?? (parsed.data.NODE_ENV === 'production' ? 2 : 0);
+  cached = { ...parsed.data, TRUST_PROXY_HOPS: trustProxyHops };
   return cached;
 }
 
