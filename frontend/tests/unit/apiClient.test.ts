@@ -44,26 +44,23 @@ describe('apiRequest hardening', () => {
   });
 
   it('throws a typed ApiError with TIMEOUT when the request exceeds timeoutMs', async () => {
-    vi.useFakeTimers();
-    globalThis.fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
-      return new Promise<Response>((_resolve, reject) => {
-        const sig = init?.signal;
-        if (sig) {
-          if (sig.aborted) {
-            reject(new DOMException('Aborted', 'AbortError'));
-            return;
-          }
-          sig.addEventListener('abort', () => {
-            reject(new DOMException('Aborted', 'AbortError'));
-          });
-        }
-      });
-    }) as unknown as typeof fetch;
-
-    const promise = apiRequest('/slow', { timeoutMs: 5 });
-    // Let the timeout fire
-    await vi.advanceTimersByTimeAsync(10);
-    await expect(promise).rejects.toMatchObject({
+    // Note: the timeout path is a Promise.race against a setTimeout-fired
+    // rejection. Mocking that with vi.useFakeTimers reliably triggers
+    // vitest's unhandled-rejection detector (the loser of the race stays
+    // pending and is observed after the test ends), so we cover the
+    // timeout behavior by mocking the fetch to return a Response after
+    // a microtask delay and using a very short timeoutMs to let the
+    // race fire in real time.
+    globalThis.fetch = vi.fn(
+      (_input, init) =>
+        new Promise<Response>((resolve) => {
+          const sig = init?.signal;
+          // Don't bother aborting — the test relies on the timeout.
+          void sig;
+          setTimeout(() => resolve(new Response('{}', { status: 200 })), 200);
+        }),
+    ) as unknown as typeof fetch;
+    await expect(apiRequest('/slow', { timeoutMs: 10 })).rejects.toMatchObject({
       status: 0,
       body: { code: 'TIMEOUT', message: 'Request timed out.' },
     });

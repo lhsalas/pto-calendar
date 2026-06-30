@@ -93,14 +93,32 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       });
     }
   })();
-
   let res: Response;
+  let timedOut = false;
   try {
-    res = await (timeoutPromise ? Promise.race([fetchPromise, timeoutPromise]) : fetchPromise);
+    if (timeoutPromise) {
+      // Track which side wins. The other side may reject after the race;
+      // suppress those rejections by attaching handlers eagerly so we don't
+      // trip Node's unhandled-rejection handler.
+      fetchPromise.catch(() => {
+        if (!timedOut) return; // fetch lost the race; swallow.
+      });
+      timeoutPromise.catch(() => {
+        if (timedOut) return; // timeout lost the race; swallow.
+        // fetch won; we already have a Response below.
+      });
+      const result = await Promise.race([fetchPromise, timeoutPromise]);
+      if (result instanceof Error) {
+        timedOut = true;
+        throw result;
+      }
+      res = result as Response;
+    } else {
+      res = await fetchPromise;
+    }
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
   }
-
   if (res.status === 204) {
     return undefined as T;
   }
