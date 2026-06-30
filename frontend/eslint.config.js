@@ -31,12 +31,31 @@ export default tseslint.config(
         'error',
         { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
       ],
+      // Issue #77: enforce that all HTTP calls go through apiRequest.
+      // Raw `fetch(` is restricted to the api client module + tests so the
+      // timeout/abort/JSON-parse/error-normalization behavior is uniform.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "CallExpression[callee.name='fetch']",
+          message:
+            "Use apiRequest from '../../api/client' (or a relative path) instead of raw fetch(). See issue #77.",
+        },
+      ],
     },
   },
   {
     files: ['**/*.test.ts', '**/*.test.tsx', 'tests/**/*'],
     languageOptions: {
       globals: { ...globals.browser, ...globals.node },
+    },
+  },
+  {
+    // Issue #77: apiRequest and the test that exercises raw `fetch(` are
+    // exempt from the no-restricted-fetch rule.
+    files: ['src/api/client.ts', 'src/api/client.test.ts', 'tests/unit/apiClient.test.ts'],
+    rules: {
+      'no-restricted-syntax': 'off',
     },
   },
   {

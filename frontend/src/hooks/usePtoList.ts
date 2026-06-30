@@ -21,7 +21,8 @@ export function usePtoList(start: string, end: string): UsePtoListResult {
     setLoading(true);
     setError(null);
     try {
-      const list = await apiRequest<PTOWithUser[]>(`/pto?start=${start}&end=${end}`);
+      const query = new URLSearchParams({ start, end }).toString();
+      const list = await apiRequest<PTOWithUser[]>(`/pto?${query}`);
       setItems(list);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load PTOs.');
@@ -48,7 +49,7 @@ export function usePtoList(start: string, end: string): UsePtoListResult {
 
   const update = useCallback(
     async (id: string, payload: CreatePTORequest): Promise<PTOWithUser> => {
-      const updated = await apiRequest<PTOWithUser>(`/pto/${id}`, {
+      const updated = await apiRequest<PTOWithUser>(`/pto/${encodeURIComponent(id)}`, {
         method: 'PUT',
         body: payload,
       });
@@ -60,7 +61,7 @@ export function usePtoList(start: string, end: string): UsePtoListResult {
 
   const remove = useCallback(
     async (id: string): Promise<void> => {
-      await apiRequest<void>(`/pto/${id}`, { method: 'DELETE' });
+      await apiRequest<void>(`/pto/${encodeURIComponent(id)}`, { method: 'DELETE' });
       await refetch();
     },
     [refetch],
