@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiRequest, ApiError } from '../../api/client';
 import type {
@@ -30,6 +30,20 @@ interface ResetState {
   expiresAt: string;
 }
 
+type CardKey = 'create' | 'reset';
+type CopyState = 'idle' | 'copied' | 'failed';
+const COPY_FEEDBACK_MS = 2000;
+
+function setupUrlFor(token: string): string {
+  return `${window.location.origin}/setup-account?token=${token}`;
+}
+
+const COPY_LABEL: Record<CopyState, string> = {
+  idle: 'Copy',
+  copied: 'Copied',
+  failed: 'Copy failed',
+};
+
 export function AdminUsersPage(): JSX.Element {
   const { logout } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
@@ -43,7 +57,12 @@ export function AdminUsersPage(): JSX.Element {
   });
   const [created, setCreated] = useState<CreatedState | null>(null);
   const [reset, setReset] = useState<ResetState | null>(null);
-  const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
+  const [copyStates, setCopyStates] = useState<Record<CardKey, CopyState>>({
+    create: 'idle',
+    reset: 'idle',
+  });
+  const createInputRef = useRef<HTMLInputElement | null>(null);
+  const resetInputRef = useRef<HTMLInputElement | null>(null);
 
   const refetch = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -104,14 +123,34 @@ export function AdminUsersPage(): JSX.Element {
     }
   }
 
-  async function handleCopy(token: string): Promise<void> {
+  function scheduleCopyReset(card: CardKey): void {
+    setTimeout(() => {
+      setCopyStates((prev) =>
+        prev[card] === 'copied' || prev[card] === 'failed' ? { ...prev, [card]: 'idle' } : prev,
+      );
+    }, COPY_FEEDBACK_MS);
+  }
+
+  async function handleCopy(
+    card: CardKey,
+    fullUrl: string,
+    inputRef: HTMLInputElement | null,
+  ): Promise<void> {
     try {
-      await navigator.clipboard.writeText(token);
-      setCopyState('copied');
-      setTimeout(() => setCopyState('idle'), 2000);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(fullUrl);
+      } else {
+        throw new Error('clipboard unavailable');
+      }
+      setCopyStates((prev) => ({ ...prev, [card]: 'copied' }));
     } catch {
-      // ignore — user can manually copy
+      if (inputRef) {
+        inputRef.focus();
+        inputRef.select();
+      }
+      setCopyStates((prev) => ({ ...prev, [card]: 'failed' }));
     }
+    scheduleCopyReset(card);
   }
 
   return (
@@ -200,17 +239,24 @@ export function AdminUsersPage(): JSX.Element {
             </p>
             <div className="mb-2 flex items-center gap-2">
               <input
+                ref={createInputRef}
                 type="text"
                 readOnly
-                value={`${window.location.origin}/setup-account?token=${created.setupToken}`}
+                data-testid="setup-url-input"
+                value={setupUrlFor(created.setupToken)}
+                onFocus={(e) => e.currentTarget.select()}
                 className="block w-full rounded border border-border bg-surface-2 px-3 py-2 text-xs text-ink focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
               />
               <button
                 type="button"
-                onClick={() => void handleCopy(created.setupToken)}
+                data-testid="copy-setup-url-button"
+                onClick={() =>
+                  void handleCopy('create', setupUrlFor(created.setupToken), createInputRef.current)
+                }
+                aria-live="polite"
                 className="min-h-11 rounded bg-accent px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover"
               >
-                {copyState === 'copied' ? 'Copied' : 'Copy'}
+                {COPY_LABEL[copyStates.create]}
               </button>
             </div>
             <button
@@ -273,17 +319,24 @@ export function AdminUsersPage(): JSX.Element {
             </p>
             <div className="mb-2 flex items-center gap-2">
               <input
+                ref={resetInputRef}
                 type="text"
                 readOnly
-                value={`${window.location.origin}/setup-account?token=${reset.setupToken}`}
+                data-testid="setup-url-input"
+                value={setupUrlFor(reset.setupToken)}
+                onFocus={(e) => e.currentTarget.select()}
                 className="block w-full rounded border border-border bg-surface-2 px-3 py-2 text-xs text-ink focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
               />
               <button
                 type="button"
-                onClick={() => void handleCopy(reset.setupToken)}
+                data-testid="copy-setup-url-button"
+                onClick={() =>
+                  void handleCopy('reset', setupUrlFor(reset.setupToken), resetInputRef.current)
+                }
+                aria-live="polite"
                 className="min-h-11 rounded bg-accent px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover"
               >
-                {copyState === 'copied' ? 'Copied' : 'Copy'}
+                {COPY_LABEL[copyStates.reset]}
               </button>
             </div>
             <button
