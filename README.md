@@ -198,21 +198,22 @@ This produces `backend/dist/` (Node service) and `frontend/dist/` (static SPA).
 
 Configure the environment from `backend/.env.example`:
 
-| Variable                 | Production value                                                                                                              |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `NODE_ENV`               | `production` (required)                                                                                                       |
-| `PORT`                   | `3000`                                                                                                                        |
-| `DATABASE_URL`           | `postgresql://user:pass@host:5432/pto`                                                                                        |
-| `SESSION_SECRET`         | `openssl rand -base64 32` (≥32 chars, high entropy; comma-separated values are accepted for graceful key rotation)            |
-| `COOKIE_SECURE`          | `true` (required in production)                                                                                               |
-| `COOKIE_DOMAIN`          | API host (e.g., `api.pto.internal.example.com`)                                                                               |
-| `CORS_ORIGIN`            | SPA origin (e.g., `https://pto.internal.example.com`)                                                                         |
-| `BCRYPT_ROUNDS`          | `12` (minimum `10` enforced in production; tests use `4`)                                                                     |
-| `AUTH_USER_CACHE_TTL_MS` | `15000` (15s) — how long `requireAuth` caches the live (id, role) record per session user before re-validating against the DB |
-| `LOG_LEVEL`              | `info`                                                                                                                        |
-| `RATE_LIMIT_WINDOW_MS`   | `900000` (15 min) — global limiter window                                                                                     |
-| `RATE_LIMIT_MAX`         | `100` — global requests per window per IP                                                                                     |
-| `AUTH_RATE_LIMIT_MAX`    | `5` — failed-login attempts per window per IP                                                                                 |
+| Variable                 | Production value                                                                                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`               | `production` (required)                                                                                                               |
+| `PORT`                   | `3000`                                                                                                                                |
+| `DATABASE_URL`           | `postgresql://user:pass@host:5432/pto`                                                                                                |
+| `SESSION_SECRET`         | `openssl rand -base64 32` (≥32 chars, high entropy; comma-separated values are accepted for graceful key rotation)                    |
+| `COOKIE_SECURE`          | `true` (required in production)                                                                                                       |
+| `COOKIE_DOMAIN`          | API host (e.g., `api.pto.internal.example.com`)                                                                                       |
+| `CORS_ORIGIN`            | SPA origin (e.g., `https://pto.internal.example.com`)                                                                                 |
+| `BCRYPT_ROUNDS`          | `12` (minimum `10` enforced in production; tests use `4`)                                                                             |
+| `AUTH_USER_CACHE_TTL_MS` | `15000` (15s) — how long `requireAuth` caches the live (id, role) record per session user before re-validating against the DB         |
+| `TRUST_PROXY_HOPS`       | `2` in production (Caddy → nginx → backend); `0` in dev/test. Used by `app.set('trust proxy', N)` and the rate-limiter `keyGenerator` |
+| `LOG_LEVEL`              | `info`                                                                                                                                |
+| `RATE_LIMIT_WINDOW_MS`   | `900000` (15 min) — global limiter window                                                                                             |
+| `RATE_LIMIT_MAX`         | `100` — global requests per window per IP                                                                                             |
+| `AUTH_RATE_LIMIT_MAX`    | `5` — failed-login attempts per window per IP                                                                                         |
 
 `SESSION_SECRET` and `COOKIE_SECURE` are validated at boot. The process refuses to start in production with a placeholder, low-entropy, or short `SESSION_SECRET`, or with `COOKIE_SECURE=false`. Multiple comma-separated keys enable key rotation (the new key signs, older keys verify). Generate a fresh secret with `openssl rand -base64 32`.
 | `SHUTDOWN_TIMEOUT_MS` | `10000` — graceful shutdown deadline before force-exit |

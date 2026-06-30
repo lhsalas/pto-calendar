@@ -1,6 +1,6 @@
 import { Writable } from 'node:stream';
 import { pino, type Logger } from 'pino';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 
 const { queryRawMock, capturedLogs } = vi.hoisted(() => ({
@@ -306,5 +306,31 @@ describe('server', () => {
     expect(res.headers['strict-transport-security']).toMatch(/max-age=/);
     expect(res.headers['cross-origin-opener-policy']).toBe('same-origin');
     expect(res.headers['cross-origin-resource-policy']).toBe('same-origin');
+  });
+
+  describe('trust proxy (app.set)', () => {
+    const originalEnv = { ...process.env };
+    const restoreEnv = (): void => {
+      process.env = { ...originalEnv };
+      resetEnvForTests();
+    };
+    afterEach(restoreEnv);
+
+    it('honors X-Forwarded-For when TRUST_PROXY_HOPS=2', async () => {
+      Object.assign(process.env, REQUIRED_ENV, { TRUST_PROXY_HOPS: '2' });
+      resetEnvForTests();
+      const app = createApp();
+      const res = await request(app).get('/health').set('X-Forwarded-For', '203.0.113.7');
+      expect(res.status).toBe(200);
+    });
+
+    it('ignores X-Forwarded-For when TRUST_PROXY_HOPS=0 (default)', async () => {
+      Object.assign(process.env, REQUIRED_ENV);
+      delete process.env.TRUST_PROXY_HOPS;
+      resetEnvForTests();
+      const app = createApp();
+      const res = await request(app).get('/health').set('X-Forwarded-For', '203.0.113.7');
+      expect(res.status).toBe(200);
+    });
   });
 });
