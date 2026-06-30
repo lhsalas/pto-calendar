@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { AuthProvider } from '../../src/context/AuthContext';
 import { ThemeProvider } from '../../src/context/ThemeContext';
 import { AdminUsersPage } from '../../src/pages/admin/AdminUsersPage';
 import { server } from '../mocks/server';
-import { authenticated, createUserOk, resetPasswordOk, usersList } from '../mocks/handlers';
+import { authenticated, createUserOk, usersList } from '../mocks/handlers';
 
 function renderWithProviders(): ReturnType<typeof render> {
   return render(

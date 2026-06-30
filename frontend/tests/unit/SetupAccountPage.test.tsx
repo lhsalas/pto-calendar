@@ -1,13 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { SetupAccountPage } from '../../src/pages/SetupAccountPage';
 import { AuthProvider } from '../../src/context/AuthContext';
 import { ThemeProvider } from '../../src/context/ThemeContext';
 import { server } from '../mocks/server';
-import { setupAccountBadToken, setupAccountOk, authenticated, STUB_USER } from '../mocks/handlers';
+import { setupAccountBadToken, setupAccountOk } from '../mocks/handlers';
 
 function renderWithProviders(initialPath: string): ReturnType<typeof render> {
   return render(
