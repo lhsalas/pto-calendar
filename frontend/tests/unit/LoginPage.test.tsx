@@ -106,4 +106,14 @@ describe('LoginPage', () => {
       expect(screen.getByTestId('location')).toHaveTextContent('/calendar');
     });
   });
+
+  it('caps the email input at 254 chars (RFC 5321 practical max) and the password at 72 (bcrypt cap)', () => {
+    renderWithProviders();
+    const email = screen.getByLabelText(/email/i) as HTMLInputElement;
+    const password = screen.getByLabelText(/password/i) as HTMLInputElement;
+    expect(email.maxLength).toBe(254);
+    expect(password.maxLength).toBe(72);
+    expect(email.getAttribute('autocomplete')).toBe('username');
+    expect(password.getAttribute('autocomplete')).toBe('current-password');
+  });
 });
