@@ -4,8 +4,8 @@ name: pto-calendar-prod
 # /auth + /pto + /health + /ready proxy) -> backend (Express + Prisma) ->
 # postgres.
 #
-# HOST, ACME_EMAIL, SESSION_SECRET, and CORS_ORIGIN are required at deploy
-# time. The first `docker compose up` will fail if any is missing.
+# HOST, ACME_EMAIL, SESSION_SECRET, CORS_ORIGIN, and DB_PASSWORD are required at
+# deploy time. The first `docker compose up` will fail if any is missing.
 
 services:
   db:
@@ -14,7 +14,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: pto
-      POSTGRES_PASSWORD: pto
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       POSTGRES_DB: pto
     volumes:
       - pto_pgdata_prod:/var/lib/postgresql/data
@@ -29,17 +29,19 @@ services:
       - internal
 
   migrate:
-    image: node:20-alpine
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     depends_on:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://pto:pto@db:5432/pto?schema=public
-    working_dir: /app
-    volumes:
-      - ./backend:/app
-      - backend_node_modules:/app/node_modules
-    command: sh -c "npm ci --no-audit --no-fund && npx prisma migrate deploy"
+      DATABASE_URL: postgresql://pto:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/pto?schema=public
+    command:
+      - sh
+      - -c
+      - 'npx prisma migrate deploy --schema=backend/prisma/schema.prisma'
+    restart: 'no'
     networks:
       - internal
 
@@ -56,7 +58,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://pto:pto@db:5432/pto?schema=public
+      DATABASE_URL: postgresql://pto:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/pto?schema=public
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
       COOKIE_SECURE: 'true'
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
@@ -67,28 +69,13 @@ services:
     networks:
       - internal
 
-  frontend-build:
+  nginx:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-    container_name: pto-calendar-frontend-build-prod
-    depends_on:
-      - backend
-    command: ['true']
-    volumes:
-      - frontend_dist:/out
-    networks:
-      - internal
-
-  nginx:
-    image: nginx:alpine
     container_name: pto-calendar-nginx-prod
     depends_on:
       - backend
-      - frontend-build
-    volumes:
-      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - frontend_dist:/usr/share/nginx/html:ro
     networks:
       - internal
 
@@ -112,8 +99,6 @@ services:
 
 volumes:
   pto_pgdata_prod:
-  backend_node_modules:
-  frontend_dist:
   caddy_data:
   caddy_config:
 

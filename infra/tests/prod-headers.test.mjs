@@ -50,14 +50,28 @@ const CADDY_REFS = [
 
 const COMPOSE_REFS = [
   /image:\s+caddy:2-alpine\b/,
-  /-\s*"80:80"/,
-  /-\s*"443:443"/,
+  /-\s*['"]80:80['"]/,
+  /-\s*['"]443:443['"]/,
   /\$\{HOST:\?HOST is required\}/,
   /\$\{ACME_EMAIL:\?ACME_EMAIL is required\}/,
   /\$\{SESSION_SECRET:\?SESSION_SECRET is required\}/,
   /\$\{CORS_ORIGIN:\?CORS_ORIGIN is required\}/,
-  /TRUST_PROXY_HOPS:\s*"2"/,
-  /COOKIE_SECURE:\s+"true"/,
+  /\$\{DB_PASSWORD:\?DB_PASSWORD is required\}/,
+  /TRUST_PROXY_HOPS:\s+['"]2['"]/,
+  /COOKIE_SECURE:\s+['"]true['"]/,
+];
+
+const COMPOSE_MUST = [
+  /^\s+migrate:\s*\n\s+build:\s*\n\s+context:\s+\.\s*\n\s+dockerfile:\s+backend\/Dockerfile/m,
+  /^\s+nginx:\s*\n\s+build:\s*\n\s+context:\s+\.\s*\n\s+dockerfile:\s+frontend\/Dockerfile/m,
+];
+
+const COMPOSE_MUST_NOT = [
+  /^migrate:\s*\n\s+image:\s+node:20-alpine/m,
+  /pto:pto@/,
+  /^\s+frontend-build:/m,
+  /^volumes:\s*\n[\s\S]*?^\s+frontend_dist:/m,
+  /^volumes:\s*\n[\s\S]*?^\s+backend_node_modules:/m,
 ];
 
 let failed = 0;
@@ -94,6 +108,10 @@ for (const re of CADDY_REFS) check(`  ${re}`, re, caddyfile);
 
 console.log('docker-compose.prod.yml:');
 for (const re of COMPOSE_REFS) check(`  ${re}`, re, compose);
+console.log('docker-compose.prod.yml required service shapes:');
+for (const re of COMPOSE_MUST) check(`  ${re}`, re, compose);
+console.log('docker-compose.prod.yml forbidden patterns absent:');
+for (const re of COMPOSE_MUST_NOT) checkAbsent(`  ${re}`, re, compose);
 
 console.log('index.html inline script hash matches nginx.conf:');
 const inlineScriptMatch = indexHtml.match(/<script>([\s\S]*?)<\/script>/);
