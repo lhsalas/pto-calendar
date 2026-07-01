@@ -36,8 +36,8 @@ test.describe('Sprint 4 — list view', () => {
     page,
   }) => {
     await login(page, SEED.dev1.email, SEED.dev1.password);
-    const day = nextWeekdayFromToday(5);
-    const newDay = nextWeekdayFromToday(7);
+    const day = nextWeekdayFromToday(20);
+    const newDay = nextWeekdayFromToday(22);
 
     await page.getByRole('button', { name: /^add pto$/i }).click();
     await page.getByLabel(/start date/i).fill(day.iso);
@@ -52,9 +52,11 @@ test.describe('Sprint 4 — list view', () => {
       'true',
     );
 
-    const row = page.locator('[data-testid^="upcoming-row-"]').first();
+    const row = page
+      .locator('[data-testid^="upcoming-row-"]')
+      .filter({ hasText: day.label })
+      .filter({ hasText: 'Developer One' });
     await expect(row).toBeVisible();
-    await expect(row).toContainText(day.label);
     await row.locator('button').first().click();
     const viewModal = page.getByRole('dialog', { name: /pto details/i });
     await expect(viewModal).toBeVisible();
@@ -66,8 +68,11 @@ test.describe('Sprint 4 — list view', () => {
     await page.getByRole('button', { name: /save pto/i }).click();
     await expect(page.getByText(/pto updated/i)).toBeVisible();
 
-    await expect(page.locator('[data-testid^="upcoming-row-"]').first()).toContainText(
-      newDay.label,
-    );
+    await expect(
+      page
+        .locator('[data-testid^="upcoming-row-"]')
+        .filter({ hasText: newDay.label })
+        .filter({ hasText: 'Developer One' }),
+    ).toBeVisible();
   });
 });

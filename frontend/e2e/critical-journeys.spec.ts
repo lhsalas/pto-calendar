@@ -127,7 +127,7 @@ test.describe('Sprint 4 — critical journeys', () => {
 
   test('Journey 8b: a team lead can edit a member PTO', async ({ page }) => {
     await login(page, SEED.dev1.email, SEED.dev1.password);
-    const day = nthWeekdayInCurrentMonth(3, 3);
+    const day = nthWeekdayInCurrentMonth(5, 3);
     await page.getByRole('button', { name: /^add pto$/i }).click();
     await page.getByLabel(/start date/i).fill(day);
     await page.getByLabel(/end date/i).fill(day);
