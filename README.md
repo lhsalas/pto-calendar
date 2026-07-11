@@ -141,6 +141,8 @@ This builds and starts four containers — Postgres, a one-shot migrate+seed job
 
 The standalone host flow (`npm run dev`) and the dev-only Postgres (`npm run db:up`) are unchanged — the new compose file lives at `docker-compose.app.yml` and is purely additive.
 
+> Works on any OS as long as Docker or Podman 5.x+ is installed — see [`docs/podman.md`](docs/podman.md) for the Podman path. The `npm run db:*` / `app:*` scripts auto-detect the engine via a tiny `bin/container.mjs` wrapper; no separate scripts or compose files.
+
 ## Scripts
 
 | Command                       | Effect                                              |

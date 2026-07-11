@@ -60,8 +60,10 @@ and `docs/testing-strategy.md` for the full automation + coverage policy.
   surface, env vars, or test policy (`README.md`, `docs/plan.md`,
   `docs/technical-spec.md`, `docs/backlog.md`, `docs/testing-strategy.md`,
   `docs/openapi.yaml`). Use small targeted edits, not rewrites.
-- **Local environment:** `docker compose up -d` starts `pto-calendar-db`
-  (postgres:16-alpine) on `:5432`; backend dev runs on `:3000` (use
-  `setsid` to detach), Vite on `:5173`. E2E specs that write data run on
-  the desktop `chromium` project only; the `mobile-chrome` project uses
-  `testMatch` to run only read-only specs.
+- **Local environment:** `npm run db:up` (which invokes
+  `node bin/container.mjs compose up -d db`, auto-detecting podman or
+  docker) starts `pto-calendar-db` (postgres:16-alpine) on `:5432`;
+  backend dev runs on `:3000` (use `setsid` to detach), Vite on `:5173`.
+  E2E specs that write data run on the desktop `chromium` project only;
+  the `mobile-chrome` project uses `testMatch` to run only read-only
+  specs. See `docs/podman.md` for the Podman path.

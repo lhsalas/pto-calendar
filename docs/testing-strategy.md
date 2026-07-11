@@ -164,8 +164,8 @@ Additional shipped journeys (frontend enhancements #18–#26):
 
 ### 9.2 Database lifecycle
 - CI: GitHub Actions service container `postgres:16` with health check.
-- Local: `docker compose up -d db` for developers; document in `README.md`
-- Local: `docker compose -f docker-compose.app.yml up --build` for the all-in-one stack (db + migrate + backend + frontend, only host port 5173) when a contributor has Docker but not Node.js — exercise this path before merge when the all-in-one compose changes
+- Local: `npm run db:up` (calls `node bin/container.mjs compose up -d db`, auto-detects podman or docker) for developers; the dev compose file is `docker-compose.yml` and is documented in `README.md`
+- Local: `npm run app:up` (calls `node bin/container.mjs compose -f docker-compose.app.yml up --build`) for the all-in-one stack (db + migrate + backend + frontend, only host port 5173) when a contributor has Docker or Podman but not Node.js — exercise this path before merge when the all-in-one compose changes. See `docs/podman.md` for the Podman-specific notes
 - Prisma migrations run on test setup. Assumes the baseline migration has been generated and committed under `backend/prisma/migrations/` before the first integration test run (see `plan.md` Phase 0). CI runs `prisma migrate deploy`, never `migrate dev`.
 - `TRUNCATE pto_requests, audit_logs RESTART IDENTITY CASCADE;` between tests (keep `users` seeded once). The seed script itself must be **idempotent including password hashes** — re-running it updates each user's `passwordHash` to match the seed definition, so test fixtures stay reproducible across re-seeds.
 
