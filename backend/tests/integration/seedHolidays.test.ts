@@ -71,4 +71,16 @@ describe('db:seed-holidays script', () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/inserted=14/);
   });
+
+  it('inserts CO holidays', () => {
+    const r = runSeedHolidays(REQUIRED_DB, ['--country', 'CO']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/inserted=42/);
+  });
+
+  it('inserts CL holidays', () => {
+    const r = runSeedHolidays(REQUIRED_DB, ['--country', 'CL']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/inserted=37/);
+  });
 });
