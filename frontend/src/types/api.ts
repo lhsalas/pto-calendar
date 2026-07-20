@@ -110,7 +110,7 @@ export interface CreateHolidayRequest {
 }
 
 export interface SeedHolidayRequest {
-  countryCode: 'US' | 'MX';
+  countryCode: 'US' | 'MX' | 'CO' | 'CL';
 }
 
 export interface SeedHolidayResponse {

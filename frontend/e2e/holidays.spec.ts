@@ -79,4 +79,15 @@ test.describe('Public holiday overlay', () => {
     });
     expect(res.status()).toBe(403);
   });
+
+  test('the admin page exposes a seed button for every supported country (US, MX, CO, CL)', async ({
+    page,
+  }) => {
+    await loginAsLead(page);
+    await page.getByTestId('manage-holidays-link').click();
+    await expect(page.getByRole('heading', { level: 1, name: /^holidays$/i })).toBeVisible();
+    for (const cc of ['US', 'MX', 'CO', 'CL']) {
+      await expect(page.getByTestId(`seed-${cc}`)).toBeVisible();
+    }
+  });
 });

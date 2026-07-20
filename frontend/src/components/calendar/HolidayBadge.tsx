@@ -4,6 +4,8 @@ import type { Holiday } from '../../types/api';
 const COUNTRY_FLAG: Record<string, string> = {
   US: '🇺🇸',
   MX: '🇲🇽',
+  CO: '🇨🇴',
+  CL: '🇨🇱',
 };
 
 export interface HolidayBadgeProps {

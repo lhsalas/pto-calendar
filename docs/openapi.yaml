@@ -1087,7 +1087,7 @@ components:
       properties:
         countryCode:
           type: string
-          enum: [US, MX]
+          enum: [US, MX, CO, CL]
     SeedHolidayResponse:
       type: object
       required: [inserted, skipped, errors]

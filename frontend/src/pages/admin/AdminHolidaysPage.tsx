@@ -7,10 +7,12 @@ import { useToast } from '../../hooks/useToast';
 import { ThemeToggle } from '../../components/ThemeToggle';
 import { ChevronLeft } from '../../components/icons';
 
-const SUPPORTED_COUNTRY_CODES: SeedHolidayRequest['countryCode'][] = ['US', 'MX'];
+const SUPPORTED_COUNTRY_CODES: SeedHolidayRequest['countryCode'][] = ['US', 'MX', 'CO', 'CL'];
 const COUNTRY_LABELS: Record<SeedHolidayRequest['countryCode'], string> = {
   US: 'United States federal holidays',
   MX: 'Mexico federal holidays',
+  CO: 'Colombia public holidays',
+  CL: 'Chile public holidays',
 };
 
 interface FormState {
