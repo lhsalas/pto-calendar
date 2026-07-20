@@ -6,7 +6,9 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "npm run build:ts && npm run build:assets",
+    "build:ts": "tsc -p tsconfig.build.json",
+    "build:assets": "node scripts/copy-assets.mjs",
     "start": "node dist/index.js",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,js,json,md}\"",

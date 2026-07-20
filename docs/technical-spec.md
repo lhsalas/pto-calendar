@@ -391,7 +391,11 @@ Response 200:
 { "inserted": 26, "skipped": 0, "errors": [] }
 ```
 
-Supported `countryCode` values: `US`, `MX`. The presets are defined as JSON under `backend/src/services/holidays/presets/` and are loaded by `loadPreset(countryCode)`.
+Supported `countryCode` values: `US`, `MX`, `CO`, `CL`. The presets are defined as JSON under `backend/src/services/holidays/presets/` and are loaded by `loadPreset(countryCode)`, which reads from `__dirname/presets/${cc}.json` at runtime.
+
+### Runtime-asset bundling
+
+`tsc` with `resolveJsonModule: true` only inlines JSON files that are imported as TypeScript modules. JSON files read at runtime via `fs.readFile` from `__dirname` are not copied automatically into `dist/`. The `backend/scripts/copy-assets.mjs` script (invoked by `npm run build:assets`, chained from `npm run build`) copies the runtime-asset directories listed in `RUNTIME_ASSET_DIRS` from `src/` to `dist/`. Add a new entry there when introducing a new runtime-asset directory. The build is verified by `backend/tests/unit/scripts/copy-assets.test.ts`, which runs `npm run build` once and asserts every supported country preset lands in `dist/services/holidays/presets/`.
 
 ## 8. Error Model
 Use consistent API error responses.
