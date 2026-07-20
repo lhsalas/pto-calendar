@@ -397,6 +397,10 @@ Supported `countryCode` values: `US`, `MX`, `CO`, `CL`. The presets are defined 
 
 `tsc` with `resolveJsonModule: true` only inlines JSON files that are imported as TypeScript modules. JSON files read at runtime via `fs.readFile` from `__dirname` are not copied automatically into `dist/`. The `backend/scripts/copy-assets.mjs` script (invoked by `npm run build:assets`, chained from `npm run build`) copies the runtime-asset directories listed in `RUNTIME_ASSET_DIRS` from `src/` to `dist/`. Add a new entry there when introducing a new runtime-asset directory. The build is verified by `backend/tests/unit/scripts/copy-assets.test.ts`, which runs `npm run build` once and asserts every supported country preset lands in `dist/services/holidays/presets/`.
 
+### Bulk seeding
+
+`npm run db:seed-holidays -w backend -- --all` iterates `SUPPORTED_COUNTRY_CODES` and runs `seedDefaults` for each, in order. The command is idempotent: re-running after the data is already loaded produces `inserted=0 skipped=N` for every country. The all-in-one Docker stack (`docker-compose.app.yml`'s `migrate` service) calls this with `--all` after `prisma migrate deploy` and `prisma/seed.ts`, so `npm run app:up` ships with US + MX + CO + CL holidays pre-seeded out of the box.
+
 ## 8. Error Model
 Use consistent API error responses.
 
