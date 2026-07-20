@@ -16,7 +16,8 @@ async function loginAsLead(page: Page): Promise<void> {
 }
 
 async function cleanupCreatedUsers(): Promise<void> {
-  const url = process.env.DATABASE_URL ?? 'postgresql://pto:pto@localhost:5432/pto?schema=public';
+  const url =
+    process.env.DATABASE_URL ?? 'postgresql://pto:pto@localhost:5432/pto_test?schema=public';
   const prisma = new PrismaClient({ datasourceUrl: url });
   try {
     await prisma.user.deleteMany({
