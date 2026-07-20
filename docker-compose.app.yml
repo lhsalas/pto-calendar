@@ -44,6 +44,12 @@ services:
       DATABASE_URL: postgresql://pto:pto@db:5432/pto?schema=public
       SESSION_SECRET: pto-calendar-dev-session-secret-at-least-32-chars-long
       COOKIE_SECURE: 'false'
+      # All-in-one demo compose is HTTP-only (no Caddy / TLS termination),
+      # so COOKIE_SECURE=false is required for the session cookie to flow.
+      # INSECURE_COOKIES_ALLOWED is the explicit, loud opt-out that bypasses
+      # the production COOKIE_SECURE=true guard. Do NOT use this in a real
+      # production deployment. See backend/.env.example for the warning text.
+      INSECURE_COOKIES_ALLOWED: 'true'
       COOKIE_DOMAIN: ''
       CORS_ORIGIN: http://localhost:5173
       BCRYPT_ROUNDS: '10'

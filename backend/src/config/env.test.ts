@@ -117,6 +117,36 @@ describe('loadEnv — production guards', () => {
     ).toThrow(/COOKIE_SECURE/);
   });
 
+  it('accepts COOKIE_SECURE=false in production when INSECURE_COOKIES_ALLOWED=true', () => {
+    const env = loadEnv({
+      ...BASE_ENV,
+      NODE_ENV: 'production',
+      SESSION_SECRET: STRONG_SECRET_A,
+      COOKIE_SECURE: 'false',
+      INSECURE_COOKIES_ALLOWED: 'true',
+      BCRYPT_ROUNDS: '10',
+    });
+    expect(env.COOKIE_SECURE).toBe(false);
+    expect(env.INSECURE_COOKIES_ALLOWED).toBe(true);
+  });
+
+  it('INSECURE_COOKIES_ALLOWED defaults to false when unset', () => {
+    const env = loadEnv({
+      ...BASE_ENV,
+      NODE_ENV: 'development',
+    });
+    expect(env.INSECURE_COOKIES_ALLOWED).toBe(false);
+  });
+
+  it('INSECURE_COOKIES_ALLOWED=true in dev is accepted (flag is allowed in any NODE_ENV)', () => {
+    const env = loadEnv({
+      ...BASE_ENV,
+      NODE_ENV: 'development',
+      INSECURE_COOKIES_ALLOWED: 'true',
+    });
+    expect(env.INSECURE_COOKIES_ALLOWED).toBe(true);
+  });
+
   it('fails when SESSION_SECRET is empty in production', () => {
     expect(() =>
       loadEnv({
