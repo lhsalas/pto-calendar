@@ -83,4 +83,29 @@ describe('db:seed-holidays script', () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/inserted=37/);
   });
+
+  it('rejects --all combined with --country', () => {
+    const r = runSeedHolidays(REQUIRED_DB, ['--all', '--country', 'US']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr + r.stdout).toMatch(/mutually exclusive/);
+  });
+
+  it('inserts every supported country via --all', () => {
+    const r = runSeedHolidays(REQUIRED_DB, ['--all']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/inserted=26/);
+    expect(r.stdout).toMatch(/inserted=14/);
+    expect(r.stdout).toMatch(/inserted=42/);
+    expect(r.stdout).toMatch(/inserted=37/);
+    expect(r.stdout).toMatch(/4 countries, inserted=119/);
+  });
+
+  it('--all is idempotent on re-run (skips existing rows)', () => {
+    const r1 = runSeedHolidays(REQUIRED_DB, ['--all']);
+    expect(r1.status).toBe(0);
+    const r2 = runSeedHolidays(REQUIRED_DB, ['--all']);
+    expect(r2.status).toBe(0);
+    expect(r2.stdout).toMatch(/inserted=0/);
+    expect(r2.stdout).toMatch(/skipped=119/);
+  });
 });

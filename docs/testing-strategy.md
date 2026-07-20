@@ -166,6 +166,7 @@ Additional shipped journeys (frontend enhancements #18–#26):
 - CI: GitHub Actions service container `postgres:16` with health check.
 - Local: `npm run db:up` (calls `node bin/container.mjs compose up -d db`, auto-detects podman or docker) for developers; the dev compose file is `docker-compose.yml` and is documented in `README.md`
 - Local: `npm run app:up` (calls `node bin/container.mjs compose -f docker-compose.app.yml up --build`) for the all-in-one stack (db + migrate + backend + frontend, only host port 5173) when a contributor has Docker or Podman but not Node.js — exercise this path before merge when the all-in-one compose changes. See `docs/podman.md` for the Podman-specific notes
+- CI: `docker-smoke` job in `.github/workflows/ci.yml` runs `docker compose -f docker-compose.app.yml up --build -d` directly (GitHub Actions runners ship with Docker; no `bin/container.mjs` wrapper needed), polls `/health` for up to 90 s, logs in as `lead@example.com`, asserts `GET /holidays/all` returns the expected US/MX/CO/CL counts (proves the auto-seed via `seedHolidays.ts --all` worked), and asserts `POST /holidays/seed {"countryCode":"CO"}` returns `{inserted:0, skipped:42, errors:[]}` (proves the runtime JSON-asset bundling works in the production backend binary). Always tears down with `down -v` even on failure.
 - Playwright's `cleanupCreatedUsers()` helper (`frontend/e2e/admin-users.spec.ts`) reads `DATABASE_URL` first and falls back to `postgresql://pto:pto@localhost:5432/pto_test?schema=public`. The `npm run test:e2e -w frontend` script prepends `DATABASE_URL=…/pto_test…` so a fresh local clone Just Works (CI does the same via the job's `env:` block). The hardcoded fallback deliberately points at `pto_test`, not `pto` (the dev DB), so a missing env var doesn't silently target the wrong DB.
 - Prisma migrations run on test setup. Assumes the baseline migration has been generated and committed under `backend/prisma/migrations/` before the first integration test run (see `plan.md` Phase 0). CI runs `prisma migrate deploy`, never `migrate dev`.
 - `TRUNCATE pto_requests, audit_logs RESTART IDENTITY CASCADE;` between tests (keep `users` seeded once). The seed script itself must be **idempotent including password hashes** — re-running it updates each user's `passwordHash` to match the seed definition, so test fixtures stay reproducible across re-seeds.
@@ -190,7 +191,8 @@ Jobs (run in order, with `needs:` dependencies):
 | 5 | `test-frontend` | ubuntu-latest | — | vitest run frontend, coverage |
 | 6 | `build` | ubuntu-latest | lint, typecheck | build backend + frontend |
 | 7 | `e2e` | ubuntu-latest + postgres service | build | playwright install, playwright test, upload trace/video on failure |
-| 8 | `coverage-gate` | ubuntu-latest | 4, 5 | enforce thresholds; post coverage diff as PR comment |
+| 8 | `docker-smoke` | ubuntu-latest | build | start the all-in-one compose stack, poll `/health`, login + validate auto-seeded holidays + validate the seed endpoint, tear down with `-v` |
+| 9 | `coverage-gate` | ubuntu-latest | 4, 5 | enforce thresholds; post coverage diff as PR comment |
 
 ### 10.2 Triggers
 - `pull_request` to `main`: full pipeline.
@@ -201,7 +203,7 @@ Jobs (run in order, with `needs:` dependencies):
 - Cache `node_modules` and Playwright browsers keyed on lockfile hashes.
 
 ### 10.4 Required status checks
-`lint`, `typecheck`, `test-backend-unit`, `test-backend-integration`, `test-frontend`, `e2e`, `coverage-gate` must all pass before merge to `main`.
+`lint`, `typecheck`, `test-backend-unit`, `test-backend-integration`, `test-frontend`, `e2e`, `docker-smoke`, `coverage-gate` must all pass before merge to `main`.
 
 ### 10.5 Secrets
 - `DATABASE_URL` for the Postgres service container (set per job, never from repo secrets).

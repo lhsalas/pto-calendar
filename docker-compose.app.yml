@@ -25,10 +25,19 @@ services:
     command:
       - sh
       - -c
-      - 'npx prisma migrate deploy --schema=backend/prisma/schema.prisma && npx tsx backend/prisma/seed.ts'
+      - 'npx prisma migrate deploy --schema=backend/prisma/schema.prisma && npx tsx backend/prisma/seed.ts && npx tsx backend/prisma/seedHolidays.ts --all'
     environment:
       DATABASE_URL: postgresql://pto:pto@db:5432/pto?schema=public
       BCRYPT_ROUNDS: '10'
+      # seedHolidays -> HolidayService -> prisma.ts -> loadEnv() runs the
+      # full backend env validator (SESSION_SECRET, COOKIE_SECURE,
+      # BCRYPT_ROUNDS, etc.) before the chain reaches `new PrismaClient()`.
+      # The migrate container never serves HTTP; these vars are present
+      # purely to satisfy validation. They mirror the backend service so
+      # dev parity is obvious.
+      SESSION_SECRET: pto-calendar-dev-session-secret-at-least-32-chars-long
+      COOKIE_SECURE: 'true'
+      INSECURE_COOKIES_ALLOWED: 'true'
     depends_on:
       db:
         condition: service_healthy
@@ -44,6 +53,12 @@ services:
       DATABASE_URL: postgresql://pto:pto@db:5432/pto?schema=public
       SESSION_SECRET: pto-calendar-dev-session-secret-at-least-32-chars-long
       COOKIE_SECURE: 'false'
+      # All-in-one demo compose is HTTP-only (no Caddy / TLS termination),
+      # so COOKIE_SECURE=false is required for the session cookie to flow.
+      # INSECURE_COOKIES_ALLOWED is the explicit, loud opt-out that bypasses
+      # the production COOKIE_SECURE=true guard. Do NOT use this in a real
+      # production deployment. See backend/.env.example for the warning text.
+      INSECURE_COOKIES_ALLOWED: 'true'
       COOKIE_DOMAIN: ''
       CORS_ORIGIN: http://localhost:5173
       BCRYPT_ROUNDS: '10'

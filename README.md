@@ -237,7 +237,7 @@ Configure the rest of the environment from `backend/.env.example`:
 | `PORT`                   | `3000`                                                                                                                                |
 | `DATABASE_URL`           | `postgresql://user:pass@host:5432/pto`                                                                                                |
 | `SESSION_SECRET`         | `openssl rand -base64 32` (≥32 chars, high entropy; comma-separated values are accepted for graceful key rotation)                    |
-| `COOKIE_SECURE`          | `true` (required in production)                                                                                                       |
+| `COOKIE_SECURE`          | `true` (required in production unless `INSECURE_COOKIES_ALLOWED=true`, which is for the HTTP-only `docker-compose.app.yml` demo only) |
 | `COOKIE_DOMAIN`          | API host (e.g., `api.pto.internal.example.com`)                                                                                       |
 | `CORS_ORIGIN`            | SPA origin (e.g., `https://pto.internal.example.com`)                                                                                 |
 | `BCRYPT_ROUNDS`          | `12` (minimum `10` enforced in production; tests use `4`)                                                                             |
@@ -248,7 +248,7 @@ Configure the rest of the environment from `backend/.env.example`:
 | `RATE_LIMIT_MAX`         | `100` — global requests per window per IP                                                                                             |
 | `AUTH_RATE_LIMIT_MAX`    | `5` — failed-login attempts per window per IP                                                                                         |
 
-`SESSION_SECRET` and `COOKIE_SECURE` are validated at boot. The process refuses to start in production with a placeholder, low-entropy, or short `SESSION_SECRET`, or with `COOKIE_SECURE=false`. Multiple comma-separated keys enable key rotation (the new key signs, older keys verify). Generate a fresh secret with `openssl rand -base64 32`.
+`SESSION_SECRET` and `COOKIE_SECURE` are validated at boot. The process refuses to start in production with a placeholder, low-entropy, or short `SESSION_SECRET`, or with `COOKIE_SECURE=false` (unless `INSECURE_COOKIES_ALLOWED=true`, which is the explicit, loud opt-out for the HTTP-only `docker-compose.app.yml` demo only). Multiple comma-separated keys enable key rotation (the new key signs, older keys verify). Generate a fresh secret with `openssl rand -base64 32`.
 | `SHUTDOWN_TIMEOUT_MS` | `10000` — graceful shutdown deadline before force-exit |
 | `READY_TIMEOUT_MS` | `5000` — `/ready` DB probe race timer |
 

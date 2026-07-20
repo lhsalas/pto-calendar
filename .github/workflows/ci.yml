@@ -195,6 +195,54 @@ jobs:
           name: playwright-test-results
           path: frontend/test-results
 
+  docker-smoke:
+    name: Docker smoke (app:up)
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start all-in-one compose
+        run: |
+          docker compose -f docker-compose.app.yml up --build -d
+      - name: Wait for backend /health
+        run: |
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:5173/health >/dev/null 2>&1; then
+              echo "Backend healthy after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://localhost:5173/health || (echo "Backend never became healthy" && docker compose -f docker-compose.app.yml logs backend && exit 1)
+      - name: Login as team_lead
+        run: |
+          rm -f /tmp/smoke-cookies.txt
+          curl -fsS -c /tmp/smoke-cookies.txt -X POST http://localhost:5173/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"lead@example.com","password":"lead-dev-password"}'
+      - name: Validate auto-seeded holidays (GET /holidays/all)
+        run: |
+          set -e
+          for cc_count in "CO:42" "CL:37" "US:26" "MX:14"; do
+            cc="${cc_count%%:*}"
+            expected="${cc_count##*:}"
+            count=$(curl -fsS -b /tmp/smoke-cookies.txt http://localhost:5173/holidays/all \
+              | python3 -c "import json, sys; data=json.load(sys.stdin); print(sum(1 for h in data if h.get('countryCode')=='${cc}'))")
+            echo "${cc} holidays: ${count}"
+            test "${count}" -eq "${expected}" || (echo "Expected ${expected} ${cc} holidays, got ${count}" && exit 1)
+          done
+      - name: Validate seed endpoint (idempotent re-seed)
+        run: |
+          result=$(curl -fsS -b /tmp/smoke-cookies.txt -X POST http://localhost:5173/holidays/seed \
+            -H 'Content-Type: application/json' \
+            -d '{"countryCode":"CO"}')
+          echo "${result}"
+          echo "${result}" | python3 -c "import json, sys; d=json.load(sys.stdin); assert d['inserted']==0 and d['skipped']==42 and d['errors']==[], d" \
+            || (echo "Expected {inserted:0, skipped:42, errors:[]}" && exit 1)
+      - name: Stop and remove containers + volume
+        if: always()
+        run: docker compose -f docker-compose.app.yml down -v
+
   coverage-gate:
     name: Coverage gate
     runs-on: ubuntu-latest

@@ -73,6 +73,11 @@ const EnvSchema = z
 
     SETUP_TOKEN_TTL_MS: z.coerce.number().int().positive().default(86_400_000),
 
+    INSECURE_COOKIES_ALLOWED: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((v) => v === 'true'),
+
     TRUST_PROXY_HOPS: z.coerce.number().int().min(0).optional(),
   })
   .superRefine((env, ctx) => {
@@ -84,11 +89,12 @@ const EnvSchema = z
         message: 'SESSION_SECRET is required in production',
       });
     }
-    if (!env.COOKIE_SECURE) {
+    if (!env.COOKIE_SECURE && !env.INSECURE_COOKIES_ALLOWED) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['COOKIE_SECURE'],
-        message: 'COOKIE_SECURE must be true in production',
+        message:
+          'COOKIE_SECURE must be true in production (or set INSECURE_COOKIES_ALLOWED=true for HTTP-only demo deployments)',
       });
     }
     if (env.BCRYPT_ROUNDS < 10) {
@@ -116,6 +122,13 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
       .map((i) => `  - ${i.path.join('.') || '(root)'}: ${i.message}`)
       .join('\n');
     throw new Error(`Invalid environment configuration:\n${issues}`);
+  }
+  if (parsed.data.INSECURE_COOKIES_ALLOWED) {
+    console.warn(
+      '[env] WARNING: INSECURE_COOKIES_ALLOWED=true — COOKIE_SECURE is being bypassed. ' +
+        'This is only intended for the HTTP-only `npm run app:up` demo compose stack. ' +
+        'Do NOT set this in a real production deployment behind HTTPS.',
+    );
   }
   const trustProxyHops =
     parsed.data.TRUST_PROXY_HOPS ?? (parsed.data.NODE_ENV === 'production' ? 2 : 0);

@@ -391,7 +391,15 @@ Response 200:
 { "inserted": 26, "skipped": 0, "errors": [] }
 ```
 
-Supported `countryCode` values: `US`, `MX`. The presets are defined as JSON under `backend/src/services/holidays/presets/` and are loaded by `loadPreset(countryCode)`.
+Supported `countryCode` values: `US`, `MX`, `CO`, `CL`. The presets are defined as JSON under `backend/src/services/holidays/presets/` and are loaded by `loadPreset(countryCode)`, which reads from `__dirname/presets/${cc}.json` at runtime.
+
+### Runtime-asset bundling
+
+`tsc` with `resolveJsonModule: true` only inlines JSON files that are imported as TypeScript modules. JSON files read at runtime via `fs.readFile` from `__dirname` are not copied automatically into `dist/`. The `backend/scripts/copy-assets.mjs` script (invoked by `npm run build:assets`, chained from `npm run build`) copies the runtime-asset directories listed in `RUNTIME_ASSET_DIRS` from `src/` to `dist/`. Add a new entry there when introducing a new runtime-asset directory. The build is verified by `backend/tests/unit/scripts/copy-assets.test.ts`, which runs `npm run build` once and asserts every supported country preset lands in `dist/services/holidays/presets/`.
+
+### Bulk seeding
+
+`npm run db:seed-holidays -w backend -- --all` iterates `SUPPORTED_COUNTRY_CODES` and runs `seedDefaults` for each, in order. The command is idempotent: re-running after the data is already loaded produces `inserted=0 skipped=N` for every country. The all-in-one Docker stack (`docker-compose.app.yml`'s `migrate` service) calls this with `--all` after `prisma migrate deploy` and `prisma/seed.ts`, so `npm run app:up` ships with US + MX + CO + CL holidays pre-seeded out of the box.
 
 ## 8. Error Model
 Use consistent API error responses.
@@ -587,7 +595,8 @@ function expandPTOToDates(pto) {
 - Authorization enforced server-side via the centralized `AuthorizationService` (`canModifyPTO`, `canViewNote`)
 - Input validation and sanitization via shared Zod schemas imported by both the routes and the validation layer (single source of truth — `services/{auth,pto}/schemas.ts`)
 - bcrypt password hashing (`BCRYPT_ROUNDS` env var; minimum 10 enforced in production, 4 in tests/CI; recommended 12)
-- `SESSION_SECRET` is validated at boot: must be ≥32 characters, must not be a known placeholder string, and must have Shannon entropy ≥ 3.5 bits/char. Comma-separated values are supported for graceful key rotation (the new key signs, older keys verify). In `NODE_ENV=production` the process refuses to start if `SESSION_SECRET` is a placeholder, fails the entropy check, or if `COOKIE_SECURE` is not `true`
+- `SESSION_SECRET` is validated at boot: must be ≥32 characters, must not be a known placeholder string, and must have Shannon entropy ≥ 3.5 bits/char. Comma-separated values are supported for graceful key rotation (the new key signs, older keys verify). In `NODE_ENV=production` the process refuses to start if `SESSION_SECRET` is a placeholder, fails the entropy check, or if `COOKIE_SECURE` is not `true` and `INSECURE_COOKIES_ALLOWED` is unset
+- `INSECURE_COOKIES_ALLOWED` (default `false`) is the explicit, loud opt-out that bypasses the `COOKIE_SECURE=true` production guard. It exists **only** for the HTTP-only `docker-compose.app.yml` all-in-one demo stack (no TLS termination, no Caddy). When set to `true` the backend emits a `console.warn` at boot so it can't be silently shipped to a real production deployment. Do NOT set this in any environment that serves HTTPS — your session cookies will be sent over plaintext.
 - `requireAuth` revalidates every session user against the database via a per-process in-memory cache keyed by user id (`AUTH_USER_CACHE_TTL_MS`, default 15s). On a cache miss the middleware runs a cheap `findUnique({ select: { id, role } })` and refreshes `req.user` / `req.session.user` to the current role. If the user no longer exists the session is cleared and the response is `401 UNAUTHENTICATED`. A deleted user is therefore revoked within at most one TTL window without a server-side session store. The negative cache (user-not-found) is held for `4 × AUTH_USER_CACHE_TTL_MS` to bound cache-stampede on a deletion. Login regenerates the session by replacing `req.session` with a fresh object containing only the new `user` field (mitigates session-fixation — `cookie-session` has no `regenerate`).
 - HTTP-only secure cookie sessions (`cookie-session`)
 - Cross-origin requests are allowed via the `cors` middleware using the `CORS_ORIGIN` env var allowlist. Credentials are permitted (`credentials: true`) so the HTTP-only cookie session works across origins in production. The allowlist is enforced server-side
