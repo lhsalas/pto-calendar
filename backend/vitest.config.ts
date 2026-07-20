@@ -97,6 +97,18 @@ export default defineConfig({
           branches: 80,
           functions: 80,
         },
+        'src/services/holidays/HolidayService.ts': {
+          lines: 80,
+          statements: 80,
+          branches: 80,
+          functions: 80,
+        },
+        'src/services/holidays/schemas.ts': {
+          lines: 100,
+          statements: 100,
+          branches: 100,
+          functions: 100,
+        },
       },
     },
   },

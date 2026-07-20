@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/useAuth';
 import { usePtoList } from '../hooks/usePtoList';
+import { useHolidays } from '../hooks/useHolidays';
 import { useToast } from '../hooks/useToast';
 import { PTOFormModal } from '../components/pto/PTOFormModal';
 import { PTOViewModal } from '../components/pto/PTOViewModal';
@@ -44,6 +45,7 @@ export function CalendarPage(): JSX.Element {
     fetchStart,
     fetchEnd,
   );
+  const { items: holidays } = useHolidays(fetchStart, fetchEnd);
   const [createOpen, setCreateOpen] = useState<boolean>(false);
   const [viewing, setViewing] = useState<PTOWithUser | null>(null);
   const [editing, setEditing] = useState<PTOWithUser | null>(null);
@@ -151,13 +153,22 @@ export function CalendarPage(): JSX.Element {
         <div className="flex flex-wrap items-center gap-3 text-sm text-ink-muted dark:text-ink-muted-dark">
           <ThemeToggle />
           {canManageUsers(user) ? (
-            <Link
-              to="/admin/users"
-              data-testid="manage-users-link"
-              className="min-h-11 rounded border border-border px-3 py-2 text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
-            >
-              Manage users
-            </Link>
+            <>
+              <Link
+                to="/admin/holidays"
+                data-testid="manage-holidays-link"
+                className="min-h-11 rounded border border-border px-3 py-2 text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
+              >
+                Holidays
+              </Link>
+              <Link
+                to="/admin/users"
+                data-testid="manage-users-link"
+                className="min-h-11 rounded border border-border px-3 py-2 text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
+              >
+                Manage users
+              </Link>
+            </>
           ) : null}
           <span>
             {user.name}{' '}
@@ -220,6 +231,7 @@ export function CalendarPage(): JSX.Element {
             ptoList={items}
             onChipClick={setViewing}
             onDayClick={handleDayClick}
+            holidays={holidays}
           />
         )
       ) : (

@@ -90,6 +90,18 @@ Rules:
 - PTO cannot start or end on a weekend
 - Weekends inside a multi-day PTO range count and are displayed as part of the continuous PTO
 
+### 5.3 Holiday
+A public holiday. Read by every authenticated user; written by team leads only. Two holidays on the same `date` with different `countryCode` values coexist; the unique key is `(date, country_code)`. A `countryCode` of `null` denotes a locale-agnostic holiday that applies to everyone. Holidays do not interact with PTO validation — a PTO that starts or ends on a holiday is allowed.
+
+Fields:
+- `id: uuid`
+- `date: date`
+- `name: string`
+- `countryCode: string | null` (ISO 3166-1 alpha-2, or null)
+- `createdById: uuid` (FK to `users.id`)
+- `createdAt: datetime`
+- `updatedAt: datetime`
+
 ## 6. Database Schema
 
 ### 6.1 PostgreSQL DDL
@@ -332,6 +344,54 @@ Response 200:
 Deletes a PTO record if requester is owner or team lead.
 
 Response 204.
+
+### 7.3 Holiday APIs
+
+#### GET /holidays?start=YYYY-MM-DD&end=YYYY-MM-DD
+Returns every holiday whose `date` falls within `[start, end]` (inclusive). Open to any authenticated user.
+
+Response 200:
+```json
+[
+  { "id": "uuid", "date": "2026-07-04", "name": "Independence Day", "countryCode": "US" },
+  { "id": "uuid", "date": "2026-12-25", "name": "Christmas Day", "countryCode": null }
+]
+```
+
+#### GET /holidays/all
+Returns every holiday in the system. Used by the team-lead admin page.
+
+#### POST /holidays
+Creates a holiday. Team-lead only (403 otherwise). Writes an audit-log entry `action='create_holiday'` with `{ id, date, name, countryCode }`.
+
+Request:
+```json
+{ "date": "2026-07-04", "name": "Independence Day", "countryCode": "US" }
+```
+
+`countryCode` is optional and nullable. Two holidays on the same `date` with different `countryCode` coexist; two holidays on the same `date` with the same `countryCode` return `409 CONFLICT`.
+
+Response 201: the created holiday.
+
+#### DELETE /holidays/:id
+Deletes a holiday. Team-lead only (403 otherwise). Writes an audit-log entry `action='delete_holiday'`.
+
+Response 204.
+
+#### POST /holidays/seed
+Inserts the federal-holiday preset for a supported country. Team-lead only (403 otherwise). Idempotent on the `(date, country_code)` unique constraint. Writes an audit-log entry `action='seed_holidays'` with `{ countryCode, inserted, skipped, errorCount }`.
+
+Request:
+```json
+{ "countryCode": "US" }
+```
+
+Response 200:
+```json
+{ "inserted": 26, "skipped": 0, "errors": [] }
+```
+
+Supported `countryCode` values: `US`, `MX`. The presets are defined as JSON under `backend/src/services/holidays/presets/` and are loaded by `loadPreset(countryCode)`.
 
 ## 8. Error Model
 Use consistent API error responses.

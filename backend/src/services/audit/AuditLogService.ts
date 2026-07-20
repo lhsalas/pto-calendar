@@ -1,8 +1,15 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 
-export type AuditAction = 'update_pto' | 'delete_pto' | 'create_user' | 'reset_user_password';
-export type AuditEntityType = 'pto_request' | 'user';
+export type AuditAction =
+  | 'update_pto'
+  | 'delete_pto'
+  | 'create_user'
+  | 'reset_user_password'
+  | 'create_holiday'
+  | 'delete_holiday'
+  | 'seed_holidays';
+export type AuditEntityType = 'pto_request' | 'user' | 'holiday';
 
 export interface AuditLogEntry {
   actorUserId: string;

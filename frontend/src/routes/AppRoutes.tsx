@@ -3,6 +3,7 @@ import { LoginPage } from '../pages/LoginPage';
 import { SetupAccountPage } from '../pages/SetupAccountPage';
 import { CalendarPage } from '../pages/CalendarPage';
 import { AdminUsersPage } from '../pages/admin/AdminUsersPage';
+import { AdminHolidaysPage } from '../pages/admin/AdminHolidaysPage';
 import { RequireAuth } from './RequireAuth';
 import { RequireRole } from '../components/guards/RequireRole';
 
@@ -24,6 +25,14 @@ export function AppRoutes(): JSX.Element {
         element={
           <RequireRole role="team_lead">
             <AdminUsersPage />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="/admin/holidays"
+        element={
+          <RequireRole role="team_lead">
+            <AdminHolidaysPage />
           </RequireRole>
         }
       />

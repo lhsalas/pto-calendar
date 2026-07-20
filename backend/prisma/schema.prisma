@@ -34,6 +34,7 @@ model User {
 
   ptoRequests PTORequest[]
   auditLogs   AuditLog[]   @relation("AuditActor")
+  holidays    Holiday[]    @relation("HolidayCreator")
 
   @@map("users")
 }
@@ -71,4 +72,20 @@ model AuditLog {
   @@index([actorUserId])
   @@index([entityType, entityId])
   @@map("audit_logs")
+}
+
+model Holiday {
+  id          String   @id @default(uuid()) @db.Uuid
+  date        DateTime @db.Date @map("date")
+  name        String   @db.VarChar(120)
+  countryCode String?  @map("country_code") @db.VarChar(2)
+  createdById String   @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  createdBy User @relation("HolidayCreator", fields: [createdById], references: [id])
+
+  @@unique([date, countryCode])
+  @@index([date])
+  @@map("holidays")
 }
