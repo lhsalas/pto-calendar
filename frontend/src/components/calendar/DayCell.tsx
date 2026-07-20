@@ -1,9 +1,10 @@
 import type { KeyboardEvent } from 'react';
 import { motion } from 'motion/react';
 import { PTOChip } from '../pto/PTOChip';
+import { HolidayBadge } from './HolidayBadge';
 import { formatLongDate, isWeekend, ptoCoversDay } from '../../lib/calendar';
 import type { CalendarDay } from '../../lib/calendar';
-import type { PTOWithUser } from '../../types/api';
+import type { Holiday, PTOWithUser } from '../../types/api';
 
 const MAX_CHIPS = 3;
 
@@ -12,12 +13,20 @@ export interface DayCellProps {
   ptoList: PTOWithUser[];
   onChipClick: (pto: PTOWithUser) => void;
   onDayClick?: (iso: string) => void;
+  holidays?: Holiday[];
 }
 
-export function DayCell({ day, ptoList, onChipClick, onDayClick }: DayCellProps): JSX.Element {
+export function DayCell({
+  day,
+  ptoList,
+  onChipClick,
+  onDayClick,
+  holidays = [],
+}: DayCellProps): JSX.Element {
   const covering = ptoList.filter((p) => ptoCoversDay(p, day.iso));
   const visible = covering.slice(0, MAX_CHIPS);
   const overflow = covering.length - visible.length;
+  const dayHolidays = holidays.filter((h) => h.date === day.iso);
   const clickable = onDayClick !== undefined && !isWeekend(day.iso);
 
   function handleDayActivate(): void {
@@ -83,6 +92,17 @@ export function DayCell({ day, ptoList, onChipClick, onDayClick }: DayCellProps)
         ) : null}
       </div>
       <div className="flex flex-col gap-0.5 overflow-hidden">
+        {dayHolidays.length > 0 ? (
+          <div
+            data-testid={`holiday-stack-${day.iso}`}
+            className="flex flex-col gap-0.5"
+            onClick={clickable ? (e) => e.stopPropagation() : undefined}
+          >
+            {dayHolidays.map((h, idx) => (
+              <HolidayBadge key={h.id} holiday={h} index={idx} />
+            ))}
+          </div>
+        ) : null}
         {visible.map((p) => (
           <div key={p.id} onClick={clickable ? (e) => e.stopPropagation() : undefined}>
             <PTOChip pto={p} onClick={onChipClick} />

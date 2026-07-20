@@ -88,7 +88,7 @@ The main page should be a **calendar view**.
 - Approval workflow
 - Email/Slack notifications
 - PTO conflicts/high team absence warning
-- Public holiday support
+- ~~Public holiday support~~ (shipped via #112 — see §18)
 - Search/filter by employee
 - Mobile-friendly calendar interactions
 - Export to CSV/iCal
@@ -399,3 +399,29 @@ The app is successful if:
 - Team lead can manage entries when needed
 - Permission rules are enforced correctly
 - Calendar navigation supports forward planning
+
+## 18. Public Holiday Support (Shipped)
+
+Issue #112. The calendar now overlays a read-only `HolidayBadge` on every day
+that matches a row in the `holidays` table. Two holidays on the same `date`
+with different `countryCode` values coexist; the unique key is
+`(date, country_code)`. A `countryCode` of `null` denotes a locale-agnostic
+holiday that applies to everyone.
+
+- **Read path**: every authenticated user fetches `GET /holidays?start=&end=`
+  for the visible grid range, in parallel with `GET /pto`. The `DayCell`
+  renders one `HolidayBadge` per matching `(date, countryCode)`, ordered by
+  `countryCode ASC` (null first), stacked above the PTO chips.
+- **Write path**: team leads only. `POST /holidays`, `DELETE /holidays/:id`,
+  and `POST /holidays/seed` are all gated by `canManageUsers`. Members who hit
+  the API directly get `403 FORBIDDEN`; the admin nav link is hidden for them.
+- **Audit logging**: `create_holiday`, `delete_holiday`, and `seed_holidays`
+  entries are written via `AuditLogService.record` with the actor's id and a
+  JSON `details` payload.
+- **PTO × holiday interaction**: independent. A PTO whose start or end date
+  matches a holiday is allowed; no backend rejection, no frontend warning.
+  PTO chips and holiday badges render independently on the same day.
+- **Out of scope (deliberately)**: iCal/CSV export of holidays, live
+  holiday-feed sync (Nager.Date, ICS subscription), per-user "ignore
+  holiday" preferences, holiday-colored PTO chips, locales beyond US + MX.
+

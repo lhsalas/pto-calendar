@@ -63,6 +63,12 @@ export default defineConfig({
           branches: 80,
           functions: 80,
         },
+        'src/routes/holidays.ts': {
+          lines: 80,
+          statements: 80,
+          branches: 80,
+          functions: 80,
+        },
       },
     },
   },

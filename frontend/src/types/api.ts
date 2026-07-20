@@ -95,3 +95,26 @@ export interface SetupAccountRequest {
   token: string;
   password: string;
 }
+
+export interface Holiday {
+  id: string;
+  date: string;
+  name: string;
+  countryCode: string | null;
+}
+
+export interface CreateHolidayRequest {
+  date: string;
+  name: string;
+  countryCode?: string | null;
+}
+
+export interface SeedHolidayRequest {
+  countryCode: 'US' | 'MX';
+}
+
+export interface SeedHolidayResponse {
+  inserted: number;
+  skipped: number;
+  errors: string[];
+}

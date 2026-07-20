@@ -52,6 +52,19 @@ CREATE TABLE audit_logs (
 CREATE INDEX idx_audit_logs_actor_user_id ON audit_logs(actor_user_id);
 CREATE INDEX idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
 
+CREATE TABLE holidays (
+  id UUID PRIMARY KEY,
+  date DATE NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  country_code VARCHAR(2) NULL,
+  created_by_id UUID NOT NULL REFERENCES users(id),
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  UNIQUE (date, country_code)
+);
+
+CREATE INDEX idx_holidays_date ON holidays(date);
+
 -- Optional seed examples
 -- INSERT INTO users (id, name, email, role, color_code, password_hash)
 -- VALUES

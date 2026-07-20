@@ -166,4 +166,38 @@ export const ptoGetDetail = http.get('/pto/:id', () =>
   }),
 );
 
-export const handlers = [unauthenticated, loginOk, logoutOk, ptoListEmpty, ptoCreateOk];
+export const holidaysListAll = http.get('/holidays/all', () =>
+  HttpResponse.json([
+    { id: 'h-1', date: '2026-07-04', name: 'Independence Day', countryCode: 'US' },
+    { id: 'h-2', date: '2026-12-25', name: 'Christmas Day', countryCode: null },
+  ]),
+);
+
+export const holidaysListEmpty = http.get('/holidays/all', () => HttpResponse.json([]));
+
+export const holidaysCreateOk = http.post('/holidays', () =>
+  HttpResponse.json(
+    { id: 'h-new', date: '2026-11-11', name: 'Veterans Day', countryCode: 'US' },
+    { status: 201 },
+  ),
+);
+
+export const holidaysDeleteOk = http.delete(
+  '/holidays/:id',
+  () => new HttpResponse(null, { status: 204 }),
+);
+
+export const holidaysSeedOk = http.post('/holidays/seed', () =>
+  HttpResponse.json({ inserted: 14, skipped: 0, errors: [] }),
+);
+
+export const holidaysRange = http.get(/\/holidays\?/, () => HttpResponse.json([]));
+
+export const handlers = [
+  unauthenticated,
+  loginOk,
+  logoutOk,
+  ptoListEmpty,
+  ptoCreateOk,
+  holidaysRange,
+];

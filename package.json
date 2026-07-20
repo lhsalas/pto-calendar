@@ -27,6 +27,7 @@
     "db:migrate": "npm run db:migrate -w backend",
     "db:seed": "npm run db:seed -w backend",
     "db:bootstrap": "npm run db:bootstrap -w backend",
+    "db:seed-holidays": "npm run db:seed-holidays -w backend --",
     "prisma:generate": "npm run prisma:generate -w backend",
     "prepare": "husky || true"
   },

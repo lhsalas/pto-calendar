@@ -1,6 +1,6 @@
 import { DayCell } from './DayCell';
 import type { CalendarDay } from '../../lib/calendar';
-import type { PTOWithUser } from '../../types/api';
+import type { Holiday, PTOWithUser } from '../../types/api';
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -9,6 +9,7 @@ export interface MonthGridProps {
   ptoList: PTOWithUser[];
   onChipClick: (pto: PTOWithUser) => void;
   onDayClick?: (iso: string) => void;
+  holidays?: Holiday[];
 }
 
 export function MonthGrid({
@@ -16,6 +17,7 @@ export function MonthGrid({
   ptoList,
   onChipClick,
   onDayClick,
+  holidays = [],
 }: MonthGridProps): JSX.Element {
   return (
     <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
@@ -43,6 +45,7 @@ export function MonthGrid({
                 ptoList={ptoList}
                 onChipClick={onChipClick}
                 {...(onDayClick ? { onDayClick } : {})}
+                holidays={holidays}
               />
             ))}
           </div>

@@ -609,8 +609,203 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '429':
           $ref: '#/components/responses/RateLimited'
+  /holidays:
+    get:
+      summary: List holidays in a date range
+      description: Returns every holiday whose `date` falls within `[start, end]` (inclusive). Open to any authenticated user.
+      parameters:
+        - in: query
+          name: start
+          required: true
+          schema: { type: string, format: date }
+        - in: query
+          name: end
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Holidays in the range
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Holiday' }
+        '400':
+          description: Invalid start or end
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    post:
+      summary: Create a holiday
+      description: Team-lead only. Writes an audit-log entry `action='create_holiday'`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateHolidayRequest' }
+      responses:
+        '201':
+          description: Created
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Holiday' }
+        '400':
+          description: Validation error
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Not a team lead
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: A holiday already exists for that (date, country_code).
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /holidays/all:
+    get:
+      summary: List every holiday in the system
+      description: Open to any authenticated user. Used by the team-lead admin page to populate the full list.
+      responses:
+        '200':
+          description: All holidays
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Holiday' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /holidays/{id}:
+    delete:
+      summary: Delete a holiday
+      description: Team-lead only. Writes an audit-log entry `action='delete_holiday'`.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Not a team lead
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Holiday not found
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /holidays/seed:
+    post:
+      summary: Seed a country's default holidays
+      description: |
+        Team-lead only. Inserts the federal-holiday preset for the requested
+        country (US or MX) into the `holidays` table. Idempotent on the unique
+        `(date, country_code)` constraint: existing rows are skipped. Writes an
+        audit-log entry `action='seed_holidays'`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SeedHolidayRequest' }
+      responses:
+        '200':
+          description: Seed result
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SeedHolidayResponse' }
+        '400':
+          description: Validation error (e.g. unsupported country)
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Not a team lead
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
 components:
   responses:
+    Unauthorized:
+      description: Unauthenticated — no valid session cookie.
+      headers:
+        X-Request-Id:
+          schema: { type: string, format: uuid }
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            unauthenticated:
+              value:
+                error: { code: UNAUTHENTICATED, message: Not authenticated. }
     RateLimited:
       description: |
         Too many requests. Returned by the global limiter on every route and
@@ -853,3 +1048,54 @@ components:
             message:
               type: string
               example: You are not allowed to modify this PTO entry.
+    Holiday:
+      type: object
+      required: [id, date, name, countryCode]
+      properties:
+        id:
+          type: string
+          format: uuid
+        date:
+          type: string
+          format: date
+        name:
+          type: string
+          maxLength: 120
+        countryCode:
+          type: string
+          nullable: true
+          description: ISO 3166-1 alpha-2 country code, or null for locale-agnostic holidays. Two holidays on the same date with different country codes coexist; the unique key is (date, country_code).
+          example: US
+    CreateHolidayRequest:
+      type: object
+      required: [date, name]
+      properties:
+        date:
+          type: string
+          format: date
+        name:
+          type: string
+          maxLength: 120
+        countryCode:
+          type: string
+          nullable: true
+          description: ISO 3166-1 alpha-2 country code, or null for locale-agnostic holidays. Omit for null.
+          example: US
+    SeedHolidayRequest:
+      type: object
+      required: [countryCode]
+      properties:
+        countryCode:
+          type: string
+          enum: [US, MX]
+    SeedHolidayResponse:
+      type: object
+      required: [inserted, skipped, errors]
+      properties:
+        inserted:
+          type: integer
+        skipped:
+          type: integer
+        errors:
+          type: array
+          items: { type: string }

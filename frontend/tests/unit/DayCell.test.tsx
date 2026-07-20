@@ -237,4 +237,49 @@ describe('DayCell', () => {
       expect(screen.getByRole('button', { name: /team lead/i })).toBeInTheDocument();
     });
   });
+
+  describe('holiday overlay', () => {
+    it('renders a holiday badge when the day matches a holiday', () => {
+      const holidays = [{ id: 'h-1', date: '2026-05-13', name: "Mother's Day", countryCode: null }];
+      render(
+        <DayCell day={IN_MONTH_DAY} ptoList={[]} onChipClick={() => {}} holidays={holidays} />,
+      );
+      const badge = screen.getByTestId('holiday-badge-2026-05-13-NONE');
+      expect(badge).toHaveTextContent("Mother's Day");
+      expect(badge).toHaveAttribute('aria-label', "Public holiday: Mother's Day");
+    });
+
+    it('does not render a holiday badge for a day with no holidays', () => {
+      render(<DayCell day={IN_MONTH_DAY} ptoList={[]} onChipClick={() => {}} holidays={[]} />);
+      expect(screen.queryByTestId('holiday-badge-2026-05-13-NONE')).not.toBeInTheDocument();
+    });
+
+    it('stacks multiple holiday badges from different countries', () => {
+      const holidays = [
+        { id: 'h-1', date: '2026-05-13', name: 'US Day', countryCode: 'US' },
+        { id: 'h-2', date: '2026-05-13', name: 'MX Day', countryCode: 'MX' },
+      ];
+      render(
+        <DayCell day={IN_MONTH_DAY} ptoList={[]} onChipClick={() => {}} holidays={holidays} />,
+      );
+      expect(screen.getByTestId('holiday-badge-2026-05-13-US')).toBeInTheDocument();
+      expect(screen.getByTestId('holiday-badge-2026-05-13-MX')).toBeInTheDocument();
+      expect(screen.getByText('US Day')).toBeInTheDocument();
+      expect(screen.getByText('MX Day')).toBeInTheDocument();
+    });
+
+    it('renders both the holiday badge and a PTO chip when both apply', () => {
+      const holidays = [{ id: 'h-1', date: '2026-05-13', name: "Mother's Day", countryCode: null }];
+      render(
+        <DayCell
+          day={IN_MONTH_DAY}
+          ptoList={[ptoOn('2026-05-13')]}
+          onChipClick={() => {}}
+          holidays={holidays}
+        />,
+      );
+      expect(screen.getByTestId('holiday-badge-2026-05-13-NONE')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /team lead/i })).toBeInTheDocument();
+    });
+  });
 });

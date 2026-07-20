@@ -111,7 +111,7 @@ All 16 tracked enhancements (8 frontend issues #18–#26 and 8 backend hardening
 
 - **Security beyond helmet:** add a CSRF token strategy for cookie-session flows, swap seed credentials for SSO when an IdP is available, and add an `IP allowlist` opt-in for `/ready` + `/health` from internal probe networks.
 - **Observability:** wire `pino-http` logs into a structured log sink (Loki/CloudWatch) and expose a `/metrics` endpoint (Prometheus format) that surfaces request count, rate-limit hits, `/ready` latency, and DB query time.
-- **Calendar features:** public-holiday overlay (read-only), iCal export of the visible month, and team-lead "PTO conflict warnings" when more than N% of the team is out on the same day.
+- **Calendar features:** iCal export of the visible month, and team-lead "PTO conflict warnings" when more than N% of the team is out on the same day. (Public-holiday overlay shipped in #112.)
 - **API surface:** support `?userId=` filter on `GET /pto` for team-lead dashboards, and add a soft-delete + audit-restore path for accidentally-deleted PTO entries.
 - **Frontend polish:** Storybook for the component library, animated month transitions via `motion`, and a keyboard-shortcut overlay.
 
@@ -293,7 +293,7 @@ The `build` and `e2e` jobs in `.github/workflows/ci.yml` run against an ephemera
 - PTO is informational only; no approval workflow for MVP
 - Overlapping PTO entries for the same user are not allowed
 - Weekends are displayed in the calendar and count as part of continuous multi-day PTO, but PTO cannot start or end on a weekend
-- Public holidays are out of scope for MVP
+- Public holidays are out of scope for MVP ~~(shipped in #112)~~
 - PTO notes are visible only in the `PTOViewModal` (the calendar list and the day chips never display the note body); the detail endpoint returns the note for the owner or a team lead
 - Multiple team leads are supported
 - Audit logging is included in MVP and stored internally only
