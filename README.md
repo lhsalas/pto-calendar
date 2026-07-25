@@ -284,6 +284,10 @@ For a single-host deployment, point `VITE_API_BASE_URL` at the empty string at b
 
 `prisma migrate deploy` is the schema entry point; row-level backups via `pg_dump` are recommended. The audit log grows monotonically — set a retention policy if storage is a concern.
 
+For the full operator runbook — OCI Always Free provisioning, first-time
+`setup.sh`, day-to-day `deploy.sh`, daily `backup.timer`, `SESSION_SECRET`
+rotation, and disaster recovery — see **[`docs/deploy.md`](docs/deploy.md)**.
+
 ### CI verification
 
 The `build` and `e2e` jobs in `.github/workflows/ci.yml` run against an ephemeral Postgres with the seeded users. If both are green, the artifact is production-ready.

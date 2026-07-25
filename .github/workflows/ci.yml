@@ -127,6 +127,22 @@ jobs:
       - run: npm run prisma:generate
       - run: npm run build
 
+  prod-config:
+    name: Prod config (static checks)
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: nginx + Caddy header invariants
+        run: npm run prod:config:check
+      - name: Deploy scripts + systemd unit invariants
+        run: npm run deploy:scripts:check
+
   e2e:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
