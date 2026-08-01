@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { CreatePTORequest, DayPart, PTOWithUser } from '../../types/api';
@@ -40,15 +40,26 @@ export function PTOFormModal({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
 
+  // Capture the date when the modal opens so the reset effect below doesn't
+  // re-fire on every re-render. Previously `today` was in the dependency
+  // array directly, but `today` is a new string on every render, so the
+  // effect would re-run after the user filled the form, clobbering the
+  // input back to "now" — which on a weekend fails the client-side
+  // `isWeekend()` check and leaves the dialog stuck open.
+  const todayRef = useRef(today);
+  useEffect(() => {
+    if (open) todayRef.current = new Date().toISOString().slice(0, 10);
+  }, [open]);
+
   useEffect(() => {
     if (open) {
       setError(null);
-      setStartDate(initialPto?.startDate ?? defaultStartDate ?? today);
-      setEndDate(initialPto?.endDate ?? defaultStartDate ?? today);
+      setStartDate(initialPto?.startDate ?? defaultStartDate ?? todayRef.current);
+      setEndDate(initialPto?.endDate ?? defaultStartDate ?? todayRef.current);
       setDayPart(initialPto?.dayPart ?? 'all_day');
       setNote(initialPto?.note ?? '');
     }
-  }, [open, initialPto, defaultStartDate, today]);
+  }, [open, initialPto, defaultStartDate]);
 
   function handleStartDateChange(value: string): void {
     setStartDate(value);
