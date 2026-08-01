@@ -197,6 +197,43 @@ describe('loadEnv — production guards', () => {
   });
 });
 
+describe('loadEnv — PORT and TRUST_PROXY_HOPS defaults', () => {
+  beforeEach(() => {
+    resetEnvForTests();
+  });
+  afterEach(() => {
+    resetEnvForTests();
+  });
+
+  it('defaults PORT to 3000 when PORT is unset (Deno Deploy does not set it)', () => {
+    const envSource = { ...BASE_ENV } as Record<string, string>;
+    delete envSource.PORT;
+    const env = loadEnv(envSource);
+    expect(env.PORT).toBe(3000);
+  });
+
+  it('honors an explicit PORT when provided', () => {
+    const env = loadEnv({ ...BASE_ENV, PORT: '4000' });
+    expect(env.PORT).toBe(4000);
+  });
+
+  it('defaults TRUST_PROXY_HOPS to 1 in production (Deno Deploy edge is a single hop)', () => {
+    const env = loadEnv({
+      ...BASE_ENV,
+      NODE_ENV: 'production',
+      SESSION_SECRET: STRONG_SECRET_A,
+      COOKIE_SECURE: 'true',
+      BCRYPT_ROUNDS: '12',
+    });
+    expect(env.TRUST_PROXY_HOPS).toBe(1);
+  });
+
+  it('defaults TRUST_PROXY_HOPS to 0 in development', () => {
+    const env = loadEnv({ ...BASE_ENV, NODE_ENV: 'development' });
+    expect(env.TRUST_PROXY_HOPS).toBe(0);
+  });
+});
+
 describe('sessionSecret helpers', () => {
   it('shannonEntropy returns 0 for the empty string', () => {
     expect(shannonEntropy('')).toBe(0);
