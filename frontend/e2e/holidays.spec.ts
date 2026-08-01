@@ -6,7 +6,23 @@ const SEED = {
 };
 
 const E2E_HOLIDAY_PREFIX = 'e2e-holiday-';
-const E2E_HOLIDAY_DATE = '2026-07-03';
+
+// Pick a weekday in the current month so the test is independent of the CI
+// date. The calendar starts on the current month, so the holiday badge is
+// guaranteed to be visible after creation.
+function weekdayInCurrentMonth(): string {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  for (let day = 1; day <= 31; day += 1) {
+    const d = new Date(Date.UTC(year, month, day));
+    if (d.getUTCMonth() !== month) break;
+    const dow = d.getUTCDay();
+    if (dow !== 0 && dow !== 6) return d.toISOString().slice(0, 10);
+  }
+  throw new Error('No weekday in the current month');
+}
+const E2E_HOLIDAY_DATE = weekdayInCurrentMonth();
 
 async function loginAsLead(page: Page): Promise<void> {
   await page.goto('/');

@@ -23,6 +23,30 @@ function nthWeekdayInCurrentMonth(n: number, weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6 
   throw new Error(`No ${weekday} #${n} in the current month`);
 }
 
+// Returns a weekday in the current month that is today or in the future.
+// Used by tests that create a PTO and then expect to see the chip on the
+// current-month calendar. Falls back to the last weekday of the month when
+// every remaining weekday in the month is before today (e.g. the CI runs
+// on the last day of a month with no future weekdays).
+function futureOrTodayWeekdayInCurrentMonth(): string {
+  const now = new Date();
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  let lastWeekday: string | undefined;
+  for (let day = 1; day <= 31; day += 1) {
+    const d = new Date(Date.UTC(year, month, day));
+    if (d.getUTCMonth() !== month) break;
+    const dow = d.getUTCDay();
+    if (dow === 0 || dow === 6) continue;
+    const iso = d.toISOString().slice(0, 10);
+    if (d.getTime() >= today) return iso;
+    lastWeekday = iso;
+  }
+  if (lastWeekday) return lastWeekday;
+  throw new Error('No weekday in the current month');
+}
+
 function nextSaturday(): string {
   const now = new Date();
   const year = now.getUTCFullYear();
@@ -127,7 +151,13 @@ test.describe('Sprint 4 — critical journeys', () => {
 
   test('Journey 8b: a team lead can edit a member PTO', async ({ page }) => {
     await login(page, SEED.dev1.email, SEED.dev1.password);
-    const day = nthWeekdayInCurrentMonth(5, 3);
+    // Use a weekday in the current month that is today or in the future so
+    // the PTO creation succeeds and the chip is visible on the current-month
+    // calendar. The previous `nthWeekdayInCurrentMonth(5, 3)` (5th Wednesday)
+    // broke in months that only have 4 Wednesdays (e.g. August 2026), and a
+    // hard-coded 3rd Monday broke when the CI ran on the last day of a month
+    // (every Monday in that month is in the past).
+    const day = futureOrTodayWeekdayInCurrentMonth();
     await page.getByRole('button', { name: /^add pto$/i }).click();
     await page.getByLabel(/start date/i).fill(day);
     await page.getByLabel(/end date/i).fill(day);
