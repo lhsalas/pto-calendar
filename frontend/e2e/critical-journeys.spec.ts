@@ -23,28 +23,29 @@ function nthWeekdayInCurrentMonth(n: number, weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6 
   throw new Error(`No ${weekday} #${n} in the current month`);
 }
 
-// Returns a weekday in the current month that is today or in the future.
-// Used by tests that create a PTO and then expect to see the chip on the
-// current-month calendar. Falls back to the last weekday of the month when
-// every remaining weekday in the month is before today (e.g. the CI runs
-// on the last day of a month with no future weekdays).
+// Returns the 4th weekday in the current month that is today or in the
+// future. The choice of the 4th weekday (not the 1st) is deliberate:
+// create-pto.spec.ts already creates a PTO for dev1 on the 1st weekday
+// of the current month, and tests run in worker-1 mode, so a Journey 8b
+// run would otherwise hit a 409 CONFLICT on overlap. Falls back to the
+// last weekday of the month when fewer than 4 weekdays remain.
 function futureOrTodayWeekdayInCurrentMonth(): string {
   const now = new Date();
   const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   const year = now.getUTCFullYear();
   const month = now.getUTCMonth();
-  let lastWeekday: string | undefined;
+  const weekdays: string[] = [];
   for (let day = 1; day <= 31; day += 1) {
     const d = new Date(Date.UTC(year, month, day));
     if (d.getUTCMonth() !== month) break;
     const dow = d.getUTCDay();
     if (dow === 0 || dow === 6) continue;
     const iso = d.toISOString().slice(0, 10);
-    if (d.getTime() >= today) return iso;
-    lastWeekday = iso;
+    if (d.getTime() >= today) weekdays.push(iso);
   }
-  if (lastWeekday) return lastWeekday;
-  throw new Error('No weekday in the current month');
+  if (weekdays.length >= 4) return weekdays[3]!;
+  if (weekdays.length > 0) return weekdays[weekdays.length - 1]!;
+  throw new Error('No future-or-today weekday in the current month');
 }
 
 function nextSaturday(): string {
