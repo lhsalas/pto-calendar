@@ -43,7 +43,7 @@ const sessionSecretSchema = z
 const EnvSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-    PORT: z.coerce.number().int().positive().default(3000),
+    PORT: z.coerce.number().int().positive().optional(),
 
     SESSION_SECRET: sessionSecretSchema,
     COOKIE_SECURE: z
@@ -130,9 +130,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
         'Do NOT set this in a real production deployment behind HTTPS.',
     );
   }
+  const port = parsed.data.PORT ?? 3000;
   const trustProxyHops =
-    parsed.data.TRUST_PROXY_HOPS ?? (parsed.data.NODE_ENV === 'production' ? 2 : 0);
-  cached = { ...parsed.data, TRUST_PROXY_HOPS: trustProxyHops };
+    parsed.data.TRUST_PROXY_HOPS ?? (parsed.data.NODE_ENV === 'production' ? 1 : 0);
+  cached = { ...parsed.data, PORT: port, TRUST_PROXY_HOPS: trustProxyHops };
   return cached;
 }
 
