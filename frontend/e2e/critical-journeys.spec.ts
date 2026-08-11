@@ -23,9 +23,9 @@ function nthWeekdayInCurrentMonth(n: number, weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6 
   throw new Error(`No ${weekday} #${n} in the current month`);
 }
 
-// Returns the last weekday in the current month that is today or in the
-// future. Earlier critical journeys reserve the first several weekdays for
-// dev1, so using the last available weekday avoids a deterministic overlap.
+// Returns the second-to-last weekday in the current month that is today or in
+// the future. Earlier critical journeys reserve the first several weekdays,
+// while list-view.spec.ts uses the last weekday in common CI dates.
 function futureOrTodayWeekdayInCurrentMonth(): string {
   const now = new Date();
   const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
@@ -40,7 +40,8 @@ function futureOrTodayWeekdayInCurrentMonth(): string {
     const iso = d.toISOString().slice(0, 10);
     if (d.getTime() >= today) weekdays.push(iso);
   }
-  if (weekdays.length > 0) return weekdays[weekdays.length - 1]!;
+  if (weekdays.length > 1) return weekdays[weekdays.length - 2]!;
+  if (weekdays.length > 0) return weekdays[0]!;
   throw new Error('No future-or-today weekday in the current month');
 }
 
