@@ -23,12 +23,9 @@ function nthWeekdayInCurrentMonth(n: number, weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6 
   throw new Error(`No ${weekday} #${n} in the current month`);
 }
 
-// Returns the 4th weekday in the current month that is today or in the
-// future. The choice of the 4th weekday (not the 1st) is deliberate:
-// create-pto.spec.ts already creates a PTO for dev1 on the 1st weekday
-// of the current month, and tests run in worker-1 mode, so a Journey 8b
-// run would otherwise hit a 409 CONFLICT on overlap. Falls back to the
-// last weekday of the month when fewer than 4 weekdays remain.
+// Returns the last weekday in the current month that is today or in the
+// future. Earlier critical journeys reserve the first several weekdays for
+// dev1, so using the last available weekday avoids a deterministic overlap.
 function futureOrTodayWeekdayInCurrentMonth(): string {
   const now = new Date();
   const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
@@ -43,7 +40,6 @@ function futureOrTodayWeekdayInCurrentMonth(): string {
     const iso = d.toISOString().slice(0, 10);
     if (d.getTime() >= today) weekdays.push(iso);
   }
-  if (weekdays.length >= 4) return weekdays[3]!;
   if (weekdays.length > 0) return weekdays[weekdays.length - 1]!;
   throw new Error('No future-or-today weekday in the current month');
 }
