@@ -1,236 +1,241 @@
 # Production Deployment & Operations
 
-This document is the operator runbook for running PTO Calendar on an Oracle
-Cloud Always Free VM (or any Ubuntu 22.04 host with Docker). It covers
-one-time provisioning, day-to-day deploys, backup verification, disaster
-recovery, and `SESSION_SECRET` rotation.
+This runbook deploys PTO Calendar as a Node/Express API on Google Cloud Run,
+a static Vite SPA on Firebase Hosting, and PostgreSQL on Supabase.
 
-For application-level architecture, environment variables, and the Caddy →
-nginx → backend topology, see `README.md` § "Production Deployment" and
-`docs/technical-spec.md` § 8.
-
-## 1. Provision the OCI VM
-
-### Shape
-- **Shape**: `VM.Standard.A1.Flex` (Always Free — 4 OCPU + 24 GB RAM per tenancy).
-- **Recommended allocation**: **2 OCPU + 12 GB RAM**. Postgres + Node + nginx + Caddy fits comfortably; leave ~50% of the tenancy quota free for the boot volume, headroom, and a future second instance.
-- **Image**: Ubuntu 22.04 LTS, aarch64 (Canonical-provided, marked "Always Free-eligible").
-- **Boot volume**: 50 GB (default is fine).
-
-### Networking
-- **Reserved public IP**: OCI Console → Networking → IPs → Reserve. Ephemeral IPs are released when the instance stops and the cert breaks; always reserve.
-- **VCN security list** (default VCN works): allow ingress on **22** (your IP only), **80**, and **443** (0.0.0.0/0). Egress is open by default.
-
-### DNS
-- Create an `A` record `pto.yourcompany.com` → the reserved public IP.
-- Wait for propagation (TTL-dependent; usually minutes) before the first deploy — Caddy needs the host to resolve before it can issue the Let's Encrypt cert on first request.
-
-### First-boot SSH
-- OCI Console → Instances → Instance details → Console connection (or `ssh ubuntu@<reserved_ip>` if your public key was added at launch).
-- The default user is `ubuntu`. `root` is reachable via `sudo`.
-
-## 2. First-time setup (`setup.sh`)
-
-The script at `infra/deploy/setup.sh` provisions everything end-to-end.
-Re-running it on an existing install is a no-op for already-done steps; it
-performs `git pull` + `docker compose up -d --build` instead of cloning.
-
-### Prerequisites
-- Root or `sudo` access on the VM.
-- DNS record already pointing at the reserved IP.
-- Outbound HTTPS to `download.docker.com`, `github.com`, and Let's Encrypt (`acme-v02.api.letsencrypt.org`).
-
-### Run
-
-```bash
-# Option A: copy setup.sh from your local clone (recommended for first run).
-# On your laptop:
-scp infra/deploy/setup.sh ubuntu@<VM_IP>:/tmp/setup.sh
-
-# On the VM:
-sudo bash /tmp/setup.sh
+```text
+Browser -> Firebase Hosting (frontend/dist)
+       -> Cloud Run (Node + Express + Prisma)
+       -> Supabase PostgreSQL
 ```
 
-`setup.sh` will refuse to run unless all five required env vars are set. Pick a strong `DB_PASSWORD` (e.g. `openssl rand -hex 24`) before running:
+Firebase Hosting is intentionally used for static files only. Do not add a
+Firebase Hosting `run` rewrite for this application: Firebase strips incoming
+cookies for Cloud Run rewrites except for a cookie named `__session`, while
+`cookie-session` uses a session cookie and a separate signature cookie.
 
-```bash
-export HOST=pto.yourcompany.com
-export ACME_EMAIL=ops@yourcompany.com
-export DB_PASSWORD="$(openssl rand -hex 24)"
-export LEAD_EMAIL=lead@yourcompany.com
-export CORS_ORIGIN="https://pto.yourcompany.com"
-sudo -E bash /tmp/setup.sh
+## 1. Required Accounts and Projects
+
+You need:
+
+- A Google Cloud project with billing enabled.
+- A Firebase project associated with that Google Cloud project.
+- A Supabase project.
+- A GitHub repository administrator who can configure Actions variables,
+  secrets, and Workload Identity Federation.
+
+Cloud Run has a monthly free tier, but billing is still required. Firebase
+Hosting may move the project to the Blaze billing plan when Google Cloud
+services are used. Set a Google Cloud budget alert before deploying.
+
+Choose a Cloud Run region close to the Supabase project and users. For a
+North American internal team, `us-central1` is a reasonable starting point.
+
+## 2. Create the Supabase Project
+
+Create a PostgreSQL project and record:
+
+- The project reference.
+- The database password.
+- The shared pooler **session-mode** connection string.
+- A direct connection string, or a session-mode connection string usable by
+  the migration and backup runner.
+
+Use the session pooler URL for the running Cloud Run service. Add a small
+Prisma connection limit, for example:
+
+```text
+postgres://postgres.<project-ref>:<password>@aws-<region>.pooler.supabase.com:5432/postgres?schema=public&connection_limit=5
 ```
 
-### What `setup.sh` does, in order
-1. Validates Ubuntu 22.04.
-2. Validates input env vars (hostname shape, email shape, URL shape).
-3. Installs `docker-ce`, `docker-compose-plugin`, `git`, `openssl` via apt (idempotent — skips if already present).
-4. Creates the unprivileged `deploy` user with `/bin/bash`, adds it to the `docker` group (no `sudo`), pre-creates `/home/deploy/.ssh` with `0700`. Idempotent.
-5. Clones the repo to `/opt/pto-calendar` as `deploy` (or `git pull`s if it's already there).
-6. Writes `/opt/pto-calendar/.env` with a **48-byte random `SESSION_SECRET`** (preserved across re-runs so existing sessions stay valid), the operator-supplied `HOST` / `ACME_EMAIL` / `CORS_ORIGIN` / `DB_PASSWORD` / `LEAD_EMAIL` / `LEAD_NAME` / `LEAD_COLOR_CODE`. File mode `0600`.
-7. Runs `docker compose -f docker-compose.prod.yml up -d --build`.
-8. Polls `http://localhost/health` for up to 60 s.
-9. Runs `db:bootstrap` against the running stack via `docker compose run --rm backend npx tsx backend/prisma/bootstrap.ts` (re-uses the backend image; no need to install Node on the host).
-10. Prints the `/setup-account?token=...` link to stdout.
+Use the direct connection URL only for one-off migrations and database dumps.
+If the direct endpoint is not reachable from the runner, use the Supabase
+shared pooler session URL for those commands.
 
-### After `setup.sh` completes
-1. **Copy the setup link** from stdout and open it in a browser. Set the team-lead password.
-2. **Log in** at `https://pto.yourcompany.com/`.
-3. Visit `/admin/users` and add the rest of the team. Each new user receives a one-time setup link to set their own password.
-4. **Add the deploy key** to `/home/deploy/.ssh/authorized_keys` (if you'll use tag-driven CI deploys — see § 6):
-   ```bash
-   sudo -u deploy bash -c 'umask 077 && cat >> ~/.ssh/authorized_keys' < /tmp/pto-calendar-deploy-key.pub
-   ```
-   Use a **dedicated ed25519 pair** with no passphrase; rotate quarterly.
+Do not put Supabase browser keys in the frontend. This application keeps its
+existing custom cookie-session authentication and accesses PostgreSQL only
+from the backend.
 
-## 3. Deploying releases
+## 3. Create Google Cloud Resources
 
-### Manual deploy (latest `main`)
-SSH in as `deploy`:
+Enable these APIs:
+
 ```bash
-ssh deploy@pto.yourcompany.com
-cd /opt/pto-calendar
-./infra/deploy/deploy.sh
+gcloud services enable \
+  artifactregistry.googleapis.com \
+  run.googleapis.com \
+  secretmanager.googleapis.com \
+  iamcredentials.googleapis.com
 ```
 
-### Manual deploy of a tagged release
+Create an Artifact Registry Docker repository:
+
 ```bash
-./infra/deploy/deploy.sh v1.2.3
+gcloud artifacts repositories create pto-calendar \
+  --repository-format=docker \
+  --location=us-central1
 ```
 
-### Tag-driven deploy (CI)
-After the `deploy.yml` workflow is merged, simply push a tag from your local machine:
-```bash
-git tag v1.2.3
-git push origin v1.2.3
-```
-The CI runner builds the tag, SSHes in as `deploy`, and runs `./infra/deploy/deploy.sh "$TAG"`. See § 6 for repo-secret setup.
+Create Secret Manager entries for:
 
-### What `deploy.sh` does
-1. Sources `HOST` from `/opt/pto-calendar/.env`.
-2. Refuses if the working tree is dirty (uncommitted edits).
-3. `git fetch --all --tags && git checkout <ref>` (and `git pull --ff-only` for branch refs).
-4. `docker compose -f docker-compose.prod.yml up -d --build`.
-5. `docker image prune -f` (clean dangling layers from the previous build).
-6. Polls `https://${HOST}/health` for up to 60 s. **Caddy fronts everything**; a 200 here means TLS is live, nginx is up, and the backend answered.
+- `pto-session-secret`
+- `pto-database-url` containing the Supabase session-pooler URL
+- `pto-direct-url` containing the migration/backup URL
 
-### Rollback
-`./deploy.sh` checks out any git ref (tag, branch, or commit SHA) and re-ups compose. To roll back to `v1.1.0`:
-```bash
-ssh deploy@pto.yourcompany.com
-cd /opt/pto-calendar
-./infra/deploy/deploy.sh v1.1.0
-```
+Create separate deployment and runtime service accounts. Grant only the
+permissions needed for Artifact Registry, Cloud Run deployment, Secret
+Manager access, and Firebase Hosting deployment. Configure GitHub Actions
+Workload Identity Federation instead of storing a JSON service-account key.
 
-## 4. Backups
+## 4. Configure GitHub Actions
 
-### Schedule
-- `infra/db/backup.timer` runs `infra/deploy/backup.sh` **daily at 03:00 UTC** as the `deploy` user.
-- `Persistent=true` means a missed run (instance stopped) catches up on next boot.
-- `RandomizedDelaySec=300` spreads the start across a 5-minute window (useful if you ever scale to multiple VMs).
+Set repository variables:
 
-### Install the timer once
-```bash
-sudo cp /opt/pto-calendar/infra/db/backup.service /etc/systemd/system/backup.service
-sudo cp /opt/pto-calendar/infra/db/backup.timer   /etc/systemd/system/backup.timer
-sudo systemctl daemon-reload
-sudo systemctl enable --now backup.timer
-sudo systemctl list-timers backup.timer   # confirm NEXT shows <24h
-```
-
-### What `backup.sh` produces
-- `/opt/backups/pto-YYYYMMDD.sql.gz` (UTC date stamp, ~1–10 MB).
-- Mode `0600`; rotated after 7 days.
-- `pg_dump --no-owner --no-acl` — clean restore on any Postgres 14+.
-
-### Verify a backup
-```bash
-ssh deploy@pto.yourcompany.com
-zcat /opt/backups/pto-20250101.sql.gz | head -50    # first 50 lines of schema
-zcat /opt/backups/pto-20250101.sql.gz | grep -c INSERT  # row count sanity
-```
-
-### Backup scope (deliberate)
-Backups live **on the same VM**. If the instance is reclaimed or its boot
-volume is corrupted, the backups die with it. This is acceptable for an
-internal team tool of <100 users; for higher-stakes data, add an Object
-Storage sync as a follow-up (out of scope per issue #102).
-
-### Restore
-```bash
-ssh deploy@pto.yourcompany.com
-cd /opt/pto-calendar
-zcat /opt/backups/pto-20250101.sql.gz \
-  | docker compose -f docker-compose.prod.yml exec -T db \
-      psql -U pto -d pto --single-transaction
-```
-Run `./infra/deploy/deploy.sh main` afterwards to make sure any pending
-migrations are applied on top of the restored schema.
-
-## 5. Disaster recovery
-
-If the VM is lost (reclaimed, corrupted boot volume, region outage):
-
-1. **Re-provision** a fresh VM per § 1 (same shape, same reserved IP if reclaiming it is impossible, otherwise a new reserved IP + new DNS A-record + Caddy reissues the cert automatically).
-2. **Re-run `setup.sh`** per § 2, reusing the previous `HOST`, `ACME_EMAIL`, `LEAD_EMAIL`, `CORS_ORIGIN`, and `LEAD_NAME`. Use a **new `DB_PASSWORD`** — the old one only existed in `/opt/pto-calendar/.env` on the lost VM.
-3. **Restore the latest backup** via the § 4 restore recipe, pointed at the new VM.
-4. **Re-bootstrap the team lead**: re-running `setup.sh` regenerates a setup token if the existing lead has no password (otherwise no-op). Visit the new link, set a password, log in.
-
-Recovery time: 15–30 minutes for an experienced operator with the backup file on hand.
-
-## 6. `SESSION_SECRET` rotation
-
-The boot-time env validator in `backend/src/config/env.ts` accepts a
-**comma-separated** `SESSION_SECRET` value: the first key is used to **sign**
-new sessions; any key in the list can **verify** them. This enables
-graceful rotation without invalidating active sessions.
-
-### Rotate
-```bash
-ssh deploy@pto.yourcompany.com
-cd /opt/pto-calendar
-# 1. Generate a new key
-NEW="$(openssl rand -base64 48)"
-# 2. Read the current value
-OLD="$(grep -E '^SESSION_SECRET=' .env | head -n1 | cut -d= -f2-)"
-# 3. Write the combined value (NEW signs, OLD verifies)
-sed -i.bak -E "s|^SESSION_SECRET=.*$|SESSION_SECRET=${NEW},${OLD}|" .env
-chmod 0600 .env
-# 4. Restart so the backend re-reads .env
-./infra/deploy/deploy.sh main
-# 5. After all old sessions have expired (default cookie max-age is one day),
-#    drop the OLD key by editing .env to `SESSION_SECRET=${NEW}` only.
-```
-
-If you **lose** the old `SESSION_SECRET` (e.g. the `.env` file is corrupted
-and you have no backup), all existing sessions are invalidated at the next
-backend restart. Users will be prompted to log in again — this is an
-acceptable recovery; it is **not** a data loss event.
-
-## 7. Always Free caveats
-
-- **24 GB RAM total per tenancy.** Running two `VM.Standard.A1.Flex` instances at full allocation (4 OCPU + 24 GB each) exceeds the quota. Stick to **2 OCPU + 12 GB** on a single instance for this app.
-- **Idle reclaim.** If the instance is **stopped** for more than 7 days, OCI may reclaim it. Always-on services (Caddy + nginx + Node + Postgres) keep the CPU non-zero, so an idle-running instance is **not** at risk; a stopped one is.
-- **Boot volume limits.** Always Free boot volumes cap at 200 GB total per tenancy. Default 50 GB is fine.
-- **Outbound bandwidth.** Always Free egress is **10 TB / month**. An internal team tool is well under this; if you serve large static assets externally, monitor the meter.
-- **Single region.** The home region is pinned at tenancy creation. There is no migration; choose carefully.
-- **Reclamation rescue.** If reclaimed, a new instance can usually be created within an hour. Data recovery requires a backup file (§ 4) that was synced **off** the instance.
-
-## 8. Operator checklist
-
-| When | Step |
+| Variable | Example |
 |---|---|
-| First time | Provision VM per § 1, run `setup.sh` per § 2, complete the setup link, add team members via `/admin/users`. |
-| Cutting a release | Tag and push (`git tag vX.Y.Z && git push origin vX.Y.Z`); CI deploys. Manual fallback: `./infra/deploy/deploy.sh vX.Y.Z`. |
-| Weekly | `zcat /opt/backups/pto-*.sql.gz \| head` (rotate between two recent files) to confirm backups are parseable. |
-| Quarterly | Rotate `SESSION_SECRET` per § 6. Rotate the deploy SSH key per § 2 (last bullet). |
-| Yearly | Review the OCI Always Free quotas (§ 7); check the metering page for egress. |
-| After a security incident | Rotate `SESSION_SECRET` and the deploy key; pull the latest main (which gets the env-validator hardening merged in #116 and follow-ups); re-deploy. |
+| `PRODUCTION_DEPLOY_ENABLED` | `true` |
+| `GCP_PROJECT_ID` | `my-project` |
+| `GCP_REGION` | `us-central1` |
+| `GCP_ARTIFACT_REGISTRY_REPOSITORY` | `pto-calendar` |
+| `FIREBASE_PROJECT_ID` | `my-project` |
+| `FIREBASE_SITE_ORIGIN` | `https://my-project.web.app` |
+| `GCP_DIRECT_URL_SECRET` | `pto-direct-url` |
+| `GCP_DATABASE_URL_SECRET` | `pto-database-url` |
+| `GCP_SESSION_SECRET_SECRET` | `pto-session-secret` |
+| `GCP_RUNTIME_SERVICE_ACCOUNT` | `pto-runtime@my-project.iam.gserviceaccount.com` |
 
-## 9. Out of scope (deferred)
+Set repository secrets:
 
-- Off-VM backup sync (Object Storage). Issue #102 explicitly excludes this; file a follow-up if the data matters enough.
-- Monitoring and alerting. The stack has `/health` and `/ready` probes for orchestrators but no Prometheus exporter, no log aggregation, no uptime alerts. Add a follow-up issue if the team needs it.
-- Multi-region / HA. Always Free's single-region constraint makes HA impractical; for production HA, move off Always Free.
-- Auto-TLS via DNS-01 challenge. Caddy already uses HTTP-01 + Let's Encrypt; no change needed.
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`
+- `GCP_DEPLOY_SERVICE_ACCOUNT`
+- `GCP_BACKUP_SERVICE_ACCOUNT`
+
+The `Deploy production` workflow runs after the `CI` workflow succeeds on
+`master`, or manually through `workflow_dispatch`. It builds
+`backend/Dockerfile`, pushes an immutable image, applies migrations once, and
+deploys Cloud Run.
+
+## 5. Deploy the Backend
+
+The workflow configures the service with:
+
+- Container port `3000`.
+- Request-based billing.
+- Minimum instances `0`.
+- Maximum instances `3` initially.
+- Public invocation, because the application performs its own cookie-session
+  authentication.
+- `TRUST_PROXY_HOPS=1`.
+- `COOKIE_SECURE=true` and `COOKIE_SAME_SITE=none`.
+- Exact `CORS_ORIGIN` equal to the Firebase production origin.
+
+Cloud Run injects `PORT`; the application listens on that value. A cold start
+after inactivity is expected with minimum instances set to zero.
+
+Migrations run before traffic is deployed using `pto-direct-url`. Never run
+`prisma migrate deploy` from every application container startup.
+
+Verify the deployed service:
+
+```bash
+gcloud run services describe pto-api \
+  --region=us-central1 \
+  --format='value(status.url)'
+
+curl -fsS https://<cloud-run-host>/health
+curl -fsS https://<cloud-run-host>/ready
+```
+
+`/health` verifies process liveness. `/ready` verifies database reachability.
+
+## 6. Deploy Firebase Hosting
+
+The committed `firebase.json` points Hosting at `frontend/dist` and provides
+the SPA fallback and security headers.
+
+The frontend build must receive the Cloud Run origin:
+
+```bash
+VITE_API_BASE_URL=https://<cloud-run-host> npm run build -w frontend
+npx firebase-tools deploy \
+  --only hosting \
+  --project <firebase-project-id> \
+  --non-interactive
+```
+
+The production API client already sends `credentials: 'include'`. The
+backend must use:
+
+```text
+CORS_ORIGIN=https://<firebase-project>.web.app
+COOKIE_SECURE=true
+COOKIE_SAME_SITE=none
+COOKIE_DOMAIN=
+```
+
+The backend rejects state-changing requests whose `Origin` or `Referer` does
+not match `CORS_ORIGIN`. This is required because `SameSite=None` is needed
+when the default Firebase and Cloud Run hostnames are different sites.
+
+If custom domains are added later, use an application domain and API domain
+under the same parent domain, then reevaluate whether `COOKIE_SAME_SITE=lax`
+is sufficient. Keep the Origin check enabled.
+
+## 7. First-Time Application Bootstrap
+
+Do not run the development seed in production. After the first migration,
+run the bootstrap command from a trusted machine or a one-off container using
+the direct database URL:
+
+```bash
+DATABASE_URL='<supabase-direct-or-session-url>' \
+LEAD_EMAIL='lead@yourcompany.com' \
+LEAD_NAME='Team Lead' \
+APP_PUBLIC_BASE_URL='https://<firebase-project>.web.app' \
+  npm run db:bootstrap -w backend
+```
+
+Open the one-time setup URL printed by the command and set the lead password.
+The command is idempotent. It does not print or store a password.
+
+Optional holiday presets can be loaded after bootstrap:
+
+```bash
+DATABASE_URL='<supabase-direct-or-session-url>' \
+LEAD_EMAIL='lead@yourcompany.com' \
+  npm run db:seed-holidays -w backend -- --all
+```
+
+## 8. Release and Rollback
+
+Push to `master` after the normal CI gates pass. The deployment workflow uses
+the tested commit SHA as the container tag.
+
+For a rollback, move Cloud Run traffic to the previous revision. Database
+migrations are forward-only; only roll back application code when the previous
+revision remains compatible with the current schema.
+
+```bash
+gcloud run services update-traffic pto-api \
+  --region=us-central1 \
+  --to-revisions=pto-api-<previous-revision>=100
+```
+
+## 9. Monitoring and Cost Controls
+
+- Keep Cloud Run minimum instances at `0` unless cold-start latency becomes a
+  real problem.
+- Keep a maximum instance limit until Supabase connection usage is measured.
+- Monitor Cloud Run request count, latency, container restarts, and logs.
+- Monitor Supabase database size and connection usage.
+- Configure a Google Cloud budget alert.
+- Remember that Artifact Registry, Cloud Storage, network egress, and usage
+  above free quotas can still incur charges.
+
+## 10. Backups
+
+Supabase Free does not provide downloadable managed backups. The repository
+contains a scheduled encrypted logical backup workflow and a separate restore
+runbook in [`docs/database-backups.md`](database-backups.md).
+
+Do not store backups on Cloud Run local disk. Cloud Run storage is ephemeral.

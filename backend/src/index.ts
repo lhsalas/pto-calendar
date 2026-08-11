@@ -8,9 +8,7 @@ import { prisma } from './lib/prisma.js';
 const env = loadEnv();
 const app = createApp();
 
-if (typeof (globalThis as { Deno?: unknown }).Deno === 'undefined') {
-  const server = app.listen(env.PORT, () => {
-    logger.info({ port: env.PORT, env: env.NODE_ENV }, 'Backend listening');
-  });
-  installShutdown(server, prisma);
-}
+const server = app.listen(env.PORT, () => {
+  logger.info({ port: env.PORT, env: env.NODE_ENV }, 'Backend listening');
+});
+installShutdown(server, prisma);

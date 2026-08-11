@@ -205,7 +205,7 @@ describe('loadEnv — PORT and TRUST_PROXY_HOPS defaults', () => {
     resetEnvForTests();
   });
 
-  it('defaults PORT to 3000 when PORT is unset (Deno Deploy does not set it)', () => {
+  it('defaults PORT to 3000 when PORT is unset', () => {
     const envSource = { ...BASE_ENV } as Record<string, string>;
     delete envSource.PORT;
     const env = loadEnv(envSource);
@@ -217,7 +217,7 @@ describe('loadEnv — PORT and TRUST_PROXY_HOPS defaults', () => {
     expect(env.PORT).toBe(4000);
   });
 
-  it('defaults TRUST_PROXY_HOPS to 1 in production (Deno Deploy edge is a single hop)', () => {
+  it('defaults TRUST_PROXY_HOPS to 1 in production (Cloud Run has one trusted proxy hop)', () => {
     const env = loadEnv({
       ...BASE_ENV,
       NODE_ENV: 'production',

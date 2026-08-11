@@ -89,6 +89,7 @@ A PR fails if coverage on a **blocking** path drops below its threshold.
   - Member cannot edit/delete another user's PTO (403)
   - Team lead edits/deletes another user's PTO (200/204)
   - Unauthenticated requests return 401
+  - State-changing requests from an untrusted Origin return `403 CSRF_REJECTED`
   - Same-day PTO without `dayPart` is rejected
   - Multi-day PTO is normalized to `all_day`
   - PTO starting or ending on a weekend is rejected

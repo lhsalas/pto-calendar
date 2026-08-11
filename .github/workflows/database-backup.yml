@@ -1,0 +1,71 @@
+name: Supabase database backup
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: supabase-database-backup
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  GCP_REGION: ${{ vars.GCP_REGION }}
+  BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET }}
+  GCP_BACKUP_DB_URL_SECRET: ${{ vars.GCP_BACKUP_DB_URL_SECRET }}
+  GCP_BACKUP_ENCRYPTION_KEY_SECRET: ${{ vars.GCP_BACKUP_ENCRYPTION_KEY_SECRET }}
+
+jobs:
+  backup:
+    name: Dump and archive Supabase PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_BACKUP_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Dump, encrypt, and upload database
+        run: |
+          set -euo pipefail
+          WORKDIR="$(mktemp -d)"
+          trap 'rm -rf "${WORKDIR}"' EXIT
+          umask 077
+
+          gcloud secrets versions access latest --project="${GCP_PROJECT_ID}" --secret="${GCP_BACKUP_DB_URL_SECRET}" > "${WORKDIR}/db-url"
+          gcloud secrets versions access latest --project="${GCP_PROJECT_ID}" --secret="${GCP_BACKUP_ENCRYPTION_KEY_SECRET}" > "${WORKDIR}/encryption-key"
+          DB_URL="$(<"${WORKDIR}/db-url")"
+          ENCRYPTION_KEY="$(<"${WORKDIR}/encryption-key")"
+
+          supabase db dump --db-url "${DB_URL}" --schema public --file "${WORKDIR}/schema.sql"
+          supabase db dump --db-url "${DB_URL}" --schema public --data-only --use-copy --file "${WORKDIR}/data.sql"
+
+          STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+          ARCHIVE="${WORKDIR}/pto-${STAMP}.tar.gz"
+          ENCRYPTED="${ARCHIVE}.gpg"
+          tar -C "${WORKDIR}" -czf "${ARCHIVE}" schema.sql data.sql
+          printf '%s' "${ENCRYPTION_KEY}" > "${WORKDIR}/passphrase"
+          gpg --batch --yes --symmetric --cipher-algo AES256 \
+            --passphrase-file "${WORKDIR}/passphrase" \
+            --output "${ENCRYPTED}" "${ARCHIVE}"
+          (cd "${WORKDIR}" && sha256sum "$(basename "${ENCRYPTED}")" > "$(basename "${ENCRYPTED}").sha256")
+
+          gcloud storage cp "${ENCRYPTED}" "${ENCRYPTED}.sha256" "gs://${BACKUP_BUCKET}/pto/"

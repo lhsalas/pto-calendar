@@ -72,10 +72,6 @@ export function installShutdown(
   prisma: PrismaClient,
   options: LifecycleOptions = {},
 ): void {
-  if (typeof (globalThis as { Deno?: unknown }).Deno !== 'undefined') {
-    return;
-  }
-
   const handler: ShutdownFn = (signal) => shutdown(signal, server, prisma, options);
 
   process.on('SIGTERM', () => {

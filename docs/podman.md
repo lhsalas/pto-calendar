@@ -79,12 +79,9 @@ the wrapper single-purpose and the script small is the goal.
 
 ## Out of scope
 
-- **Production deployment** (`docker-compose.prod.yml`, Caddy + nginx + the
-  80/443 port). Production is deployed with Docker on the OCI VM (see
-  `docs/deploy.md`); rootless Podman would need
-  `net.ipv4.ip_unprivileged_port_start=80` (or a `socat` relay) and
-  `userns_mode: keep-id` on the Caddy volumes. A follow-up issue will
-  cover prod-on-rootless-Podman if/when we move that target.
+- **Cloud production deployment** — production uses Cloud Run, Firebase
+  Hosting, and Supabase. Podman remains supported for the local Docker Compose
+  development and all-in-one demo stacks only; see `docs/deploy.md`.
 - **Podman quadlets / `podman kube play`** — separate architectural
   decision.
 - **CI runners** — GitHub Actions uses the `postgres:16` service

@@ -51,6 +51,7 @@ const EnvSchema = z
       .default('false')
       .transform((v) => v === 'true'),
     COOKIE_DOMAIN: z.string().default(''),
+    COOKIE_SAME_SITE: z.enum(['lax', 'strict', 'none']).default('lax'),
     COOKIE_MAX_AGE_MS: z.coerce.number().int().positive().default(86_400_000),
 
     DATABASE_URL: z.string().url(),

@@ -308,6 +308,20 @@ describe('server', () => {
     expect(res.headers['cross-origin-resource-policy']).toBe('same-origin');
   });
 
+  it('rejects state-changing requests from an untrusted origin', async () => {
+    const app = createApp();
+    const res = await request(app)
+      .post('/auth/login')
+      .set('Origin', 'https://attacker.example')
+      .send({ email: 'nobody@example.com', password: 'wrong' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatchObject({
+      code: 'CSRF_REJECTED',
+      message: 'Request origin is not allowed.',
+    });
+  });
+
   describe('trust proxy (app.set)', () => {
     const originalEnv = { ...process.env };
     const restoreEnv = (): void => {

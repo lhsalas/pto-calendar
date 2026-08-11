@@ -16,7 +16,7 @@ export function cookieSessionMiddleware(): RequestHandler {
     maxAge: env.COOKIE_MAX_AGE_MS,
     httpOnly: true,
     secure: env.COOKIE_SECURE,
-    sameSite: 'lax',
+    sameSite: env.COOKIE_SAME_SITE,
     ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
   });
 }

@@ -1038,6 +1038,7 @@ components:
                 Machine-readable error code. Common values:
                   - `UNAUTHENTICATED` (401)
                   - `FORBIDDEN` (403)
+                  - `CSRF_REJECTED` (403) — state-changing request origin is not allowed
                   - `VALIDATION_ERROR` (400)
                   - `NOT_FOUND` (404)
                   - `CONFLICT` (409)
