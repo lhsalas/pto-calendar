@@ -64,6 +64,19 @@ describe('cookieSessionMiddleware', () => {
     expect(opts.maxAge).toBe(3_600_000);
   });
 
+  it('allows SameSite=None for a split-origin HTTPS deployment', () => {
+    process.env.SESSION_SECRET = 'fF1!gG2@hH3#iI4$jJ5%kK6&lL7*mM8+nN9';
+    process.env.COOKIE_SECURE = 'true';
+    process.env.COOKIE_SAME_SITE = 'none';
+    process.env.COOKIE_DOMAIN = '';
+    resetEnvForTests();
+
+    cookieSessionMiddleware();
+    const opts = capturedOptions[0]!;
+    expect(opts.sameSite).toBe('none');
+    expect(opts.secure).toBe(true);
+  });
+
   it('omits domain when COOKIE_DOMAIN is empty', () => {
     process.env.SESSION_SECRET = 'cC1!dD2@eF3#gH4$iJ5%kL6&mN7*oP8+';
     process.env.COOKIE_SECURE = 'false';

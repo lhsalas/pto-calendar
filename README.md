@@ -45,6 +45,12 @@ All project documentation lives under [`docs/`](docs/).
 - **File:** `docs/testing-strategy.md`
 - **Purpose:** Tooling matrix, test pyramid, coverage targets (≥80% on critical services, ≥90% on `PTOService`, 100% on authorization, validation, schemas, middleware, and lifecycle), GitHub Actions CI pipeline, ephemeral Postgres for integration tests, Playwright E2E scope (desktop + mobile-chrome projects), pre-commit hooks, and merge policy.
 
+### 7. Deployment and Backup Runbooks
+
+- **Files:** `docs/deploy.md` and `docs/database-backups.md`
+- **Purpose:** GCP Cloud Run, Firebase Hosting, Supabase operations, and
+  encrypted backup/restore procedures.
+
 ## Functional Summary
 
 The app is intended to support:
@@ -69,7 +75,7 @@ The app is intended to support:
 - Toast notifications for save/update/delete/load-error feedback: a unified `Toast` + `ToastViewport` + `ToastProvider` + `useToast` system mounted in `App.tsx`. Success and error tones, terracotta or danger left-stripe on a `surface-3` card, `CheckCircle2` / `XCircle` lucide icons, slide+fade enter/exit via `motion`, hairline progress bar (pauses on hover/focus, resumes on leave), manual close button, `Escape` dismisses the topmost when the viewport has focus, error toasts move focus to the close button for SR/keyboard users, `prefers-reduced-motion` honored, queue capped at 3 with oldest auto-evicted, and same `tone+title` toasts dedupe in place. `error` toasts from `usePtoList` carry a Retry action that calls `refetch()`.
 - Persistent keyboard focus indicators: every input and `<button>` carries a `focus:ring-2` (inputs) or `focus-visible:ring-2 ring-accent-500` (buttons) so the keyboard user always sees where focus lives; ring offset matches the page surface so it reads as part of the layout; chips, calendar cells, modal ×, list-row opens, and Retry link all participate
 - Tab favicon: a single 723-byte SVG under `frontend/public/favicon.svg` — calendar-grid mark (rounded-rect page outline, two binding stubs, header divider, 3×3 day grid, one filled "today" square) — single mid-tone terracotta (#B5533A) fill, tab-only, no PNG/apple-touch-icon/manifest/OG
-- Production hardening (backend): `helmet` mounted globally for the canonical security headers (CSP, HSTS, `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, COOP/CORP/OAC); stricter login limiter on `POST /auth/login` (5 failed attempts per 15 min per IP, `skipSuccessfulRequests: true`); broader global limiter across the rest of the API (100 requests per 15 min per IP); both respond with `{ error: { code: 'RATE_LIMITED', message } }` and `Retry-After`. All three limits are env-driven (`RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_MAX`); defaults are conservative for production but the dev `.env` and CI bump them so e2e suites don't trip the limiter.
+- Production hardening (backend): `helmet` mounted globally for the canonical security headers (CSP, HSTS, `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, COOP/CORP/OAC); exact-origin CSRF checks for state-changing split-origin requests; stricter login limiter on `POST /auth/login` (5 failed attempts per 15 min per IP, `skipSuccessfulRequests: true`); broader global limiter across the rest of the API (100 requests per 15 min per IP); both respond with `{ error: { code: 'RATE_LIMITED', message } }` and `Retry-After`. All three limits are env-driven (`RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_MAX`); defaults are conservative for production but the dev `.env` and CI bump them so e2e suites don't trip the limiter.
 - Graceful shutdown (backend): SIGTERM/SIGINT triggers `shutdown(server, prisma)` which drains `server.close()`, then disconnects the global Prisma client, with a `SHUTDOWN_TIMEOUT_MS` (default 10s) fallback that force-exits 1 if drain hangs. `server.closeAllConnections()` (Node 18+) closes idle keep-alives. `uncaughtException` and `unhandledRejection` handlers log `logger.fatal` and call `process.exit(1)`. Lifecycle is extracted to `backend/src/lib/lifecycle.ts` and unit-tested at 100% coverage (`lifecycle.test.ts`).
 - Health vs readiness (backend): `GET /health` is a no-DB liveness probe that always returns 200 + `{ status: 'ok' }` so orchestrators can restart hung instances; `GET /ready` runs `prisma.$queryRaw\`SELECT 1\``with a`READY_TIMEOUT_MS`(default 5s) race-timer and returns 200 +`{ status: 'ready', db: 'ok', uptime }`on success or 503 +`{ error: { code: 'NOT_READY', ... } }`on failure or timeout. Both endpoints are unauthenticated and registered before`authRouter`/`ptoRouter`. Extracted to `backend/src/routes/health.ts`; covered by `server.test.ts` (7 tests including DB-throw and DB-hang cases).
 - Request logging (backend): `pino-http` mounted globally between `express.json` and `cookieSession` so request-scoped logs are available everywhere. Every response echoes an `X-Request-Id` header (UUID v4 generated by `crypto.randomUUID()`, or the inbound `X-Request-Id` if the client sent one and it matches the safe character class — values containing control characters or whitespace are replaced with a fresh UUID to prevent log injection). Every non-probe request produces exactly one structured log line with `req.{id,method,url}`, `res.statusCode`, and `responseTime` on response finish; `/health` and `/ready` are skipped via `autoLogging.ignore` so probes don't spam logs. `errorHandler` middleware logs `reqId` with any unhandled error so operators can correlate. The base `pino` logger applies a `redact` configuration that strips `Cookie`, `Set-Cookie`, `Authorization`, and `password`/`passwordHash`/`token`/`secret` fields from every log line, and the custom `req`/`res` serializers drop the `headers` field entirely so session cookies and other auth headers never reach stdout.
@@ -109,7 +115,7 @@ The two calendar surfaces, captured from the running dev stack at 1440×900 in l
 
 All 16 tracked enhancements (8 frontend issues #18–#26 and 8 backend hardening issues B1–B8) are shipped. Reasonable follow-ups for the next iteration:
 
-- **Security beyond helmet:** add a CSRF token strategy for cookie-session flows, swap seed credentials for SSO when an IdP is available, and add an `IP allowlist` opt-in for `/ready` + `/health` from internal probe networks.
+- **Security beyond helmet:** swap seed credentials for SSO when an IdP is available, and add an `IP allowlist` opt-in for `/ready` + `/health` from internal probe networks.
 - **Observability:** wire `pino-http` logs into a structured log sink (Loki/CloudWatch) and expose a `/metrics` endpoint (Prometheus format) that surfaces request count, rate-limit hits, `/ready` latency, and DB query time.
 - **Calendar features:** iCal export of the visible month, and team-lead "PTO conflict warnings" when more than N% of the team is out on the same day. (Public-holiday overlay shipped in #112.)
 - **API surface:** support `?userId=` filter on `GET /pto` for team-lead dashboards, and add a soft-delete + audit-restore path for accidentally-deleted PTO entries.
@@ -182,115 +188,24 @@ Sign in as the team lead to see (and edit) every member's PTO; sign in as a memb
 
 ## Production Deployment
 
-The MVP deploys as three artifacts (the Node API, a static SPA, and nginx) fronted by Caddy as the TLS-terminating reverse proxy. The recommended production topology is **Caddy → nginx → backend**, with nginx serving the static SPA and proxying `/auth/*`, `/pto/*`, `/health`, `/ready` to the Node service. Caddy terminates TLS, sets the HSTS header, and forwards `X-Forwarded-{For,Proto,Host}` to nginx. nginx emits the rest of the defense-in-depth security headers (CSP, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options`). HSTS must NOT be duplicated on nginx (Caddy owns it).
+Production uses **Firebase Hosting → Cloud Run → Supabase PostgreSQL**. Firebase serves the static Vite SPA. The browser calls the public Cloud Run API directly with `credentials: 'include'`; the API uses exact CORS and secure cookie settings. Firebase Hosting rewrites are deliberately not used because they strip incoming cookies except for a specially named `__session` cookie, while this app uses `cookie-session` with a session and signature cookie.
 
-The full `docker-compose.prod.yml` ships with this layout and can be brought up with:
+The complete operator runbook is [`docs/deploy.md`](docs/deploy.md). Database backup and restore procedures are in [`docs/database-backups.md`](docs/database-backups.md).
 
-```bash
-HOST=pto.example.com \
-ACME_EMAIL=ops@example.com \
-SESSION_SECRET="$(openssl rand -base64 32)" \
-CORS_ORIGIN=https://pto.example.com \
-  docker compose -f docker-compose.prod.yml up -d
-```
+Production deployment is automated by `.github/workflows/deploy.yml`. It builds
+the backend image, applies Prisma migrations once, deploys Cloud Run with
+minimum instances set to `0`, builds the frontend with the Cloud Run API URL,
+and publishes `frontend/dist` to Firebase Hosting.
 
-`HOST`, `ACME_EMAIL`, `SESSION_SECRET`, and `CORS_ORIGIN` are required; the process refuses to start without them (Caddyfile uses `{$HOST:localhost}` with a localhost fallback for dev, and `docker-compose.prod.yml` uses `${HOST:?HOST is required}` for prod).
+The runtime environment uses a Supabase pooler URL for `DATABASE_URL`, while
+the migration job temporarily overrides `DATABASE_URL` with a direct or
+session-mode URL. Production should use `COOKIE_SECURE=true`,
+`COOKIE_SAME_SITE=none`, an empty `COOKIE_DOMAIN`, exact `CORS_ORIGIN`, and
+`TRUST_PROXY_HOPS=1`.
 
-A `npm run prod:config:check` script (see `infra/tests/prod-headers.test.mjs`) statically asserts that the configured headers, HSTS placement, `X-Forwarded-Proto`/`-Host` forwarding on every proxy_pass, the Caddy reverse-proxy + HSTS directives, and the inline-script CSP hash all line up — run it before any production deploy.
-
-### 1. Provision a Postgres instance
-
-Any Postgres 14+ works. Record the connection string in `DATABASE_URL`.
-
-```bash
-createdb pto
-```
-
-### 2. Build the workspaces
-
-```bash
-npm ci
-npm run prisma:generate
-npx prisma migrate deploy --schema=backend/prisma/schema.prisma
-npm run db:seed
-npm run build
-```
-
-This produces `backend/dist/` (Node service) and `frontend/dist/` (static SPA).
-
-### 3. Start the backend in production mode
-
-For a brand-new production database, run `npm run db:bootstrap` once (instead of `npm run db:seed`) to create the single team lead with a one-time setup link. The script reads `LEAD_EMAIL` (required), optional `LEAD_NAME` / `LEAD_COLOR_CODE` / `APP_PUBLIC_BASE_URL` (or `--base-url` flag), and prints the setup link to stdout. Idempotent: if the lead already has a password, it's a no-op; if the lead exists with no password, it regenerates the token and prints the new link. See [`backend/prisma/bootstrap.ts`](backend/prisma/bootstrap.ts) for the exact contract.
-
-```bash
-LEAD_EMAIL=lead@yourcompany.com \
-APP_PUBLIC_BASE_URL=https://pto.yourcompany.com \
-  npm run db:bootstrap
-# prints: https://pto.yourcompany.com/setup-account?token=...
-```
-
-Configure the rest of the environment from `backend/.env.example`:
-
-| Variable                 | Production value                                                                                                                      |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `NODE_ENV`               | `production` (required)                                                                                                               |
-| `PORT`                   | `3000`                                                                                                                                |
-| `DATABASE_URL`           | `postgresql://user:pass@host:5432/pto`                                                                                                |
-| `SESSION_SECRET`         | `openssl rand -base64 32` (≥32 chars, high entropy; comma-separated values are accepted for graceful key rotation)                    |
-| `COOKIE_SECURE`          | `true` (required in production unless `INSECURE_COOKIES_ALLOWED=true`, which is for the HTTP-only `docker-compose.app.yml` demo only) |
-| `COOKIE_DOMAIN`          | API host (e.g., `api.pto.internal.example.com`)                                                                                       |
-| `CORS_ORIGIN`            | SPA origin (e.g., `https://pto.internal.example.com`)                                                                                 |
-| `BCRYPT_ROUNDS`          | `12` (minimum `10` enforced in production; tests use `4`)                                                                             |
-| `AUTH_USER_CACHE_TTL_MS` | `15000` (15s) — how long `requireAuth` caches the live (id, role) record per session user before re-validating against the DB         |
-| `TRUST_PROXY_HOPS`       | `2` in production (Caddy → nginx → backend); `0` in dev/test. Used by `app.set('trust proxy', N)` and the rate-limiter `keyGenerator` |
-| `LOG_LEVEL`              | `info`                                                                                                                                |
-| `RATE_LIMIT_WINDOW_MS`   | `900000` (15 min) — global limiter window                                                                                             |
-| `RATE_LIMIT_MAX`         | `100` — global requests per window per IP                                                                                             |
-| `AUTH_RATE_LIMIT_MAX`    | `5` — failed-login attempts per window per IP                                                                                         |
-
-`SESSION_SECRET` and `COOKIE_SECURE` are validated at boot. The process refuses to start in production with a placeholder, low-entropy, or short `SESSION_SECRET`, or with `COOKIE_SECURE=false` (unless `INSECURE_COOKIES_ALLOWED=true`, which is the explicit, loud opt-out for the HTTP-only `docker-compose.app.yml` demo only). Multiple comma-separated keys enable key rotation (the new key signs, older keys verify). Generate a fresh secret with `openssl rand -base64 32`.
-| `SHUTDOWN_TIMEOUT_MS` | `10000` — graceful shutdown deadline before force-exit |
-| `READY_TIMEOUT_MS` | `5000` — `/ready` DB probe race timer |
-
-```bash
-cd backend
-node dist/index.js
-```
-
-The server now exposes the API at `/health`, `/ready`, `/auth/*`, and `/pto/*`.
-
-### 4. Reverse proxy
-
-The shipped Caddyfile + nginx.conf implement the Caddy → nginx → backend layout. To customize, edit the Caddyfile (`{$HOST}` and `{$ACME_EMAIL}` are required), then `docker compose -f docker-compose.prod.yml up -d --build caddy nginx`. Run `npm run prod:config:check` after any change to validate the static config invariants.
-
-Or Nginx:
-
-```
-server {
-  listen 443 ssl;
-  server_name pto.internal.example.com;
-
-  location /auth/ { proxy_pass http://localhost:3000; }
-  location /pto/  { proxy_pass http://localhost:3000; }
-  location /health { proxy_pass http://localhost:3000; }
-  location /ready  { proxy_pass http://localhost:3000; }
-  location /      { root /srv/pto/frontend/dist; try_files $uri /index.html; }
-}
-```
-
-For a single-host deployment, point `VITE_API_BASE_URL` at the empty string at build time and serve the SPA at `/`. For a split-host setup, set `VITE_API_BASE_URL` to `https://api.pto.internal.example.com` and let the SPA call the API directly (CORS + `credentials: 'include'` is wired in the backend and the Vite dev proxy).
-
-### 5. Backup
-
-`prisma migrate deploy` is the schema entry point; row-level backups via `pg_dump` are recommended. The audit log grows monotonically — set a retention policy if storage is a concern.
-
-For the full operator runbook — OCI Always Free provisioning, first-time
-`setup.sh`, day-to-day `deploy.sh`, daily `backup.timer`, `SESSION_SECRET`
-rotation, and disaster recovery — see **[`docs/deploy.md`](docs/deploy.md)**.
-
-### CI verification
-
-The `build` and `e2e` jobs in `.github/workflows/ci.yml` run against an ephemeral Postgres with the seeded users. If both are green, the artifact is production-ready.
+The local Docker path remains separate and unchanged: `docker-compose.app.yml`
+continues to use `frontend/nginx.conf` to serve the SPA and proxy local API
+requests.
 
 ## Confirmed Product Decisions
 
@@ -317,7 +232,7 @@ The `build` and `e2e` jobs in `.github/workflows/ci.yml` run against an ephemera
 ## Optional Next Artifacts
 
 - Wireframes or low-fidelity mockups (not currently tracked; design is encoded directly in the Tailwind v4 `@theme` tokens and the component library)
-- Architecture diagram (the runtime topology is two artifacts behind a reverse proxy — see `## Production Deployment`)
+- Architecture diagram (the runtime topology is Firebase Hosting → Cloud Run → Supabase — see `## Production Deployment`)
 - ER diagram (the schema is in `docs/schema.sql` and `backend/prisma/schema.prisma`)
 - Postman / Insomnia collection (the OpenAPI contract at `docs/openapi.yaml` is the source of truth; importable into either tool)
 - Seed data script (already shipped as `npm run db:seed -w backend`; idempotent and re-runnable)

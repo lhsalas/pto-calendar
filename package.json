@@ -23,8 +23,6 @@
     "app:up": "node bin/container.mjs compose -f docker-compose.app.yml up --build",
     "app:down": "node bin/container.mjs compose -f docker-compose.app.yml down",
     "app:reset": "node bin/container.mjs compose -f docker-compose.app.yml down -v && node bin/container.mjs compose -f docker-compose.app.yml up --build",
-    "prod:config:check": "node infra/tests/prod-headers.test.mjs",
-    "deploy:scripts:check": "node infra/tests/deploy-scripts.test.mjs",
     "db:migrate": "npm run db:migrate -w backend",
     "db:seed": "npm run db:seed -w backend",
     "db:bootstrap": "npm run db:bootstrap -w backend",

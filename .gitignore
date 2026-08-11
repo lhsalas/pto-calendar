@@ -35,5 +35,3 @@ test-results/
 /frontend/tsconfig.tsbuildinfo
 
 *.tsbuildinfo
-
-deno.lock

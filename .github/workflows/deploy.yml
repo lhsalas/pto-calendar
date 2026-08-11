@@ -1,0 +1,144 @@
+name: Deploy production
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '20'
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  GCP_REGION: ${{ vars.GCP_REGION }}
+  GCP_ARTIFACT_REGISTRY_REPOSITORY: ${{ vars.GCP_ARTIFACT_REGISTRY_REPOSITORY }}
+  CLOUD_RUN_SERVICE: pto-api
+  FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+  FIREBASE_SITE_ORIGIN: ${{ vars.FIREBASE_SITE_ORIGIN }}
+  GCP_DIRECT_URL_SECRET: ${{ vars.GCP_DIRECT_URL_SECRET }}
+  GCP_DATABASE_URL_SECRET: ${{ vars.GCP_DATABASE_URL_SECRET }}
+  GCP_SESSION_SECRET_SECRET: ${{ vars.GCP_SESSION_SECRET_SECRET }}
+  GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+
+jobs:
+  backend:
+    name: Deploy Cloud Run backend
+    if: >-
+      vars.PRODUCTION_DEPLOY_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'master'))
+    runs-on: ubuntu-latest
+    outputs:
+      service_url: ${{ steps.deploy.outputs.service_url }}
+    env:
+      IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: Check out the tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Authenticate Docker to Artifact Registry
+        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and push backend image
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REGISTRY_REPOSITORY }}/pto-api:${{ env.IMAGE_TAG }}
+
+      - name: Apply Prisma migrations once
+        env:
+          IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REGISTRY_REPOSITORY }}/pto-api:${{ env.IMAGE_TAG }}
+        run: |
+          set -euo pipefail
+          DIRECT_URL="$(gcloud secrets versions access latest --project="${GCP_PROJECT_ID}" --secret="${GCP_DIRECT_URL_SECRET}")"
+          docker run --rm \
+            --env "DATABASE_URL=${DIRECT_URL}" \
+            "${IMAGE}" \
+            npx prisma migrate deploy --schema=backend/prisma/schema.prisma
+          unset DIRECT_URL
+
+      - name: Deploy Cloud Run revision
+        id: deploy
+        env:
+          IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REGISTRY_REPOSITORY }}/pto-api:${{ env.IMAGE_TAG }}
+        run: |
+          set -euo pipefail
+          gcloud run deploy "${CLOUD_RUN_SERVICE}" \
+            --image "${IMAGE}" \
+            --project "${GCP_PROJECT_ID}" \
+            --region "${GCP_REGION}" \
+            --platform managed \
+            --allow-unauthenticated \
+            --service-account "${GCP_RUNTIME_SERVICE_ACCOUNT}" \
+            --port 3000 \
+            --min-instances 0 \
+            --max-instances 3 \
+            --update-env-vars "NODE_ENV=production,CORS_ORIGIN=${FIREBASE_SITE_ORIGIN},COOKIE_SECURE=true,COOKIE_SAME_SITE=none,COOKIE_DOMAIN=,TRUST_PROXY_HOPS=1,BCRYPT_ROUNDS=12,LOG_LEVEL=info,RATE_LIMIT_WINDOW_MS=900000,RATE_LIMIT_MAX=100,AUTH_RATE_LIMIT_MAX=5" \
+            --update-secrets "SESSION_SECRET=${GCP_SESSION_SECRET_SECRET}:latest,DATABASE_URL=${GCP_DATABASE_URL_SECRET}:latest" \
+            --quiet
+          SERVICE_URL="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" --project "${GCP_PROJECT_ID}" --region "${GCP_REGION}" --format='value(status.url)')"
+          echo "service_url=${SERVICE_URL}" >> "${GITHUB_OUTPUT}"
+          curl --fail --silent --show-error --max-time 30 "${SERVICE_URL}/health"
+          curl --fail --silent --show-error --max-time 30 "${SERVICE_URL}/ready"
+
+  frontend:
+    name: Deploy Firebase Hosting frontend
+    needs: backend
+    if: needs.backend.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend with the Cloud Run API URL
+        env:
+          VITE_API_BASE_URL: ${{ needs.backend.outputs.service_url }}
+        run: npm run build -w frontend
+
+      - name: Authenticate to Google Cloud for Firebase CLI
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Deploy Firebase Hosting
+        run: npx --yes firebase-tools@latest deploy --only hosting --project "${FIREBASE_PROJECT_ID}" --non-interactive

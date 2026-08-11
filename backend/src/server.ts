@@ -9,6 +9,7 @@ import { healthRouter } from './routes/health.js';
 import { createUsersRouter } from './routes/users.js';
 import { createHolidaysRouter } from './routes/holidays.js';
 import { cookieSessionMiddleware } from './middleware/cookieSession.js';
+import { csrfOriginMiddleware } from './middleware/csrf.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { logger } from './lib/logger.js';
 import { createGlobalLimiter, createLoginLimiter } from './lib/rateLimit.js';
@@ -30,6 +31,7 @@ export function createApp(): Express {
       credentials: true,
     }),
   );
+  app.use(csrfOriginMiddleware());
   app.use(express.json({ limit: '100kb' }));
   const pinoHttpOptions: PinoHttpOptions = {
     logger,

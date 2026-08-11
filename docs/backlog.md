@@ -274,7 +274,7 @@
 **So that** regressions are caught before merge
 
 #### Acceptance Criteria
-- GitHub Actions workflow runs on every PR and push to `main`
+- GitHub Actions workflow runs on every PR and push to `master`
 - Pipeline includes: lint, typecheck, backend unit, backend integration (with ephemeral Postgres), frontend unit/component, build, Playwright E2E
 - Required status checks block merge when any job fails
 - Pipeline runs in under 15 minutes for typical PRs
@@ -412,8 +412,8 @@ A backlog item is done when:
 - Graceful shutdown now calls `server.closeIdleConnections()` before awaiting `server.close()`, so idle keep-alive peers drop within the grace window instead of waiting for the kernel keep-alive timeout. `server.closeAllConnections()` is still invoked after the close callback to terminate any stragglers. `backend/src/lib/lifecycle.ts` carries the change; `backend/src/lib/lifecycle.test.ts` asserts the call order.
 - Login form input caps: `frontend/src/pages/LoginPage.tsx` sets `maxLength={254}` on the email input (RFC 5321 practical cap) and `maxLength={72}` on the password input (bcrypt's hard cap). This mirrors the server's `LoginSchema.email.max(254)` and prevents a minor DoS surface (oversized payloads) and a password-truncation footgun. `tests/unit/LoginPage.test.tsx` asserts the attributes; `docs/technical-spec.md` §7.1 notes the client-side caps.
 - Dev-toolchain bump: `vite ^6.0.3 → ^7.3.6`, `vitest ^2.1.8 → ^3.2.6`, `@vitest/coverage-v8 ^2.1.8 → ^3.2.6` (frontend `package.json` + lockfile). `npm audit` (with devDeps) now reports `0 vulnerabilities` (was 6: esbuild dev-server cross-origin, vite `.map` path traversal, vite `server.fs.deny` Windows bypass, vitest UI arbitrary file read, plus transitive duplicates). Production bundle is unaffected (`npm audit --omit=dev` = 0 before and after). All frontend unit, e2e, lint, typecheck, and build gates stay green.
-- Trust-proxy + correct rate limiting behind a reverse proxy: new `TRUST_PROXY_HOPS` env (default 0 in dev/test, 2 in production). `createApp()` calls `app.set('trust proxy', N)` when `N > 0`. Both the login and global limiters use a `keyGenerator` that reads `X-Forwarded-For` only when trust proxy is enabled, falling back to `req.socket.remoteAddress` otherwise (spoofing guard). The global limiter `skip`s `/health` and `/ready` so health probes don't consume the user-facing bucket. `backend/src/config/env.ts` carries the schema; `backend/src/lib/rateLimit.ts` carries the limiters; new unit tests in `server.test.ts` cover the trust-proxy pass-through and ignore behavior; new integration test in `tests/integration/auth.test.ts` proves two distinct `X-Forwarded-For` IPs get distinct rate-limit buckets when `TRUST_PROXY_HOPS=2`.
-- Production security headers + Caddy prod topology: `frontend/nginx.conf` emits `Content-Security-Policy` (with the SHA-256 of the inline theme-init script in `frontend/index.html`), `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` (camera/microphone/geolocation/payment disabled), and `X-Frame-Options: DENY` on every static + proxied response. All four `proxy_pass` blocks add `X-Forwarded-Proto` and `X-Forwarded-Host`. nginx does NOT set HSTS (Caddy owns it). New `Caddyfile` (repo root) uses `{$HOST}` + `{$ACME_EMAIL}` placeholders, sets HSTS, and reverse-proxies to `nginx:80`. New `docker-compose.prod.yml` adds a Caddy service on ports 80/443 with auto-TLS, requires `HOST`, `ACME_EMAIL`, `SESSION_SECRET`, `CORS_ORIGIN` at deploy time, and sets `TRUST_PROXY_HOPS=2` + `COOKIE_SECURE=true` on the backend. Static config invariants are enforced by `npm run prod:config:check` (`infra/tests/prod-headers.test.mjs`).
+- Trust-proxy + correct rate limiting behind Cloud Run: `TRUST_PROXY_HOPS` defaults to `0` in dev/test and `1` in production. `createApp()` calls `app.set('trust proxy', N)` when `N > 0`. Both the login and global limiters use a `keyGenerator` that reads `X-Forwarded-For` only when trust proxy is enabled, falling back to `req.socket.remoteAddress` otherwise (spoofing guard). The global limiter `skip`s `/health` and `/ready` so health probes don't consume the user-facing bucket. `backend/src/config/env.ts` carries the schema; `backend/src/lib/rateLimit.ts` carries the limiters.
+- Firebase Hosting + Cloud Run production topology: `firebase.json` serves the static SPA with the CSP and security headers, while the browser calls the public Cloud Run API origin directly. Firebase Hosting rewrites are not used because they strip incoming cookies other than `__session`; the API uses `COOKIE_SAME_SITE=none`, `COOKIE_SECURE=true`, exact `CORS_ORIGIN`, and `csrfOriginMiddleware` for state-changing requests. `min-instances=0` and a small maximum instance limit protect Supabase connection capacity. The local `frontend/nginx.conf` remains for `docker-compose.app.yml` only.
 - Harden `frontend/src/api/client.ts` `apiRequest`: safe-JSON parse (throws `ApiError(0, { code: 'BAD_RESPONSE' })` on malformed body, no more uncaught `SyntaxError` leaking to callers), default 15s timeout (`VITE_API_TIMEOUT_MS` + per-request `timeoutMs` option) enforced via `Promise.race` with a `clearTimeout` in `finally` (no leaked timers), caller `signal` forwarded to `fetch` and reported as `ApiError(0, { code: 'ABORTED' })` on abort, network failures reported as `ApiError(0, { code: 'NETWORK' })`. `vite-env.d.ts` documents the new `VITE_API_TIMEOUT_MS`; `frontend/.env.example` documents it; unit tests in `tests/unit/apiClient.test.ts` cover the four error paths. The `AuthContext` `/auth/me` effect keeps the `cancelled`-flag cleanup pattern (the AbortController-based pattern runs into a vitest+jsdom+undici `AbortSignal` instanceof mismatch; documented in the file's docblock).
 - Use `apiRequest` consistently + encode URL segments: `PTOViewModal.loadDetail` was the only remaining raw `fetch(` call site; rewrote to `apiRequest<PTO & { user }>` with `encodeURIComponent(pto.id)`. `usePtoList` builds the `/pto?start=…&end=…` query via `URLSearchParams` (not string concatenation) and encodes `id` in the `update` and `remove` paths. `frontend/eslint.config.js` adds a `no-restricted-syntax` rule that bans raw `fetch(` outside `src/api/client.ts` and the `apiClient` test, with a helpful error message pointing to `apiRequest`; the `PTOFormModal` overlap test was using a raw `fetch(` in a mock `onSubmit` and was rewritten to `apiRequest` via dynamic import.
 - Top-level `ErrorBoundary` (`frontend/src/components/ErrorBoundary.tsx`): a React class component (with `getDerivedStateFromError` + `componentDidCatch`) that wraps the route tree in `App.tsx`, so a render-time throw — a malformed server payload cast to the wrong shape, a `new Date(invalidString)`-style NaN, etc. — shows a user-facing fallback with a "Back to calendar" button instead of unmounting the whole app to a blank screen. `componentDidCatch` logs to `console.error` (no raw error body in the fallback — no info leak). Unit tests in `tests/unit/ErrorBoundary.test.tsx` cover the four paths: no-error render, fallback render on child throw, no raw-error echo in the fallback, and the Reload button → `window.location.assign('/calendar')`.
@@ -423,3 +423,67 @@ A backlog item is done when:
 ### Story 6.9: Public holiday support — #112
 **Status:** Shipped
 **Summary:** New `Holiday` Prisma model (`id`, `date`, `name`, `countryCode?`, `createdById`, `createdAt`, `updatedAt`; UNIQUE `(date, country_code)` + INDEX `(date)`). `HolidayService` (`listInRange`, `listAll`, `create`, `remove`, `seedDefaults`) with shared Zod schemas in `services/holidays/schemas.ts` and JSON presets under `services/holidays/presets/{US,MX}.json` for federal-holiday seeds. Routes mounted at `/holidays` (`GET ?start=&end=`, `GET /all`, `POST`, `DELETE /:id`, `POST /seed`); all writes gated by `canManageUsers` (team_lead or admin). `AuditLogService.record` is invoked on every write with `action ∈ {create_holiday, delete_holiday, seed_holidays}`. `npm run db:seed-holidays -- --country=US` is a CLI wrapper that calls the same `seedDefaults` with the first team_lead as actor (or `LEAD_EMAIL=...` to pick a specific one). Frontend: `useHolidays(start, end)` parallel-fetches with PTOs; `CalendarPage` threads the result into `MonthGrid` → `DayCell` which renders a `HolidayBadge` (corner ribbon + flag + name on hover) per matching `(date, countryCode)`. New `/admin/holidays` page (team_lead only) lists holidays, has an "Add holiday" form, and a "Seed defaults" dropdown. New `--color-holiday` design tokens (purple) added to the `@theme` block. Audit-log enum widened to include the three new actions. Vitest coverage: `HolidayService` joins the existing critical-path tier at ≥80% lines (achieved 92%); `services/holidays/schemas.ts` hits 100% across all metrics; `routes/holidays.ts` joins the existing routes tier at ≥80% (achieved 90%). Integration suite stays at ≥90% All-files lines (achieved 93.6%). e2e suite adds `frontend/e2e/holidays.spec.ts` (2 specs): a team_lead reaches `/admin/holidays` from the calendar, adds a holiday, and sees it on the calendar; a non-team_lead sees no nav link and gets 403 on direct API call. `frontend/vite.config.ts` and `frontend/nginx.conf` add a `/holidays` proxy pass. The e2e suite is now **40 specs**, all green. Added Colombia (CO, 42 entries) and Chile (CL, 37 entries) preset support in #114 — the `SUPPORTED_COUNTRY_CODES` allowlist in both backend and frontend is now `['US','MX','CO','CL']`, the frontend `COUNTRY_FLAG` map adds 🇨🇴 and 🇨🇱, and the admin page's "Seed defaults" section exposes one button per country. The e2e suite grows to 41 specs.
+## 7. Epic 7: Cloud Deployment and Operations
+
+The production target is Google Cloud Run + Firebase Hosting + Supabase. The
+stories below replace the former Deno Deploy and OCI plan.
+
+### Story 7.1: Document Cloud Run, Firebase, and Supabase deployment - #128
+
+**Status:** Implemented in this change
+
+**Acceptance criteria:** `docs/deploy.md` documents provisioning, secrets,
+Cloud Run scaling, Firebase Hosting, Supabase connection URLs, bootstrap,
+rollback, monitoring, and cost controls. `docs/plan.md`, `README.md`, and
+`docs/technical-spec.md` record the architecture decision.
+
+### Story 7.2: Make cookie sessions and Prisma safe for split-origin deployment - #130
+
+**Status:** Implemented in this change
+
+**Acceptance criteria:** `COOKIE_SAME_SITE` is configurable, production can
+use `SameSite=None; Secure`, state-changing requests validate Origin/Referer,
+and local tests continue to pass.
+
+### Story 7.3: Deploy the API to Cloud Run - #125
+
+**Status:** Scaffolded in this change; cloud provisioning pending
+
+**Acceptance criteria:** GitHub Actions builds and pushes the backend image,
+runs migrations once using a direct Supabase URL, deploys with minimum
+instances `0`, caps maximum instances, injects Secret Manager values, and
+smoke-tests `/health` and `/ready`.
+
+### Story 7.4: Deploy the SPA to Firebase Hosting - #127
+
+**Status:** Scaffolded in this change; Firebase deployment pending
+
+**Acceptance criteria:** `firebase.json` serves `frontend/dist`, preserves SPA
+routing and security headers, builds with `VITE_API_BASE_URL`, and verifies a
+real Firebase-origin login flow against Cloud Run.
+
+### Story 7.5: Back up and restore Supabase Free PostgreSQL - #124
+
+**Status:** Scaffolded in this change; restore drill pending
+
+**Acceptance criteria:** `.github/workflows/database-backup.yml` creates a
+daily encrypted public-schema dump, uploads it to private GCS storage, and
+retains it for 30 days. `docs/database-backups.md` documents manual CLI dumps,
+restore, and a restore drill.
+
+### Story 7.6: Retire Deno and OCI production infrastructure - #129
+
+**Status:** Implemented in this change
+
+**Acceptance criteria:** Deno entry-point files, Deno CI, OCI production
+scripts, Caddy production files, and obsolete deployment checks are removed.
+The local Docker/Podman stack and its nginx proxy remain supported.
+
+### Story 7.7: Validate the production cutover and disaster recovery drill - #126
+
+**Status:** Planned
+
+**Acceptance criteria:** A clean Supabase project is migrated and bootstrapped,
+the Firebase-origin critical journeys pass against Cloud Run, minimum
+instances and connection limits are verified, a Cloud Run rollback is tested,
+and an encrypted database backup is restored into a disposable target.

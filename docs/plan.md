@@ -425,3 +425,26 @@ holiday that applies to everyone.
   holiday-feed sync (Nager.Date, ICS subscription), per-user "ignore
   holiday" preferences, holiday-colored PTO chips, locales beyond US + MX.
 
+## 19. ADR: Cloud Run + Firebase Hosting + Supabase
+
+### Decision
+
+Deploy the Node/Express API to Google Cloud Run with request-based billing and
+minimum instances set to `0`. Deploy the Vite SPA as static files on Firebase
+Hosting. Keep PostgreSQL and Prisma migrations on Supabase.
+
+### Consequences
+
+- The frontend calls the Cloud Run URL directly with `credentials: 'include'`.
+- Production uses exact CORS, `COOKIE_SECURE=true`, and
+  `COOKIE_SAME_SITE=none` for the default split Firebase/Cloud Run hostnames.
+- State-changing requests validate the browser `Origin` or `Referer`.
+- Cloud Run uses a Supabase pooler URL at runtime; migrations and backups use a
+  direct or session-mode URL in one-off jobs.
+- Firebase Hosting rewrites are not used because they strip cookies other than
+  `__session`, which is incompatible with the current signed cookie-session
+  pair.
+- Supabase Free does not provide downloadable managed backups. Daily encrypted
+  logical dumps are stored outside Supabase in private GCS storage.
+- The Deno adapter and OCI production infrastructure are retired. The local
+  Docker/Podman development stack remains supported.
