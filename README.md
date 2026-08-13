@@ -190,7 +190,7 @@ Sign in as the team lead to see (and edit) every member's PTO; sign in as a memb
 
 Production uses **Firebase Hosting → Cloud Run → Supabase PostgreSQL**. Firebase serves the static Vite SPA. The browser calls the public Cloud Run API directly with `credentials: 'include'`; the API uses exact CORS and secure cookie settings. Firebase Hosting rewrites are deliberately not used because they strip incoming cookies except for a specially named `__session` cookie, while this app uses `cookie-session` with a session and signature cookie.
 
-The complete operator runbook is [`docs/deploy.md`](docs/deploy.md). Database backup and restore procedures are in [`docs/database-backups.md`](docs/database-backups.md).
+The complete operator runbook is [`docs/deploy.md`](docs/deploy.md). Database backup and restore procedures are in [`docs/database-backups.md`](docs/database-backups.md). The end-to-end production cutover and DR drill checklists are in [`docs/cutover-drill.md`](docs/cutover-drill.md).
 
 Production deployment is automated by `.github/workflows/deploy.yml`. It builds
 the backend image, applies Prisma migrations once, deploys Cloud Run with
