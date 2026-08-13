@@ -19,6 +19,22 @@ The bucket lifecycle file in `infra/gcp/backup-lifecycle.json` deletes objects
 after 30 days. Change the retention only after confirming the storage cost and
 recovery requirement.
 
+## Operator Scripts
+
+The same flow is available locally through two helper scripts so operators do
+not have to remember the exact invocation:
+
+- `bin/backup-db.mjs` — dump, encrypt, upload. Mirrors the GitHub Actions
+  workflow. Requires `DATABASE_URL`, `BACKUP_BUCKET`, `ENCRYPTION_KEY` env vars
+  plus `supabase` (preferred) or `pg_dump`, `gpg`, `tar`, `sha256sum`, and
+  `gcloud` on `PATH`.
+- `bin/restore-backup.mjs` — download, verify, decrypt, apply. Requires
+  `BACKUP_BUCKET`, `TARGET_DATABASE_URL`, `ENCRYPTION_KEY` env vars plus
+  `gpg`, `tar`, `sha256sum`, `gcloud`, and `psql` on `PATH`.
+
+Both scripts mask secrets where GitHub Actions does, set `umask 077` on the
+working directory, and never echo secret values back to the terminal.
+
 ## One-Time GCP Setup
 
 Create a private bucket in the same region as the Cloud Run service:
@@ -51,7 +67,16 @@ Workload Identity Federation.
 
 ## Manual Backup
 
-Install the Supabase CLI, then run:
+Install the Supabase CLI, then run the helper script:
+
+```bash
+DATABASE_URL='<supabase-direct-or-session-url>' \
+BACKUP_BUCKET='<backup-bucket>' \
+ENCRYPTION_KEY='<passphrase>' \
+  node bin/backup-db.mjs [--label <suffix>] [--keep-local]
+```
+
+Or invoke `supabase db dump` and the GPG flow manually:
 
 ```bash
 supabase db dump \
@@ -80,7 +105,17 @@ an encrypted archive.
 ## Restore Drill
 
 Restore into a new Supabase project or a disposable local PostgreSQL instance,
-not directly over production:
+not directly over production. The helper script downloads, verifies, decrypts,
+and applies the archive:
+
+```bash
+BACKUP_BUCKET='<backup-bucket>' \
+TARGET_DATABASE_URL='<disposable-target-url>' \
+ENCRYPTION_KEY='<passphrase>' \
+  node bin/restore-backup.mjs --archive pto-20260810T030000Z.tar.gz.gpg
+```
+
+The manual equivalent:
 
 ```bash
 gcloud storage cp \
@@ -93,14 +128,39 @@ gpg --decrypt \
   --output pto-<timestamp>.tar.gz \
   pto-<timestamp>.tar.gz.gpg
 tar -xzf pto-<timestamp>.tar.gz
+
+# Drop the public schema so the dump's CREATE SCHEMA public can run.
+psql "$TARGET_DATABASE_URL" -c 'DROP SCHEMA public CASCADE;'
+psql "$TARGET_DATABASE_URL" --variable=ON_ERROR_STOP=1 --file schema.sql
+psql "$TARGET_DATABASE_URL" --variable=ON_ERROR_STOP=1 --file data.sql
 ```
 
-Apply the schema and data to the disposable target using `psql`:
+The drop step is required because the pg_dump output includes
+`CREATE SCHEMA public;`. `psql` is required (not `prisma db execute`) because
+the dump uses psql meta-commands like `\restrict`.
 
-```bash
-psql "$TARGET_DATABASE_URL" --single-transaction --file schema.sql
-psql "$TARGET_DATABASE_URL" --single-transaction --file data.sql
-```
+### Restore drill log
+
+Fill in and attach to the cutover ticket (`#126`):
+
+| Field | Value |
+| --- | --- |
+| Date | |
+| Operator | |
+| Archive timestamp (UTC) | |
+| Source archive path | `gs://<bucket>/pto/pto-<timestamp>.tar.gz.gpg` |
+| Target database | |
+| Schema version (`SELECT MAX(migration_name) FROM _prisma_migrations;`) | |
+| User count (`SELECT COUNT(*) FROM users;`) | |
+| PTO request count (`SELECT COUNT(*) FROM pto_requests;`) | |
+| Holiday count (`SELECT COUNT(*) FROM holidays;`) | |
+| Audit log count (`SELECT COUNT(*) FROM audit_logs;`) | |
+| `GET /ready` against restored app | |
+| Login test account | |
+| PTO create + edit + delete | |
+| Authorization rule (`member cannot modify team_lead PTO`) | |
+| Elapsed recovery time (start → last validation) | |
+| Backup age (archive timestamp → drill start) | |
 
 After restoring:
 
@@ -109,7 +169,6 @@ After restoring:
 - Run `GET /ready` against the restored application.
 - Log in with a restored account.
 - Confirm a PTO create/edit/delete operation and authorization rules.
-- Record the restore date, archive timestamp, and elapsed recovery time.
 
 Do not run `prisma migrate reset` against a restored production database.
 Pending migrations can be applied with `prisma migrate deploy` after verifying

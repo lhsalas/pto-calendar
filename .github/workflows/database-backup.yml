@@ -44,28 +44,71 @@ jobs:
           version: latest
 
       - name: Dump, encrypt, and upload database
+        env:
+          SUPABASE_CLI_NO_UPDATE_NOTIFIER: '1'
         run: |
           set -euo pipefail
+          set +x
           WORKDIR="$(mktemp -d)"
+          chmod 700 "${WORKDIR}"
           trap 'rm -rf "${WORKDIR}"' EXIT
           umask 077
 
-          gcloud secrets versions access latest --project="${GCP_PROJECT_ID}" --secret="${GCP_BACKUP_DB_URL_SECRET}" > "${WORKDIR}/db-url"
-          gcloud secrets versions access latest --project="${GCP_PROJECT_ID}" --secret="${GCP_BACKUP_ENCRYPTION_KEY_SECRET}" > "${WORKDIR}/encryption-key"
+          # Fetch secrets into files; redirect stderr to avoid accidental leaks.
+          if ! gcloud secrets versions access latest \
+              --project="${GCP_PROJECT_ID}" \
+              --secret="${GCP_BACKUP_DB_URL_SECRET}" \
+              > "${WORKDIR}/db-url" 2> "${WORKDIR}/db-url.err"; then
+            echo "::error::Failed to fetch database URL secret." >&2
+            cat "${WORKDIR}/db-url.err" >&2
+            exit 1
+          fi
+          if ! gcloud secrets versions access latest \
+              --project="${GCP_PROJECT_ID}" \
+              --secret="${GCP_BACKUP_ENCRYPTION_KEY_SECRET}" \
+              > "${WORKDIR}/encryption-key" 2> "${WORKDIR}/key.err"; then
+            echo "::error::Failed to fetch encryption key secret." >&2
+            cat "${WORKDIR}/key.err" >&2
+            exit 1
+          fi
+          chmod 600 "${WORKDIR}/db-url" "${WORKDIR}/encryption-key"
+          rm -f "${WORKDIR}/db-url.err" "${WORKDIR}/key.err"
+
           DB_URL="$(<"${WORKDIR}/db-url")"
           ENCRYPTION_KEY="$(<"${WORKDIR}/encryption-key")"
+          # Mask secrets so a later echo / error never reveals them in logs.
+          printf '::add-mask::%s\n' "${DB_URL}"
+          printf '::add-mask::%s\n' "${ENCRYPTION_KEY}"
+          unset ENCRYPTION_KEY
 
-          supabase db dump --db-url "${DB_URL}" --schema public --file "${WORKDIR}/schema.sql"
-          supabase db dump --db-url "${DB_URL}" --schema public --data-only --use-copy --file "${WORKDIR}/data.sql"
+          # Dump public schema and public data separately.
+          supabase db dump --db-url "${DB_URL}" --schema public --file "${WORKDIR}/schema.sql" > /dev/null
+          supabase db dump --db-url "${DB_URL}" --schema public --data-only --use-copy --file "${WORKDIR}/data.sql" > /dev/null
+          unset DB_URL
 
           STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
           ARCHIVE="${WORKDIR}/pto-${STAMP}.tar.gz"
           ENCRYPTED="${ARCHIVE}.gpg"
+          CHECKSUM="${ENCRYPTED}.sha256"
           tar -C "${WORKDIR}" -czf "${ARCHIVE}" schema.sql data.sql
-          printf '%s' "${ENCRYPTION_KEY}" > "${WORKDIR}/passphrase"
-          gpg --batch --yes --symmetric --cipher-algo AES256 \
+          rm -f "${WORKDIR}/schema.sql" "${WORKDIR}/data.sql"
+
+          # Re-read the key only when needed for symmetric encryption, then mask and unset.
+          KEY="$(<"${WORKDIR}/encryption-key")"
+          printf '::add-mask::%s\n' "${KEY}"
+          printf '%s' "${KEY}" > "${WORKDIR}/passphrase"
+          unset KEY
+          chmod 600 "${WORKDIR}/passphrase"
+
+          gpg --batch --yes --no-tty --symmetric --cipher-algo AES256 \
+            --compress-algo none \
             --passphrase-file "${WORKDIR}/passphrase" \
             --output "${ENCRYPTED}" "${ARCHIVE}"
-          (cd "${WORKDIR}" && sha256sum "$(basename "${ENCRYPTED}")" > "$(basename "${ENCRYPTED}").sha256")
+          rm -f "${WORKDIR}/passphrase" "${WORKDIR}/encryption-key"
 
-          gcloud storage cp "${ENCRYPTED}" "${ENCRYPTED}.sha256" "gs://${BACKUP_BUCKET}/pto/"
+          (cd "${WORKDIR}" && sha256sum "$(basename "${ENCRYPTED}")" > "$(basename "${ENCRYPTED}").sha256")
+          chmod 644 "${CHECKSUM}"
+
+          gcloud storage cp "${ENCRYPTED}" "${CHECKSUM}" "gs://${BACKUP_BUCKET}/pto/"
+
+          echo "Backup uploaded: gs://${BACKUP_BUCKET}/pto/$(basename "${ENCRYPTED}")"
