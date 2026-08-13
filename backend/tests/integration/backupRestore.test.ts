@@ -13,13 +13,9 @@ const TARGET_URL =
   'postgresql://pto:pto@localhost:5432/pto_restore_test?schema=public';
 const LOCAL_CONTAINER = 'pto-calendar-db';
 const TARGET_DB = 'pto_restore_test';
+const SOURCE_DB = 'pto_test';
 
 const PASSPHRASE = 'correct horse battery staple';
-
-function stripPgQuery(url: string): string {
-  const idx = url.indexOf('?');
-  return idx === -1 ? url : url.slice(0, idx);
-}
 
 type Runner = 'pg_dump' | 'podman-container' | 'none';
 
@@ -64,15 +60,33 @@ function runPgSql(sqlArgs: string[], input?: string): string {
 }
 
 function runSql(sql: string): void {
-  runPgSql(['psql', '-U', 'pto', '-d', TARGET_DB, '-v', 'ON_ERROR_STOP=1', '-q'], sql);
+  runPgSql(
+    [
+      'psql',
+      '-h',
+      'localhost',
+      '-p',
+      '5432',
+      '-U',
+      'pto',
+      '-d',
+      TARGET_DB,
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-q',
+    ],
+    sql,
+  );
 }
 
 function resetTarget(): void {
-  // DROP SCHEMA public is best-effort: the target DB starts empty after
-  // `CREATE DATABASE`, so the schema may not exist yet.
   try {
     runPgSql([
       'psql',
+      '-h',
+      'localhost',
+      '-p',
+      '5432',
       '-U',
       'pto',
       '-d',
@@ -87,23 +101,71 @@ function resetTarget(): void {
   }
 }
 
-function dumpSchema(sourceDbUrl: string): string {
-  return runPgSql(['pg_dump', '--schema-only', '--no-owner', '--schema=public', sourceDbUrl]);
+function dumpSchema(): string {
+  return runPgSql([
+    'pg_dump',
+    '-h',
+    'localhost',
+    '-p',
+    '5432',
+    '-U',
+    'pto',
+    '--schema-only',
+    '--no-owner',
+    '--schema=public',
+    SOURCE_DB,
+  ]);
 }
 
-function dumpData(sourceDbUrl: string): string {
-  return runPgSql(['pg_dump', '--data-only', '--no-owner', '--schema=public', sourceDbUrl]);
+function dumpData(): string {
+  return runPgSql([
+    'pg_dump',
+    '-h',
+    'localhost',
+    '-p',
+    '5432',
+    '-U',
+    'pto',
+    '--data-only',
+    '--no-owner',
+    '--schema=public',
+    SOURCE_DB,
+  ]);
 }
 
 function ensureTargetDatabase(): void {
   try {
-    runPgSql(['psql', '-U', 'pto', '-d', TARGET_DB, '-c', 'SELECT 1']);
+    runPgSql([
+      'psql',
+      '-h',
+      'localhost',
+      '-p',
+      '5432',
+      '-U',
+      'pto',
+      '-d',
+      TARGET_DB,
+      '-c',
+      'SELECT 1',
+    ]);
     return;
   } catch {
     // fall through and create
   }
   try {
-    runPgSql(['psql', '-U', 'pto', '-d', 'postgres', '-c', `CREATE DATABASE ${TARGET_DB};`]);
+    runPgSql([
+      'psql',
+      '-h',
+      'localhost',
+      '-p',
+      '5432',
+      '-U',
+      'pto',
+      '-d',
+      'postgres',
+      '-c',
+      `CREATE DATABASE ${TARGET_DB};`,
+    ]);
   } catch {
     // race-safe: ignore "database already exists" if another process raced us.
   }
@@ -204,10 +266,8 @@ describe('database backup → restore roundtrip', () => {
       const checksumPath = `${encryptedPath}.sha256`;
       const decryptedPath = join(workdir, `${archiveBase}.decrypted.tar.gz`);
 
-      const sourceDbUrl = stripPgQuery(SOURCE_URL);
-
-      writeFileSync(schemaPath, dumpSchema(sourceDbUrl));
-      writeFileSync(dataPath, dumpData(sourceDbUrl));
+      writeFileSync(schemaPath, dumpSchema());
+      writeFileSync(dataPath, dumpData());
       expect(readFileSync(schemaPath).length).toBeGreaterThan(0);
       expect(readFileSync(dataPath).length).toBeGreaterThan(0);
 
@@ -219,8 +279,6 @@ describe('database backup → restore roundtrip', () => {
       encrypt(archivePath, encryptedPath, PASSPHRASE);
       expect(readFileSync(encryptedPath).length).toBeGreaterThan(0);
 
-      // Ciphertext must not contain plaintext schema/data markers — the only
-      // way the original bytes could be recovered is via GPG with the key.
       const ciphertext = readFileSync(encryptedPath);
       const plaintextSchema = readFileSync(schemaPath);
       expect(ciphertext.includes(plaintextSchema.slice(0, 32))).toBe(false);
@@ -238,7 +296,6 @@ describe('database backup → restore roundtrip', () => {
       });
       expect(verify.status).toBe(0);
 
-      // Tampered ciphertext must fail decryption or checksum verification.
       const tampered = `${encryptedPath}.tampered`;
       const corrupted = Buffer.from(ciphertext);
       const lastIndex = corrupted.length - 1;
