@@ -84,6 +84,8 @@ Create Secret Manager entries for:
 - `pto-session-secret`
 - `pto-database-url` containing the Supabase session-pooler URL
 - `pto-direct-url` containing the migration/backup URL
+- `pto-rate-limit-redis-url` containing a TLS Redis/Valkey URL for the shared
+  login and global rate-limit stores
 
 Create separate deployment and runtime service accounts. Grant only the
 permissions needed for Artifact Registry, Cloud Run deployment, Secret
@@ -110,6 +112,7 @@ Set repository variables:
 | `GCP_DIRECT_URL_SECRET` | `pto-direct-url` |
 | `GCP_DATABASE_URL_SECRET` | `pto-database-url` |
 | `GCP_SESSION_SECRET_SECRET` | `pto-session-secret` |
+| `GCP_RATE_LIMIT_REDIS_URL_SECRET` | `pto-rate-limit-redis-url` |
 | `GCP_RUNTIME_SERVICE_ACCOUNT` | `pto-runtime@my-project.iam.gserviceaccount.com` |
 
 Set repository secrets:
@@ -138,11 +141,19 @@ The workflow configures the service with:
 - Public invocation, because the application performs its own cookie-session
   authentication.
 - `TRUST_PROXY_HOPS=1`.
+- A shared TLS Redis/Valkey rate-limit store through `RATE_LIMIT_REDIS_URL`.
 - `COOKIE_SECURE=true` and `COOKIE_SAME_SITE=none`.
 - Exact `CORS_ORIGIN` equal to the Firebase production origin.
 
 Cloud Run injects `PORT`; the application listens on that value. A cold start
 after inactivity is expected with minimum instances set to zero.
+
+The Redis URL is read from Secret Manager and is required in production. Use a
+private TLS Redis/Valkey endpoint reachable from Cloud Run, and keep the
+`GCP_RATE_LIMIT_REDIS_URL_SECRET` repository variable pointed at the matching
+Secret Manager entry. If the shared store is unavailable, the rate-limit
+middleware fails the request instead of silently falling back to a per-instance
+counter.
 
 Migrations run before traffic is deployed using `pto-direct-url`. Never run
 `prisma migrate deploy` from every application container startup.

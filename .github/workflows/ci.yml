@@ -155,6 +155,8 @@ jobs:
               "actions: read",
               "github.ref == 'refs/heads/master'",
               "github.event.workflow_run.conclusion == 'success'",
+              'GCP_RATE_LIMIT_REDIS_URL_SECRET',
+              'RATE_LIMIT_REDIS_URL=${GCP_RATE_LIMIT_REDIS_URL_SECRET}:latest',
               'Verify manual dispatch has successful CI',
               'environment: production',
           ]

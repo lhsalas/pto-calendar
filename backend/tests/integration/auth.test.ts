@@ -294,25 +294,25 @@ describe('Auth routes', () => {
       expect(successAgain.status).toBe(200);
     });
 
-    it('keyGenerator splits buckets by X-Forwarded-For when trust proxy is enabled', async () => {
+    it('uses the trusted proxy-derived IP instead of the first raw X-Forwarded-For value', async () => {
       const originalAuthMax = process.env.AUTH_RATE_LIMIT_MAX;
       const originalTrust = process.env.TRUST_PROXY_HOPS;
       process.env.AUTH_RATE_LIMIT_MAX = '2';
-      process.env.TRUST_PROXY_HOPS = '2';
+      process.env.TRUST_PROXY_HOPS = '1';
       resetEnvForTests();
       const localApp = createApp();
 
       const a1 = await request(localApp)
         .post('/auth/login')
-        .set('X-Forwarded-For', '198.51.100.10')
+        .set('X-Forwarded-For', '198.51.100.10, 203.0.113.7')
         .send({ email: SEED.lead.email, password: 'wrong-password' });
       const a2 = await request(localApp)
         .post('/auth/login')
-        .set('X-Forwarded-For', '198.51.100.10')
+        .set('X-Forwarded-For', '198.51.100.10, 203.0.113.7')
         .send({ email: SEED.lead.email, password: 'wrong-password' });
       const a3 = await request(localApp)
         .post('/auth/login')
-        .set('X-Forwarded-For', '198.51.100.10')
+        .set('X-Forwarded-For', '198.51.100.10, 203.0.113.7')
         .send({ email: SEED.lead.email, password: 'wrong-password' });
 
       expect(a1.status).toBe(401);
@@ -321,9 +321,9 @@ describe('Auth routes', () => {
 
       const b1 = await request(localApp)
         .post('/auth/login')
-        .set('X-Forwarded-For', '198.51.100.20')
+        .set('X-Forwarded-For', '198.51.100.20, 203.0.113.7')
         .send({ email: SEED.lead.email, password: 'wrong-password' });
-      expect(b1.status).toBe(401);
+      expect(b1.status).toBe(429);
 
       if (originalAuthMax === undefined) delete process.env.AUTH_RATE_LIMIT_MAX;
       else process.env.AUTH_RATE_LIMIT_MAX = originalAuthMax;
