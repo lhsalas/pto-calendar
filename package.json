@@ -31,8 +31,9 @@
     "prepare": "husky || true"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0",
+    "concurrently": "^10.0.4",
     "husky": "^9.1.7",
+    "js-yaml": "^4.3.1",
     "lint-staged": "^15.2.10",
     "prettier": "^3.4.2"
   },
@@ -42,7 +43,7 @@
     ]
   },
   "engines": {
-    "node": ">=20.0.0",
+    "node": ">=24.0.0",
     "npm": ">=10.0.0"
   },
   "allowScripts": {

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { CreatePTORequest } from '../../src/types/api';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -7,16 +8,16 @@ import { PTOFormModal } from '../../src/components/pto/PTOFormModal';
 import { STUB_PTO } from '../mocks/handlers';
 
 interface RenderArgs {
-  onSubmit?: ReturnType<typeof vi.fn>;
-  onClose?: ReturnType<typeof vi.fn>;
+  onSubmit?: (payload: CreatePTORequest) => void | Promise<void>;
+  onClose?: () => void;
   open?: boolean;
   initialPto?: typeof STUB_PTO;
   defaultStartDate?: string;
 }
 
 function renderModal({
-  onSubmit = vi.fn(),
-  onClose = vi.fn(),
+  onSubmit = vi.fn() as (payload: CreatePTORequest) => void | Promise<void>,
+  onClose = vi.fn() as () => void,
   open = true,
   initialPto,
   defaultStartDate,

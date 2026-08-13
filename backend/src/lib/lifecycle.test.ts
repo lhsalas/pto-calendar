@@ -62,7 +62,7 @@ function restoreListeners(snapshot: ReturnType<typeof snapshotListeners>): void 
 }
 
 function setupExitSpy(): ReturnType<typeof vi.spyOn> {
-  return vi.spyOn(process, 'exit' as never).mockImplementation(((..._args: unknown[]) => {
+  return vi.spyOn(process, 'exit').mockImplementation(((..._args: unknown[]) => {
     return undefined as never;
   }) as never);
 }
