@@ -158,3 +158,16 @@ jobs:
 
       - name: Deploy Firebase Hosting
         run: npx --yes firebase-tools@latest deploy --only hosting --project "${FIREBASE_PROJECT_ID}" --non-interactive
+
+      - name: Smoke-test Firebase Hosting SPA + cross-origin /health
+        run: |
+          set -euo pipefail
+          SITE_URL="https://${FIREBASE_PROJECT_ID}.web.app"
+          echo "Fetching SPA root from ${SITE_URL}"
+          curl --fail --silent --show-error --max-time 30 "${SITE_URL}/" -o /tmp/index.html
+          grep -q 'id="root"' /tmp/index.html
+          echo "SPA index served; /auth/* and /health are reachable from the SPA origin:"
+          curl --fail --silent --show-error --max-time 30 "${SITE_URL}/auth/me" -o /dev/null
+          SERVICE_URL="${{ needs.backend.outputs.service_url }}"
+          echo "Cross-origin smoke: SPA -> Cloud Run /health"
+          curl --fail --silent --show-error --max-time 30 -H "Origin: ${SITE_URL}" "${SERVICE_URL}/health"

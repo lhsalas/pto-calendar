@@ -19,7 +19,10 @@ cookies for Cloud Run rewrites except for a cookie named `__session`, while
 You need:
 
 - A Google Cloud project with billing enabled.
-- A Firebase project associated with that Google Cloud project.
+- A Firebase project associated with that Google Cloud project. The Firebase
+  project can live in a different GCP project, but both projects must be in
+  the same Google Cloud organization so that a single Workload Identity
+  Federation pool can mint short-lived tokens for either project.
 - A Supabase project.
 - A GitHub repository administrator who can configure Actions variables,
   secrets, and Workload Identity Federation.
@@ -84,8 +87,13 @@ Create Secret Manager entries for:
 
 Create separate deployment and runtime service accounts. Grant only the
 permissions needed for Artifact Registry, Cloud Run deployment, Secret
-Manager access, and Firebase Hosting deployment. Configure GitHub Actions
-Workload Identity Federation instead of storing a JSON service-account key.
+Manager access, and Firebase Hosting deployment. If the Firebase project
+is in a different GCP project than the Cloud Run project, the deployment
+service account must additionally be granted `roles/firebasehosting.admin`
+(or a narrower custom role) on the Firebase project — see
+[Firebase Hosting IAM roles](https://firebase.google.com/docs/hosting/admin-intro#grant-access).
+Configure GitHub Actions Workload Identity Federation instead of storing
+a JSON service-account key.
 
 ## 4. Configure GitHub Actions
 
