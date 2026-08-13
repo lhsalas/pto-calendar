@@ -10,11 +10,7 @@ export default defineConfig({
     hookTimeout: 30000,
     setupFiles: ['./tests/setup.ts'],
     pool: 'forks',
-    poolOptions: {
-      forks: {
-        singleFork: true,
-      },
-    },
+    fileParallelism: false,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov', 'json-summary'],
