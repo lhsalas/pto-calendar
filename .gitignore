@@ -33,5 +33,6 @@ test-results/
 /frontend/dist/
 /frontend/dist-node/
 /frontend/tsconfig.tsbuildinfo
+firebase.deploy.json
 
 *.tsbuildinfo

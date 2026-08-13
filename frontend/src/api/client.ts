@@ -65,8 +65,8 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
               }),
             );
           }, timeoutMs);
-          if (typeof (timeoutHandle as { unref?: () => void }).unref === 'function') {
-            (timeoutHandle as { unref: () => void }).unref();
+          if (typeof (timeoutHandle as unknown as { unref?: () => void }).unref === 'function') {
+            (timeoutHandle as unknown as { unref: () => void }).unref();
           }
         })
       : undefined;

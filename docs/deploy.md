@@ -134,6 +134,7 @@ and deploys Cloud Run.
 
 The workflow configures the service with:
 
+- Node.js 24 on pinned container base images.
 - Container port `3000`.
 - Request-based billing.
 - Minimum instances `0`.
@@ -174,13 +175,17 @@ curl -fsS https://<cloud-run-host>/ready
 ## 6. Deploy Firebase Hosting
 
 The committed `firebase.json` points Hosting at `frontend/dist` and provides
-the SPA fallback and security headers.
+the SPA fallback and security headers. Its CSP contains a Cloud Run origin
+placeholder; always render `firebase.deploy.json` with the exact deployed API
+origin before publishing.
 
 The frontend build must receive the Cloud Run origin:
 
 ```bash
 VITE_API_BASE_URL=https://<cloud-run-host> npm run build -w frontend
-npx firebase-tools deploy \
+CLOUD_RUN_ORIGIN=https://<cloud-run-host> node bin/render-firebase-config.mjs
+npx --yes firebase-tools@15.26.0 deploy \
+  --config firebase.deploy.json \
   --only hosting \
   --project <firebase-project-id> \
   --non-interactive

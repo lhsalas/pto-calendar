@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: '20'
+  NODE_VERSION: '24'
 
 jobs:
   lint:
@@ -142,9 +142,38 @@ jobs:
       - name: Validate Firebase Hosting configuration
         run: |
           node -e "const c=require('./firebase.json'); if (c.hosting?.public !== 'frontend/dist') process.exit(1); if (!c.hosting?.rewrites?.some((r) => r.destination === '/index.html')) process.exit(1)"
+      - name: Validate exact Firebase CSP template
+        run: |
+          CLOUD_RUN_ORIGIN=https://pto-api.example.a.run.app node bin/render-firebase-config.mjs
+          node -e "const c=require('./firebase.deploy.json'); const h=c.hosting.headers.flatMap((x) => x.headers).find((x) => x.key === 'Content-Security-Policy'); if (!h || h.value.includes('__CLOUD_RUN_API_ORIGIN__') || h.value.includes('*.a.run.app') || !h.value.includes('https://pto-api.example.a.run.app')) process.exit(1)"
+          rm -f firebase.deploy.json
       - name: Validate backup lifecycle configuration
         run: |
           node -e "const c=require('./infra/gcp/backup-lifecycle.json'); if (c.rule?.[0]?.condition?.age !== 30) process.exit(1)"
+      - name: Validate production supply-chain pins
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          for name in ('.github/workflows/deploy.yml', '.github/workflows/database-backup.yml'):
+              workflow = Path(name).read_text()
+              action_refs = re.findall(r'uses:\s+[^\s#]+@([^\s#]+)', workflow)
+              if any(not re.fullmatch(r'[0-9a-f]{40}', ref) for ref in action_refs):
+                  raise SystemExit(f'Mutable action reference in {name}: {action_refs}')
+          for name in ('backend/Dockerfile', 'frontend/Dockerfile'):
+              dockerfile = Path(name).read_text()
+              if not re.search(r'^FROM\s+[^\n]+@sha256:[0-9a-f]{64}', dockerfile, re.MULTILINE):
+                  raise SystemExit(f'Unpinned base image in {name}')
+              if 'node:24-alpine@sha256:' not in dockerfile:
+                  raise SystemExit(f'Unsupported Node base image in {name}')
+          for name in ('.github/workflows/ci.yml', '.github/workflows/deploy.yml'):
+              if "NODE_VERSION: '24'" not in Path(name).read_text():
+                  raise SystemExit(f'Unsupported CI Node version in {name}')
+          deploy = Path('.github/workflows/deploy.yml').read_text()
+          if 'firebase-tools@latest' in deploy or 'firebase-tools@15.26.0' not in deploy:
+              raise SystemExit('Firebase CLI is not pinned')
+          PY
       - name: Validate production deployment guard
         run: |
           python3 - <<'PY'
@@ -273,6 +302,9 @@ jobs:
             sleep 1
           done
           curl -fsS http://localhost:5173/health || (echo "Backend never became healthy" && docker compose -f docker-compose.app.yml logs backend && exit 1)
+      - name: Verify production backend image excludes development tooling
+        run: |
+          docker compose -f docker-compose.app.yml exec -T backend node -e "const fs=require('node:fs'); if (fs.existsSync('/app/backend/src')) process.exit(1); try { require.resolve('vitest'); process.exit(1) } catch {}"
       - name: Login as team_lead
         run: |
           rm -f /tmp/smoke-cookies.txt

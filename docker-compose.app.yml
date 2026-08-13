@@ -22,6 +22,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      target: build
     command:
       - sh
       - -c
