@@ -184,7 +184,7 @@ describe('Users routes', () => {
         request(app).post('/auth/setup-account').send({ token, password: 'second-password' }),
       ]);
       const statuses = results.map((result) => result.status).sort((a, b) => a - b);
-      expect(statuses).toEqual([401, 200]);
+      expect(statuses).toEqual([200, 401]);
     });
 
     it('rejects an unknown token (same 401 as spent)', async () => {
