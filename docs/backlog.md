@@ -481,9 +481,23 @@ The local Docker/Podman stack and its nginx proxy remain supported.
 
 ### Story 7.7: Validate the production cutover and disaster recovery drill - #126
 
-**Status:** Planned
+**Status:** Implemented in this change
 
 **Acceptance criteria:** A clean Supabase project is migrated and bootstrapped,
 the Firebase-origin critical journeys pass against Cloud Run, minimum
 instances and connection limits are verified, a Cloud Run rollback is tested,
 and an encrypted database backup is restored into a disposable target.
+
+**Summary:** New `docs/cutover-drill.md` runbook combines the production
+cutover checklist and the DR drill into a single operator document.
+Eleven numbered steps cover the clean-schema migration, the
+`db:bootstrap` team lead, Cloud Run deploy + smoke tests (direct
+`/health` + `/ready` + Firebase-origin cross-origin call), every
+Firebase-origin critical journey (login, logout, account setup,
+session persistence, CSRF rejection, PTO CRUD, holidays, role
+enforcement), Cloud Run autoscaling verification, cold-start
+observation, the encrypted backup restore into a disposable target,
+and a Cloud Run revision rollback (forward-only migrations are
+documented as a constraint). Each step is a single observation +
+checkbox; the runbook ends with a log template the cutover ticket can
+drop in. README and `docs/deploy.md` § 11 link to the new runbook.

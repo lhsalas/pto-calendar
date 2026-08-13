@@ -284,3 +284,14 @@ contains a scheduled encrypted logical backup workflow and a separate restore
 runbook in [`docs/database-backups.md`](database-backups.md).
 
 Do not store backups on Cloud Run local disk. Cloud Run storage is ephemeral.
+
+## 11. Cutover and Disaster Recovery Drill
+
+After the first deployment and on a quarterly cadence, run the
+production cutover + DR drill checklist in
+[`docs/cutover-drill.md`](cutover-drill.md). It exercises every step
+the cutover ticket will require: clean-schema migrations, the
+`db:bootstrap` lead, end-to-end Firebase-origin critical journeys,
+Cloud Run autoscaling verification, a backup restore into a disposable
+target, and a Cloud Run revision rollback. Fill the log template at
+the end of the runbook and attach it to the closing issue.
