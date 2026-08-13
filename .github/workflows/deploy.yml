@@ -75,12 +75,28 @@ jobs:
           IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REGISTRY_REPOSITORY }}/pto-api:${{ env.IMAGE_TAG }}
         run: |
           set -euo pipefail
-          DIRECT_URL="$(gcloud secrets versions access latest --project="${GCP_PROJECT_ID}" --secret="${GCP_DIRECT_URL_SECRET}")"
+          set +x
+          WORKDIR="$(mktemp -d)"
+          chmod 700 "${WORKDIR}"
+          trap 'rm -rf "${WORKDIR}"' EXIT
+          if ! gcloud secrets versions access latest \
+              --project="${GCP_PROJECT_ID}" \
+              --secret="${GCP_DIRECT_URL_SECRET}" \
+              > "${WORKDIR}/direct-url" 2> "${WORKDIR}/direct-url.err"; then
+            echo "::error::Failed to fetch direct URL secret." >&2
+            cat "${WORKDIR}/direct-url.err" >&2
+            exit 1
+          fi
+          chmod 600 "${WORKDIR}/direct-url"
+          rm -f "${WORKDIR}/direct-url.err"
+          DIRECT_URL="$(<"${WORKDIR}/direct-url")"
+          printf '::add-mask::%s\n' "${DIRECT_URL}"
           docker run --rm \
             --env "DATABASE_URL=${DIRECT_URL}" \
             "${IMAGE}" \
             npx prisma migrate deploy --schema=backend/prisma/schema.prisma
           unset DIRECT_URL
+          rm -rf "${WORKDIR}"
 
       - name: Deploy Cloud Run revision
         id: deploy

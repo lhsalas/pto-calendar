@@ -209,17 +209,54 @@ LEAD_EMAIL='lead@yourcompany.com' \
 ## 8. Release and Rollback
 
 Push to `master` after the normal CI gates pass. The deployment workflow uses
-the tested commit SHA as the container tag.
+the tested commit SHA as the container tag, so each commit has a corresponding
+immutable image in Artifact Registry. The same SHA is recorded as a Cloud Run
+revision, which makes it possible to list revisions and pick an earlier one by
+name.
 
-For a rollback, move Cloud Run traffic to the previous revision. Database
-migrations are forward-only; only roll back application code when the previous
-revision remains compatible with the current schema.
+### Finding a previous revision
+
+List revisions newest first; the most recent ready revision is the live one:
+
+```bash
+gcloud run revisions list \
+  --service=pto-api \
+  --region=us-central1 \
+  --format='table(metadata.name,status.conditions[0].status,metadata.creationTimestamp)'
+```
+
+A revision's name looks like `pto-api-00042-abc`. The `abc` portion is the
+short commit SHA — cross-reference it with the commit history to find the
+exact commit you want to roll back to.
+
+### Rolling traffic back
+
+Move 100 % of traffic to an older revision. Cloud Run keeps the previous
+revision's container image around, so this is a label switch, not an image
+rebuild:
 
 ```bash
 gcloud run services update-traffic pto-api \
   --region=us-central1 \
-  --to-revisions=pto-api-<previous-revision>=100
+  --to-revisions=pto-api-00041-abc=100
 ```
+
+Verify the rollback with `/health` and `/ready` against the service URL, then
+check Cloud Logging for the new revision's startup logs.
+
+### Migrations are forward-only
+
+`prisma migrate deploy` is run once before each new revision. Database
+migrations are forward-only: rolling back application code requires that the
+previous revision's schema is compatible with the current database state. If
+the previous revision expected an older schema, roll forward with a new
+migration rather than rolling back the code.
+
+If a migration is partially applied and the application is in a broken state,
+do not roll back the Cloud Run revision. The correct recovery path is the
+encrypted backup restore documented in
+[`docs/database-backups.md`](database-backups.md), applied to a disposable
+target first and then promoted.
 
 ## 9. Monitoring and Cost Controls
 
