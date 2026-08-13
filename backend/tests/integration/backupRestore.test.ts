@@ -20,8 +20,10 @@ const PASSPHRASE = 'correct horse battery staple';
 type Runner = 'pg_dump' | 'podman-container' | 'none';
 
 function detectRunner(): Runner {
-  const probe = spawnSync('pg_dump', ['--version'], { stdio: 'ignore' });
-  if (probe.status === 0) return 'pg_dump';
+  for (const candidate of ['pg_dump', '/usr/lib/postgresql/16/bin/pg_dump']) {
+    const probe = spawnSync(candidate, ['--version'], { stdio: 'ignore' });
+    if (probe.status === 0) return 'pg_dump';
+  }
   const containerProbe = spawnSync('podman', ['ps', '--format', '{{.Names}}'], {
     encoding: 'utf8',
   });
@@ -29,6 +31,19 @@ function detectRunner(): Runner {
     return 'podman-container';
   }
   return 'none';
+}
+
+function resolveTool(tool: string): string {
+  if (tool !== 'pg_dump' && tool !== 'psql') return tool;
+  const candidates =
+    tool === 'pg_dump'
+      ? ['pg_dump', '/usr/lib/postgresql/16/bin/pg_dump']
+      : ['psql', '/usr/lib/postgresql/16/bin/psql'];
+  for (const candidate of candidates) {
+    const probe = spawnSync(candidate, ['--version'], { stdio: 'ignore' });
+    if (probe.status === 0) return candidate;
+  }
+  return tool;
 }
 
 function runPgSql(sqlArgs: string[], input?: string): string {
@@ -41,11 +56,12 @@ function runPgSql(sqlArgs: string[], input?: string): string {
     throw new Error('sqlArgs must include a tool name');
   }
   const subArgs = sqlArgs.slice(1);
+  const resolvedTool = runner === 'pg_dump' ? resolveTool(tool) : tool;
   const fullArgs =
     runner === 'pg_dump'
-      ? [tool, ...subArgs]
-      : ['exec', '-i', '-e', `PGPASSWORD=pto`, LOCAL_CONTAINER, tool, ...subArgs];
-  const cmd = runner === 'pg_dump' ? tool : 'podman';
+      ? [resolvedTool, ...subArgs]
+      : ['exec', '-i', '-e', `PGPASSWORD=pto`, LOCAL_CONTAINER, resolvedTool, ...subArgs];
+  const cmd = runner === 'pg_dump' ? resolvedTool : 'podman';
   const env = runner === 'pg_dump' ? { PGPASSWORD: 'pto' } : undefined;
   const result = spawnSync(cmd, fullArgs, {
     encoding: 'utf8',
@@ -54,7 +70,9 @@ function runPgSql(sqlArgs: string[], input?: string): string {
     maxBuffer: 64 * 1024 * 1024,
   });
   if (result.status !== 0) {
-    throw new Error(`${tool} failed (status=${result.status}): ${result.stderr || result.stdout}`);
+    throw new Error(
+      `${resolvedTool} failed (status=${result.status}): ${result.stderr || result.stdout}`,
+    );
   }
   return result.stdout;
 }
