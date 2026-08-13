@@ -16,7 +16,7 @@
 //
 // Usage:
 //   node bin/restore-backup.mjs --archive pto-20260810T030000Z.tar.gz.gpg \
-//     [--bucket <name>] [--keep-local]
+//     --allow-disposable-target [--bucket <name>] [--keep-local]
 //
 // Exit codes:
 //   0  success
@@ -26,24 +26,51 @@
 
 import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   mkdtempSync,
   rmSync,
   copyFileSync,
   existsSync,
-  readFileSync,
+  lstatSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
+import { assertStrongEncryptionKey } from './backupSecurity.mjs';
 
-function fail(message, code = 1) {
-  console.error(`error: ${message}`);
-  process.exit(code);
+process.umask(0o077);
+
+class ScriptError extends Error {
+  constructor(message, code = 1) {
+    super(message);
+    this.code = code;
+  }
 }
 
+let activeWorkdir;
+
+function cleanupWorkdir() {
+  if (!activeWorkdir) return;
+  rmSync(activeWorkdir, { recursive: true, force: true });
+  activeWorkdir = undefined;
+}
+
+function fail(message, code = 1) {
+  throw new ScriptError(message, code);
+}
+
+process.once('SIGINT', () => {
+  cleanupWorkdir();
+  process.exit(130);
+});
+process.once('SIGTERM', () => {
+  cleanupWorkdir();
+  process.exit(143);
+});
+
 function parseArgs(argv) {
-  const args = { archive: null, bucket: null, keepLocal: false };
+  const args = { archive: null, bucket: null, keepLocal: false, allowDisposableTarget: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--archive' && i + 1 < argv.length) {
@@ -52,6 +79,8 @@ function parseArgs(argv) {
       args.bucket = argv[++i];
     } else if (arg === '--keep-local') {
       args.keepLocal = true;
+    } else if (arg === '--allow-disposable-target') {
+      args.allowDisposableTarget = true;
     } else if (arg === '--help' || arg === '-h') {
       printHelp();
       process.exit(0);
@@ -72,6 +101,7 @@ Options:
   --archive <name>    Encrypted archive filename inside the bucket's pto/ prefix
   --bucket <name>     Override BACKUP_BUCKET env
   --keep-local        Keep the decrypted files in CWD after applying them
+  --allow-disposable-target  Confirm TARGET_DATABASE_URL is disposable
   -h, --help          Show this help
 `);
 }
@@ -97,14 +127,46 @@ function run(label, command, args, options = {}) {
     ...options,
   });
   if (result.error) {
-    fail(`${label} failed to start: ${result.error.message}`, 2);
+    fail(`${label} failed to start`, 2);
   }
   if (result.status !== 0) {
-    const stderr = result.stderr ? result.stderr.toString() : '';
-    const stdout = result.stdout ? result.stdout.toString() : '';
-    fail(`${label} exited with status ${result.status}\n${stderr}\n${stdout}`.trim(), 2);
+    fail(`${label} exited with status ${result.status}`, 2);
   }
   return result;
+}
+
+function validateArchiveName(archive) {
+  if (basename(archive) !== archive || !/^pto-[A-Za-z0-9._-]+\.tar\.gz\.gpg$/.test(archive)) {
+    fail('archive name must be a generated .tar.gz.gpg basename', 1);
+  }
+}
+
+function validateArchiveContents(archivePath) {
+  const manifest = run('tar manifest', 'tar', ['--list', '--verbose', '--file', archivePath]);
+  const entries = manifest.stdout
+    .toString()
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const expected = new Set(['schema.sql', 'data.sql']);
+  const names = [];
+  for (const entry of entries) {
+    const type = entry[0];
+    const name = entry.split(/\s+/).at(-1);
+    if (type !== '-' || !name || !expected.has(name)) {
+      fail('archive contains an unexpected path or non-regular file', 2);
+    }
+    names.push(name);
+  }
+  if (names.length !== expected.size || new Set(names).size !== expected.size) {
+    fail('archive must contain exactly schema.sql and data.sql', 2);
+  }
+}
+
+function assertRegularFile(path, label) {
+  if (!existsSync(path) || !lstatSync(path).isFile() || statSync(path).size === 0) {
+    fail(`${label} is missing, empty, or not a regular file`, 2);
+  }
 }
 
 function verifyChecksum(workdir, encryptedPath, checksumPath) {
@@ -132,6 +194,15 @@ function main() {
   const bucket = args.bucket ?? requireEnv('BACKUP_BUCKET');
   const targetUrl = requireEnv('TARGET_DATABASE_URL');
   const encryptionKey = requireEnv('ENCRYPTION_KEY');
+  if (!args.allowDisposableTarget) {
+    fail('refusing restore without --allow-disposable-target confirmation', 1);
+  }
+  validateArchiveName(args.archive);
+  try {
+    assertStrongEncryptionKey(encryptionKey);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : 'invalid encryption key', 1);
+  }
 
   requireTool('gpg', 'Install gnupg.');
   requireTool('tar', 'Install tar.');
@@ -140,6 +211,7 @@ function main() {
   requireTool('psql', 'Install postgresql-client (provides psql).');
 
   const workdir = mkdtempSync(join(tmpdir(), 'pto-restore-'));
+  activeWorkdir = workdir;
   const encryptedPath = join(workdir, args.archive);
   const checksumPath = `${encryptedPath}.sha256`;
   const archivePath = encryptedPath.replace(/\.gpg$/, '');
@@ -191,26 +263,34 @@ function main() {
     rmSync(encryptedPath, { force: true });
     rmSync(checksumPath, { force: true });
 
-    if (!existsSync(archivePath) || statSync(archivePath).size === 0) {
-      fail('decrypted archive is missing or empty', 2);
-    }
+    assertRegularFile(archivePath, 'decrypted archive');
 
-    run('tar extract', 'tar', ['-C', workdir, '-xzf', archivePath]);
+    validateArchiveContents(archivePath);
+    run('tar extract', 'tar', [
+      '--directory',
+      workdir,
+      '--extract',
+      '--gzip',
+      '--file',
+      archivePath,
+      '--no-same-owner',
+      '--no-same-permissions',
+      '--no-overwrite-dir',
+    ]);
     rmSync(archivePath, { force: true });
 
     const schemaPath = join(workdir, 'schema.sql');
     const dataPath = join(workdir, 'data.sql');
-    if (!existsSync(schemaPath)) {
-      fail(`schema.sql missing after extraction`, 2);
-    }
-    if (!existsSync(dataPath)) {
-      fail(`data.sql missing after extraction`, 2);
-    }
+    assertRegularFile(schemaPath, 'schema.sql');
+    assertRegularFile(dataPath, 'data.sql');
 
     if (args.keepLocal) {
       const cwd = process.cwd();
       copyFileSync(schemaPath, join(cwd, 'schema.sql'));
       copyFileSync(dataPath, join(cwd, 'data.sql'));
+      chmodSync(join(cwd, 'schema.sql'), 0o600);
+      chmodSync(join(cwd, 'data.sql'), 0o600);
+      console.warn('WARNING: --keep-local retains plaintext database dumps on disk.');
       console.log(`local copies: ${cwd}/schema.sql and ${cwd}/data.sql`);
     }
 
@@ -219,8 +299,15 @@ function main() {
 
     console.log(`Restore complete: applied schema.sql and data.sql to target.`);
   } finally {
-    rmSync(workdir, { recursive: true, force: true });
+    cleanupWorkdir();
   }
 }
 
-main();
+try {
+  main();
+} catch (error) {
+  const code = error instanceof ScriptError ? error.code : 2;
+  const message = error instanceof Error ? error.message : 'Unknown restore failure';
+  console.error(`error: ${message}`);
+  process.exit(code);
+}

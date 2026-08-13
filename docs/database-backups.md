@@ -30,10 +30,15 @@ not have to remember the exact invocation:
   `gcloud` on `PATH`.
 - `bin/restore-backup.mjs` — download, verify, decrypt, apply. Requires
   `BACKUP_BUCKET`, `TARGET_DATABASE_URL`, `ENCRYPTION_KEY` env vars plus
-  `gpg`, `tar`, `sha256sum`, `gcloud`, and `psql` on `PATH`.
+  `gpg`, `tar`, `sha256sum`, `gcloud`, and `psql` on `PATH`. It also requires
+  the explicit `--allow-disposable-target` confirmation flag.
 
 Both scripts mask secrets where GitHub Actions does, set `umask 077` on the
 working directory, and never echo secret values back to the terminal.
+They reject encryption keys shorter than 32 characters, low-diversity keys, and
+common placeholder prefixes. Failed child processes throw through the top-level
+cleanup path so temporary plaintext, decrypted archives, and passphrases are
+removed before exit.
 
 ## One-Time GCP Setup
 
@@ -60,6 +65,12 @@ Create these Secret Manager entries:
   the shared pooler session URL otherwise.
 - `pto-backup-encryption-key`: a high-entropy passphrase stored only in Secret
   Manager.
+
+Generate a key from random bytes rather than a human phrase:
+
+```bash
+openssl rand -base64 32
+```
 
 The backup service account needs Secret Manager access to those two secrets
 and object-create access to the bucket. GitHub Actions authenticates through
@@ -112,7 +123,9 @@ and applies the archive:
 BACKUP_BUCKET='<backup-bucket>' \
 TARGET_DATABASE_URL='<disposable-target-url>' \
 ENCRYPTION_KEY='<passphrase>' \
-  node bin/restore-backup.mjs --archive pto-20260810T030000Z.tar.gz.gpg
+  node bin/restore-backup.mjs \
+    --archive pto-20260810T030000Z.tar.gz.gpg \
+    --allow-disposable-target
 ```
 
 The manual equivalent:
