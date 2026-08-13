@@ -17,6 +17,7 @@ CREATE TABLE users (
   password_hash TEXT NULL,
   setup_token_hash VARCHAR(64) NULL,
   setup_token_expires_at TIMESTAMP NULL,
+  session_version INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );

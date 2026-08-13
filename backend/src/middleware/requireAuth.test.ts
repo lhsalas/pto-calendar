@@ -75,11 +75,13 @@ describe('requireAuth', () => {
   });
 
   it('revalidates the session user against the DB on a cache miss', async () => {
-    const user = { id: 'u1', role: 'member' as const };
+    const user = { id: 'u1', role: 'member' as const, sessionVersion: 0 };
     const req = { session: { user: { ...user } } } as unknown as Request;
     const res = makeRes();
     const next = vi.fn() as unknown as NextFunction;
-    findUniqueMock.mockResolvedValueOnce({ id: 'u1', role: 'member' });
+    findUniqueMock
+      .mockResolvedValueOnce({ id: 'u1', role: 'member' })
+      .mockResolvedValueOnce({ sessionVersion: 0 });
 
     await requireAuth(req, res as Response, next);
 
@@ -87,13 +89,16 @@ describe('requireAuth', () => {
       where: { id: 'u1' },
       select: { id: true, role: true },
     });
-    expect(req.user).toEqual({ id: 'u1', role: 'member' });
+    expect(req.user).toEqual({ id: 'u1', role: 'member', sessionVersion: 0 });
     expect(next).toHaveBeenCalledWith();
   });
 
-  it('serves subsequent requests from the cache (no second DB hit)', async () => {
-    const sessionUser = { id: 'u2', role: 'member' as const };
-    findUniqueMock.mockResolvedValueOnce({ id: 'u2', role: 'member' });
+  it('serves the role from cache while checking session version', async () => {
+    const sessionUser = { id: 'u2', role: 'member' as const, sessionVersion: 0 };
+    findUniqueMock
+      .mockResolvedValueOnce({ id: 'u2', role: 'member' })
+      .mockResolvedValueOnce({ sessionVersion: 0 })
+      .mockResolvedValueOnce({ sessionVersion: 0 });
 
     const req1 = { session: { user: { ...sessionUser } } } as unknown as Request;
     const res1 = makeRes();
@@ -103,7 +108,24 @@ describe('requireAuth', () => {
     const res2 = makeRes();
     await requireAuth(req2, res2 as Response, vi.fn() as unknown as NextFunction);
 
-    expect(findUniqueMock).toHaveBeenCalledTimes(1);
+    expect(findUniqueMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('rejects a session whose version was revoked in the database', async () => {
+    const sessionUser = { id: 'u-revoked', role: 'member' as const, sessionVersion: 0 };
+    findUniqueMock
+      .mockResolvedValueOnce({ id: 'u-revoked', role: 'member' })
+      .mockResolvedValueOnce({ sessionVersion: 1 });
+
+    const req = { session: { user: sessionUser } } as unknown as Request;
+    const res = makeRes();
+    const next = vi.fn() as unknown as NextFunction;
+
+    await requireAuth(req, res as Response, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(req.session).toBeNull();
+    expect(next).not.toHaveBeenCalled();
   });
 
   it('reflects a role change in req.user after cache expiry', async () => {
@@ -113,8 +135,10 @@ describe('requireAuth', () => {
     loadEnv();
     __resetAuthUserCacheForTests();
 
-    const sessionUser = { id: 'u3', role: 'team_lead' as const };
-    findUniqueMock.mockResolvedValueOnce({ id: 'u3', role: 'team_lead' });
+    const sessionUser = { id: 'u3', role: 'team_lead' as const, sessionVersion: 0 };
+    findUniqueMock
+      .mockResolvedValueOnce({ id: 'u3', role: 'team_lead' })
+      .mockResolvedValueOnce({ sessionVersion: 0 });
 
     const req1 = { session: { user: { ...sessionUser } } } as unknown as Request;
     const res1 = makeRes();
@@ -122,17 +146,20 @@ describe('requireAuth', () => {
     expect(req1.user?.role).toBe('team_lead');
 
     await new Promise((r) => setTimeout(r, 5));
-    findUniqueMock.mockResolvedValueOnce({ id: 'u3', role: 'member' });
+    findUniqueMock
+      .mockResolvedValueOnce({ id: 'u3', role: 'member' })
+      .mockResolvedValueOnce({ sessionVersion: 0 });
 
     const req2 = { session: { user: { ...sessionUser } } } as unknown as Request;
     const res2 = makeRes();
     await requireAuth(req2, res2 as Response, vi.fn() as unknown as NextFunction);
     expect(req2.user?.role).toBe('member');
+    expect(req2.user?.sessionVersion).toBe(0);
     expect(req2.session?.user?.role).toBe('member');
   });
 
   it('returns 401 and clears the session when the user no longer exists in the DB', async () => {
-    const sessionUser = { id: 'gone', role: 'member' as const };
+    const sessionUser = { id: 'gone', role: 'member' as const, sessionVersion: 0 };
     findUniqueMock.mockResolvedValueOnce(null);
 
     const req = { session: { user: { ...sessionUser } } } as unknown as Request;
@@ -159,14 +186,14 @@ describe('requireAuth', () => {
     findUniqueMock.mockResolvedValueOnce(null);
 
     const req1 = {
-      session: { user: { id: 'gone2', role: 'member' as const } },
+      session: { user: { id: 'gone2', role: 'member' as const, sessionVersion: 0 } },
     } as unknown as Request;
     await requireAuth(req1, makeRes() as Response, vi.fn() as unknown as NextFunction);
     expect(findUniqueMock).toHaveBeenCalledTimes(1);
 
     // immediately retry — should be a cache hit (negative cache)
     const req2 = {
-      session: { user: { id: 'gone2', role: 'member' as const } },
+      session: { user: { id: 'gone2', role: 'member' as const, sessionVersion: 0 } },
     } as unknown as Request;
     const res2 = makeRes();
     await requireAuth(req2, res2 as Response, vi.fn() as unknown as NextFunction);
@@ -175,7 +202,7 @@ describe('requireAuth', () => {
   });
 
   it('forwards DB errors to next()', async () => {
-    const sessionUser = { id: 'u-err', role: 'member' as const };
+    const sessionUser = { id: 'u-err', role: 'member' as const, sessionVersion: 0 };
     const err = new Error('db boom');
     findUniqueMock.mockRejectedValueOnce(err);
 

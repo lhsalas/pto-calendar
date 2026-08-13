@@ -123,31 +123,56 @@ export interface SetupAccountResult {
 export async function setupAccount(input: SetupAccountInput): Promise<SetupAccountResult> {
   const env = loadEnv();
   const tokenHash = hashSetupToken(input.token);
-  // Look up by hash. Reject users without a setup token (already set up).
-  const user = await prisma.user.findFirst({
-    where: { setupTokenHash: tokenHash },
-  });
-  if (!user || !user.setupTokenExpiresAt) {
-    throw new HttpError(401, 'UNAUTHENTICATED', 'Setup link is invalid or has already been used.');
-  }
-  if (user.setupTokenExpiresAt.getTime() < Date.now()) {
-    // Clean up expired tokens.
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { setupTokenHash: null, setupTokenExpiresAt: null },
+  const claim = await prisma.$transaction(async (tx) => {
+    // Read the candidate inside the transaction, then claim it with a
+    // conditional update so concurrent redemptions cannot both succeed.
+    const user = await tx.user.findFirst({ where: { setupTokenHash: tokenHash } });
+    if (!user || !user.setupTokenExpiresAt) {
+      throw new HttpError(
+        401,
+        'UNAUTHENTICATED',
+        'Setup link is invalid or has already been used.',
+      );
+    }
+    const now = new Date();
+    if (user.setupTokenExpiresAt.getTime() < now.getTime()) {
+      await tx.user.updateMany({
+        where: { id: user.id, setupTokenHash: tokenHash },
+        data: { setupTokenHash: null, setupTokenExpiresAt: null },
+      });
+      return { status: 'expired' as const };
+    }
+    const passwordHash = await bcrypt.hash(input.password, env.BCRYPT_ROUNDS);
+    const claimed = await tx.user.updateMany({
+      where: {
+        id: user.id,
+        setupTokenHash: tokenHash,
+        setupTokenExpiresAt: { gt: now },
+      },
+      data: {
+        passwordHash,
+        setupTokenHash: null,
+        setupTokenExpiresAt: null,
+        sessionVersion: { increment: 1 },
+      },
     });
+    if (claimed.count !== 1) {
+      throw new HttpError(
+        401,
+        'UNAUTHENTICATED',
+        'Setup link is invalid or has already been used.',
+      );
+    }
+    const updated = await tx.user.findUnique({ where: { id: user.id } });
+    return { status: 'claimed' as const, user: updated };
+  });
+  if (claim.status === 'expired') {
     throw new HttpError(401, 'UNAUTHENTICATED', 'Setup link has expired.');
   }
-  const passwordHash = await bcrypt.hash(input.password, env.BCRYPT_ROUNDS);
-  const updated = await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      passwordHash,
-      setupTokenHash: null,
-      setupTokenExpiresAt: null,
-    },
-  });
-  return { user: updated };
+  if (!claim.user) {
+    throw new HttpError(401, 'UNAUTHENTICATED', 'Setup link is invalid or has already been used.');
+  }
+  return { user: claim.user };
 }
 
 export async function resetUserPassword(userId: string): Promise<{
@@ -165,6 +190,7 @@ export async function resetUserPassword(userId: string): Promise<{
       passwordHash: null,
       setupTokenHash: setupToken.hash,
       setupTokenExpiresAt: setupToken.expiresAt,
+      sessionVersion: { increment: 1 },
     },
   });
   return { user: updated, setupToken };

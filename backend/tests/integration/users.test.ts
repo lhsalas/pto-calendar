@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
+import bcrypt from 'bcryptjs';
 import type { Express } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { createApp } from '../../src/server.js';
@@ -170,6 +171,22 @@ describe('Users routes', () => {
       expect(r2.body.error.code).toBe('UNAUTHENTICATED');
     });
 
+    it('allows only one concurrent redemption of the same token', async () => {
+      const leadCookie = await loginAs(SEED.lead.email, SEED.lead.password);
+      const createRes = await request(app)
+        .post('/users')
+        .set('Cookie', leadCookie)
+        .send({ email: 'race@example.com', name: 'Race' });
+      const token = createRes.body.setupToken as string;
+
+      const results = await Promise.all([
+        request(app).post('/auth/setup-account').send({ token, password: 'first-password' }),
+        request(app).post('/auth/setup-account').send({ token, password: 'second-password' }),
+      ]);
+      const statuses = results.map((result) => result.status).sort((a, b) => a - b);
+      expect(statuses).toEqual([401, 200]);
+    });
+
     it('rejects an unknown token (same 401 as spent)', async () => {
       const res = await request(app)
         .post('/auth/setup-account')
@@ -180,6 +197,30 @@ describe('Users routes', () => {
   });
 
   describe('POST /users/:id/reset-password', () => {
+    it('revokes existing sessions for the reset user', async () => {
+      const leadCookie = await loginAs(SEED.lead.email, SEED.lead.password);
+      const passwordHash = await bcrypt.hash('old-password', 4);
+      const target = await prisma.user.create({
+        data: {
+          email: 'active-session@example.com',
+          name: 'Active Session',
+          role: 'member',
+          colorCode: '#000000',
+          passwordHash,
+        },
+      });
+      const oldCookie = await loginAs('active-session@example.com', 'old-password');
+
+      const res = await request(app)
+        .post(`/users/${target.id}/reset-password`)
+        .set('Cookie', leadCookie);
+      expect(res.status).toBe(200);
+
+      const staleSession = await request(app).get('/auth/me').set('Cookie', oldCookie);
+      expect(staleSession.status).toBe(401);
+      expect(staleSession.body.error.code).toBe('UNAUTHENTICATED');
+    });
+
     it('issues a fresh token for an existing member', async () => {
       const leadCookie = await loginAs(SEED.lead.email, SEED.lead.password);
       const created = await prisma.user.create({
