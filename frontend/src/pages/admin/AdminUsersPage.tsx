@@ -35,7 +35,9 @@ type CopyState = 'idle' | 'copied' | 'failed';
 const COPY_FEEDBACK_MS = 2000;
 
 function setupUrlFor(token: string): string {
-  return `${window.location.origin}/setup-account?token=${token}`;
+  const url = new URL('/setup-account', window.location.origin);
+  url.hash = new URLSearchParams({ token }).toString();
+  return url.toString();
 }
 
 const COPY_LABEL: Record<CopyState, string> = {

@@ -96,7 +96,7 @@ APP_PUBLIC_BASE_URL='https://<firebase-project>.web.app' \
 Verify:
 
 - [ ] The command prints a one-time setup link of the form
-      `https://<firebase-site>/setup-account?token=<token>`.
+      `https://<firebase-site>/setup-account#token=<token>`.
 - [ ] Opening the link in a browser lets you set a password and lands
       on the calendar.
 - [ ] Re-running the command with the same email prints

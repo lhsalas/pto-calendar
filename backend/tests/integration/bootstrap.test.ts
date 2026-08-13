@@ -85,7 +85,7 @@ describe('db:bootstrap script', () => {
     });
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/Created team lead bootstrap@example.com/);
-    expect(r.stdout).toMatch(/https:\/\/pto\.example\.com\/setup-account\?token=[a-f0-9]{64}/);
+    expect(r.stdout).toMatch(/https:\/\/pto\.example\.com\/setup-account#token=[a-f0-9]{64}/);
   });
 
   it('overrides the base URL with --base-url', () => {

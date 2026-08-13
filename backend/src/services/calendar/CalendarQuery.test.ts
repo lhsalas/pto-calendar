@@ -25,6 +25,7 @@ describe('CalendarQuery', () => {
         ],
       },
       orderBy: [{ startDate: 'asc' }, { userId: 'asc' }],
+      take: 1000,
       select: expect.objectContaining({
         id: true,
         startDate: true,

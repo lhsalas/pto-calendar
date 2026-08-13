@@ -4,6 +4,7 @@ import { HttpError } from '../../middleware/errorHandler.js';
 import { record } from '../audit/AuditLogService.js';
 import type { CreateHolidayInput, SupportedCountryCode } from './schemas.js';
 import { loadPreset } from './presets.js';
+import { MAX_CALENDAR_RESULTS } from '../calendar/range.js';
 
 export interface ApiHoliday {
   id: string;
@@ -49,6 +50,7 @@ export async function listInRange(start: string, end: string): Promise<ApiHolida
       date: { gte: toDateOnly(start), lte: toDateOnly(end) },
     },
     orderBy: [{ date: 'asc' }, { countryCode: 'asc' }],
+    take: MAX_CALENDAR_RESULTS,
     select: HOLIDAY_SELECT,
   });
   return rows.map(toApi);
@@ -159,6 +161,7 @@ export async function seedDefaults(
 export async function listAll(): Promise<ApiHoliday[]> {
   const rows = await prisma.holiday.findMany({
     orderBy: [{ date: 'asc' }, { countryCode: 'asc' }],
+    take: MAX_CALENDAR_RESULTS,
     select: HOLIDAY_SELECT,
   });
   return rows.map(toApi);

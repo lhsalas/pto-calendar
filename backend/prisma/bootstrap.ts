@@ -71,7 +71,7 @@ async function main(): Promise<void> {
           `Issued a fresh setup token. The link is valid until ${expiresAt.toISOString()}:`,
       );
       // eslint-disable-next-line no-console
-      console.log(`${baseUrl}/setup-account?token=${plaintext}`);
+      console.log(`${baseUrl}/setup-account#token=${plaintext}`);
       return;
     }
     const setupToken = generateSetupToken();
@@ -87,7 +87,7 @@ async function main(): Promise<void> {
     // eslint-disable-next-line no-console
     console.log(`Setup link (valid until ${setupToken.expiresAt.toISOString()}):`);
     // eslint-disable-next-line no-console
-    console.log(`${baseUrl}/setup-account?token=${setupToken.plaintext}`);
+    console.log(`${baseUrl}/setup-account#token=${setupToken.plaintext}`);
   } finally {
     await prisma.$disconnect();
   }

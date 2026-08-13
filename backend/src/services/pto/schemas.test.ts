@@ -78,6 +78,18 @@ describe('RangeQuerySchema', () => {
     const result = RangeQuerySchema.safeParse({ start: '2026-01-01' });
     expect(result.success).toBe(false);
   });
+
+  it('rejects invalid, reversed, and oversized calendar ranges', () => {
+    expect(RangeQuerySchema.safeParse({ start: '2026-02-30', end: '2026-03-01' }).success).toBe(
+      false,
+    );
+    expect(RangeQuerySchema.safeParse({ start: '2026-02-01', end: '2026-01-31' }).success).toBe(
+      false,
+    );
+    expect(RangeQuerySchema.safeParse({ start: '2026-01-01', end: '2027-01-02' }).success).toBe(
+      false,
+    );
+  });
 });
 
 describe('IdParamSchema', () => {

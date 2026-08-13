@@ -21,4 +21,16 @@ describe('LoginSchema', () => {
     const result = LoginSchema.safeParse({ email: 'not-an-email', password: 'whatever' });
     expect(result.success).toBe(false);
   });
+
+  it('rejects oversized email and password values before authentication work', () => {
+    expect(
+      LoginSchema.safeParse({ email: `${'a'.repeat(249)}@b.com`, password: 'whatever' }).success,
+    ).toBe(false);
+    expect(LoginSchema.safeParse({ email: 'a@b.com', password: 'a'.repeat(73) }).success).toBe(
+      false,
+    );
+    expect(LoginSchema.safeParse({ email: 'a@b.com', password: 'a'.repeat(72) }).success).toBe(
+      true,
+    );
+  });
 });
