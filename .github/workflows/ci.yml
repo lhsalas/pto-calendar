@@ -145,6 +145,44 @@ jobs:
       - name: Validate backup lifecycle configuration
         run: |
           node -e "const c=require('./infra/gcp/backup-lifecycle.json'); if (c.rule?.[0]?.condition?.age !== 30) process.exit(1)"
+      - name: Validate production deployment guard
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/deploy.yml').read_text()
+          required = [
+              "actions: read",
+              "github.ref == 'refs/heads/master'",
+              "github.event.workflow_run.conclusion == 'success'",
+              'Verify manual dispatch has successful CI',
+              'environment: production',
+          ]
+          missing = [item for item in required if item not in workflow]
+          if missing:
+              raise SystemExit(f'Missing production deploy guard: {missing}')
+          PY
+      - name: Validate privileged OpenCode workflow
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/opencode.yml').read_text()
+          required = [
+              "github.event.comment.author_association == 'OWNER'",
+              "github.event.comment.author_association == 'MEMBER'",
+              'environment: opencode',
+              'id-token: none',
+              'actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803',
+              'anomalyco/opencode/github@a3b97d9090ccf4aa9ac32268486283e3131e36b4',
+              'ref: ${{ github.event.repository.default_branch }}',
+          ]
+          missing = [item for item in required if item not in workflow]
+          if missing:
+              raise SystemExit(f'Missing OpenCode security control: {missing}')
+          if '@latest' in workflow or 'id-token: write' in workflow:
+              raise SystemExit('OpenCode workflow contains a mutable or excessive privilege')
+          PY
 
   e2e:
     name: E2E (Playwright)

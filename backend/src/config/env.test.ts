@@ -117,17 +117,30 @@ describe('loadEnv — production guards', () => {
     ).toThrow(/COOKIE_SECURE/);
   });
 
-  it('accepts COOKIE_SECURE=false in production when INSECURE_COOKIES_ALLOWED=true', () => {
-    const env = loadEnv({
-      ...BASE_ENV,
-      NODE_ENV: 'production',
-      SESSION_SECRET: STRONG_SECRET_A,
-      COOKIE_SECURE: 'false',
-      INSECURE_COOKIES_ALLOWED: 'true',
-      BCRYPT_ROUNDS: '10',
-    });
-    expect(env.COOKIE_SECURE).toBe(false);
-    expect(env.INSECURE_COOKIES_ALLOWED).toBe(true);
+  it('rejects the insecure-cookie bypass in production', () => {
+    expect(() =>
+      loadEnv({
+        ...BASE_ENV,
+        NODE_ENV: 'production',
+        SESSION_SECRET: STRONG_SECRET_A,
+        COOKIE_SECURE: 'false',
+        INSECURE_COOKIES_ALLOWED: 'true',
+        BCRYPT_ROUNDS: '10',
+      }),
+    ).toThrow(/INSECURE_COOKIES_ALLOWED/);
+  });
+
+  it('rejects the insecure-cookie flag in production even when cookies are secure', () => {
+    expect(() =>
+      loadEnv({
+        ...BASE_ENV,
+        NODE_ENV: 'production',
+        SESSION_SECRET: STRONG_SECRET_A,
+        COOKIE_SECURE: 'true',
+        INSECURE_COOKIES_ALLOWED: 'true',
+        BCRYPT_ROUNDS: '10',
+      }),
+    ).toThrow(/INSECURE_COOKIES_ALLOWED/);
   });
 
   it('INSECURE_COOKIES_ALLOWED defaults to false when unset', () => {
@@ -138,7 +151,7 @@ describe('loadEnv — production guards', () => {
     expect(env.INSECURE_COOKIES_ALLOWED).toBe(false);
   });
 
-  it('INSECURE_COOKIES_ALLOWED=true in dev is accepted (flag is allowed in any NODE_ENV)', () => {
+  it('INSECURE_COOKIES_ALLOWED=true in dev is accepted', () => {
     const env = loadEnv({
       ...BASE_ENV,
       NODE_ENV: 'development',

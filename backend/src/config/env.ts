@@ -94,8 +94,7 @@ const EnvSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['COOKIE_SECURE'],
-        message:
-          'COOKIE_SECURE must be true in production (or set INSECURE_COOKIES_ALLOWED=true for HTTP-only demo deployments)',
+        message: 'COOKIE_SECURE must be true in production',
       });
     }
     if (env.BCRYPT_ROUNDS < 10) {
@@ -103,6 +102,13 @@ const EnvSchema = z
         code: z.ZodIssueCode.custom,
         path: ['BCRYPT_ROUNDS'],
         message: 'BCRYPT_ROUNDS must be at least 10 in production',
+      });
+    }
+    if (env.INSECURE_COOKIES_ALLOWED) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['INSECURE_COOKIES_ALLOWED'],
+        message: 'INSECURE_COOKIES_ALLOWED is not permitted in production',
       });
     }
   });

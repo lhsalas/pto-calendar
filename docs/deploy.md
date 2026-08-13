@@ -119,9 +119,13 @@ Set repository secrets:
 - `GCP_BACKUP_SERVICE_ACCOUNT`
 
 The `Deploy production` workflow runs after the `CI` workflow succeeds on
-`master`, or manually through `workflow_dispatch`. It builds
-`backend/Dockerfile`, pushes an immutable image, applies migrations once, and
-deploys Cloud Run.
+`master`, or manually through `workflow_dispatch` from `master` only. A manual
+dispatch must also find a successful `CI` push run for the exact commit SHA
+before cloud authentication and deployment begin. Both Cloud Run and Firebase
+deployment jobs use the protected `production` environment, so configure
+required reviewers and restrict its deployment branches to `master`. The
+workflow builds `backend/Dockerfile`, pushes an image, applies migrations once,
+and deploys Cloud Run.
 
 ## 5. Deploy the Backend
 
