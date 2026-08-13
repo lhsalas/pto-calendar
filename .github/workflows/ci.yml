@@ -87,6 +87,8 @@ jobs:
       - run: npm ci
       - run: npm run prisma:generate
       - run: npx prisma migrate deploy --schema=backend/prisma/schema.prisma
+      - name: Install postgresql-client (for backupRestore roundtrip test)
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: npm run test:integration:coverage -w backend
       - name: Upload coverage
         if: always()

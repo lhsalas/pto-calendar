@@ -11,7 +11,8 @@ const SOURCE_URL =
 const TARGET_URL =
   process.env.BACKUP_TEST_TARGET_URL ??
   'postgresql://pto:pto@localhost:5432/pto_restore_test?schema=public';
-const CONTAINER = 'pto-calendar-db';
+const LOCAL_CONTAINER = 'pto-calendar-db';
+const TARGET_DB = 'pto_restore_test';
 
 const PASSPHRASE = 'correct horse battery staple';
 
@@ -20,48 +21,89 @@ function stripPgQuery(url: string): string {
   return idx === -1 ? url : url.slice(0, idx);
 }
 
-function pgInContainer(args: string[], input?: string): string {
-  const fullArgs = ['exec', '-i', '-e', 'PGPASSWORD=pto', CONTAINER, ...args];
-  const result = spawnSync('podman', fullArgs, {
+type Runner = 'pg_dump' | 'podman-container' | 'none';
+
+function detectRunner(): Runner {
+  const probe = spawnSync('pg_dump', ['--version'], { stdio: 'ignore' });
+  if (probe.status === 0) return 'pg_dump';
+  const containerProbe = spawnSync('podman', ['ps', '--format', '{{.Names}}'], {
+    encoding: 'utf8',
+  });
+  if (containerProbe.status === 0 && containerProbe.stdout.split('\n').includes(LOCAL_CONTAINER)) {
+    return 'podman-container';
+  }
+  return 'none';
+}
+
+function runPgSql(sqlArgs: string[], input?: string): string {
+  const runner = detectRunner();
+  if (runner === 'none') {
+    throw new Error('no pg_dump / podman runner available');
+  }
+  const fullArgs =
+    runner === 'pg_dump'
+      ? sqlArgs
+      : ['exec', '-i', '-e', 'PGPASSWORD=pto', LOCAL_CONTAINER, ...sqlArgs];
+  const cmd = runner === 'pg_dump' ? 'pg_dump' : 'podman';
+  const env = runner === 'pg_dump' ? { PGPASSWORD: 'pto' } : undefined;
+  const result = spawnSync(cmd, fullArgs, {
     encoding: 'utf8',
     input,
+    env,
     maxBuffer: 64 * 1024 * 1024,
   });
   if (result.status !== 0) {
     throw new Error(
-      `podman ${args.join(' ')} failed (status=${result.status}): ${result.stderr || result.stdout}`,
+      `${cmd} ${sqlArgs.join(' ')} failed (status=${result.status}): ${result.stderr || result.stdout}`,
     );
   }
   return result.stdout;
 }
 
-function dumpSchema(sourceDbUrl: string): string {
-  return pgInContainer(['pg_dump', '--schema-only', '--no-owner', '--schema=public', sourceDbUrl]);
-}
-
-function dumpData(sourceDbUrl: string): string {
-  return pgInContainer(['pg_dump', '--data-only', '--no-owner', '--schema=public', sourceDbUrl]);
-}
-
-function applySql(sql: string): void {
-  pgInContainer(
-    ['psql', '-U', 'pto', '-d', 'pto_restore_test', '-v', 'ON_ERROR_STOP=1', '-q'],
-    sql,
-  );
+function runSql(sql: string): void {
+  runPgSql(['psql', '-U', 'pto', '-d', TARGET_DB, '-v', 'ON_ERROR_STOP=1', '-q'], sql);
 }
 
 function resetTarget(): void {
-  pgInContainer([
-    'psql',
-    '-U',
-    'pto',
-    '-d',
-    'pto_restore_test',
-    '-v',
-    'ON_ERROR_STOP=1',
-    '-c',
-    'DROP SCHEMA public CASCADE; CREATE SCHEMA public;',
-  ]);
+  // DROP SCHEMA public is best-effort: the target DB starts empty after
+  // `CREATE DATABASE`, so the schema may not exist yet.
+  try {
+    runPgSql([
+      'psql',
+      '-U',
+      'pto',
+      '-d',
+      TARGET_DB,
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-c',
+      'DROP SCHEMA public CASCADE;',
+    ]);
+  } catch {
+    // ignore — the schema didn't exist, which is exactly what we wanted
+  }
+}
+
+function dumpSchema(sourceDbUrl: string): string {
+  return runPgSql(['pg_dump', '--schema-only', '--no-owner', '--schema=public', sourceDbUrl]);
+}
+
+function dumpData(sourceDbUrl: string): string {
+  return runPgSql(['pg_dump', '--data-only', '--no-owner', '--schema=public', sourceDbUrl]);
+}
+
+function ensureTargetDatabase(): void {
+  try {
+    runPgSql(['psql', '-U', 'pto', '-d', TARGET_DB, '-c', 'SELECT 1']);
+    return;
+  } catch {
+    // fall through and create
+  }
+  try {
+    runPgSql(['psql', '-U', 'pto', '-d', 'postgres', '-c', `CREATE DATABASE ${TARGET_DB};`]);
+  } catch {
+    // race-safe: ignore "database already exists" if another process raced us.
+  }
 }
 
 function encrypt(plaintextPath: string, ciphertextPath: string, passphrase: string): void {
@@ -127,11 +169,15 @@ async function selectCount(url: string, table: string): Promise<number> {
 }
 
 const sourcePrisma = new PrismaClient({ datasources: { db: { url: SOURCE_URL } } });
+const runner = detectRunner();
+const testOrSkip = runner === 'none' ? it.skip : it;
 
 describe('database backup → restore roundtrip', () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pto-backup-restore-'));
 
   beforeAll(async () => {
+    if (runner === 'none') return;
+    ensureTargetDatabase();
     resetTarget();
     expect(existsSync(workdir)).toBe(true);
     const userCount = await selectCount(SOURCE_URL, 'users');
@@ -143,127 +189,119 @@ describe('database backup → restore roundtrip', () => {
     await sourcePrisma.$disconnect();
   });
 
-  it('dumps, encrypts, decrypts, and restores users + PTOs', async () => {
-    const stamp = new Date().toISOString().replace(/[:.]/g, '').slice(0, 15) + 'Z';
-    const archiveBase = `pto-${stamp}-roundtrip`;
-    const schemaPath = join(workdir, 'schema.sql');
-    const dataPath = join(workdir, 'data.sql');
-    const archivePath = join(workdir, `${archiveBase}.tar.gz`);
-    const encryptedPath = `${archivePath}.gpg`;
-    const checksumPath = `${encryptedPath}.sha256`;
-    const decryptedPath = join(workdir, `${archiveBase}.decrypted.tar.gz`);
+  testOrSkip(
+    'dumps, encrypts, decrypts, and restores users + PTOs',
+    async () => {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '').slice(0, 15) + 'Z';
+      const archiveBase = `pto-${stamp}-roundtrip`;
+      const schemaPath = join(workdir, 'schema.sql');
+      const dataPath = join(workdir, 'data.sql');
+      const archivePath = join(workdir, `${archiveBase}.tar.gz`);
+      const encryptedPath = `${archivePath}.gpg`;
+      const checksumPath = `${encryptedPath}.sha256`;
+      const decryptedPath = join(workdir, `${archiveBase}.decrypted.tar.gz`);
 
-    const sourceDbUrl = stripPgQuery(SOURCE_URL);
+      const sourceDbUrl = stripPgQuery(SOURCE_URL);
 
-    writeFileSync(schemaPath, dumpSchema(sourceDbUrl));
-    writeFileSync(dataPath, dumpData(sourceDbUrl));
-    expect(readFileSync(schemaPath).length).toBeGreaterThan(0);
-    expect(readFileSync(dataPath).length).toBeGreaterThan(0);
+      writeFileSync(schemaPath, dumpSchema(sourceDbUrl));
+      writeFileSync(dataPath, dumpData(sourceDbUrl));
+      expect(readFileSync(schemaPath).length).toBeGreaterThan(0);
+      expect(readFileSync(dataPath).length).toBeGreaterThan(0);
 
-    execFileSync('tar', ['-C', workdir, '-czf', archivePath, 'schema.sql', 'data.sql'], {
-      stdio: 'pipe',
-    });
-    expect(existsSync(archivePath)).toBe(true);
-
-    encrypt(archivePath, encryptedPath, PASSPHRASE);
-    expect(readFileSync(encryptedPath).length).toBeGreaterThan(0);
-
-    // Ciphertext must not contain plaintext schema/data markers — the only
-    // way the original bytes could be recovered is via GPG with the key.
-    const ciphertext = readFileSync(encryptedPath);
-    const plaintextSchema = readFileSync(schemaPath);
-    expect(ciphertext.includes(plaintextSchema.slice(0, 32))).toBe(false);
-    expect(ciphertext.includes(plaintextSchema.slice(-32))).toBe(false);
-
-    const sha = execFileSync('sha256sum', [basename(encryptedPath)], {
-      cwd: workdir,
-      encoding: 'utf8',
-    });
-    writeFileSync(checksumPath, sha);
-
-    const verify = spawnSync('sha256sum', ['--check', '--strict', basename(checksumPath)], {
-      cwd: workdir,
-      encoding: 'utf8',
-    });
-    expect(verify.status).toBe(0);
-
-    // Tampered ciphertext must fail decryption or checksum verification.
-    const tampered = `${encryptedPath}.tampered`;
-    const corrupted = Buffer.from(ciphertext);
-    const lastIndex = corrupted.length - 1;
-    if (lastIndex < 0) {
-      throw new Error('ciphertext is empty');
-    }
-    const lastByte = corrupted[lastIndex];
-    if (lastByte === undefined) {
-      throw new Error('ciphertext is empty');
-    }
-    corrupted[lastIndex] = lastByte ^ 0xff;
-    writeFileSync(tampered, corrupted);
-    const decryptTampered = spawnSync(
-      'gpg',
-      [
-        '--batch',
-        '--yes',
-        '--no-tty',
-        '--decrypt',
-        '--passphrase-file',
-        '/dev/stdin',
-        '--output',
-        join(workdir, 'tampered.tar.gz'),
-        tampered,
-      ],
-      {
-        encoding: 'utf8',
-        input: PASSPHRASE,
-      },
-    );
-    // GPG may report an integrity error (non-zero) OR succeed but produce
-    // corrupted output. Either way, the output MUST NOT match the original.
-    const tamperedOut = join(workdir, 'tampered.tar.gz');
-    let producedBytesIdentical = false;
-    if (existsSync(tamperedOut)) {
-      const produced = readFileSync(tamperedOut);
-      producedBytesIdentical = produced.equals(readFileSync(archivePath));
-    }
-    expect(producedBytesIdentical).toBe(false);
-    void decryptTampered;
-
-    decrypt(encryptedPath, decryptedPath, PASSPHRASE);
-    expect(existsSync(decryptedPath)).toBe(true);
-    expect(readFileSync(decryptedPath).equals(readFileSync(archivePath))).toBe(true);
-
-    execFileSync('tar', ['-xzf', decryptedPath, '-C', workdir], { stdio: 'pipe' });
-    const restoredSchema = join(workdir, 'schema.sql');
-    const restoredData = join(workdir, 'data.sql');
-    expect(existsSync(restoredSchema)).toBe(true);
-    expect(existsSync(restoredData)).toBe(true);
-
-    // Drop schema before applying; pg_dump's schema dump includes
-    // CREATE SCHEMA public, which fails when public already exists.
-    pgInContainer([
-      'psql',
-      '-U',
-      'pto',
-      '-d',
-      'pto_restore_test',
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-c',
-      'DROP SCHEMA public CASCADE;',
-    ]);
-    applySql(readFileSync(restoredSchema, 'utf8'));
-    applySql(readFileSync(restoredData, 'utf8'));
-
-    const tables = ['users', 'pto_requests', 'audit_logs'];
-    for (const table of tables) {
-      const sourceCount = await selectCount(SOURCE_URL, table);
-      const targetCount = await selectCount(TARGET_URL, table);
-      expect({ table, source: sourceCount, target: targetCount }).toEqual({
-        table,
-        source: sourceCount,
-        target: sourceCount,
+      execFileSync('tar', ['-C', workdir, '-czf', archivePath, 'schema.sql', 'data.sql'], {
+        stdio: 'pipe',
       });
-    }
-  }, 120_000);
+      expect(existsSync(archivePath)).toBe(true);
+
+      encrypt(archivePath, encryptedPath, PASSPHRASE);
+      expect(readFileSync(encryptedPath).length).toBeGreaterThan(0);
+
+      // Ciphertext must not contain plaintext schema/data markers — the only
+      // way the original bytes could be recovered is via GPG with the key.
+      const ciphertext = readFileSync(encryptedPath);
+      const plaintextSchema = readFileSync(schemaPath);
+      expect(ciphertext.includes(plaintextSchema.slice(0, 32))).toBe(false);
+      expect(ciphertext.includes(plaintextSchema.slice(-32))).toBe(false);
+
+      const sha = execFileSync('sha256sum', [basename(encryptedPath)], {
+        cwd: workdir,
+        encoding: 'utf8',
+      });
+      writeFileSync(checksumPath, sha);
+
+      const verify = spawnSync('sha256sum', ['--check', '--strict', basename(checksumPath)], {
+        cwd: workdir,
+        encoding: 'utf8',
+      });
+      expect(verify.status).toBe(0);
+
+      // Tampered ciphertext must fail decryption or checksum verification.
+      const tampered = `${encryptedPath}.tampered`;
+      const corrupted = Buffer.from(ciphertext);
+      const lastIndex = corrupted.length - 1;
+      if (lastIndex < 0) {
+        throw new Error('ciphertext is empty');
+      }
+      const lastByte = corrupted[lastIndex];
+      if (lastByte === undefined) {
+        throw new Error('ciphertext is empty');
+      }
+      corrupted[lastIndex] = lastByte ^ 0xff;
+      writeFileSync(tampered, corrupted);
+      const decryptTampered = spawnSync(
+        'gpg',
+        [
+          '--batch',
+          '--yes',
+          '--no-tty',
+          '--decrypt',
+          '--passphrase-file',
+          '/dev/stdin',
+          '--output',
+          join(workdir, 'tampered.tar.gz'),
+          tampered,
+        ],
+        {
+          encoding: 'utf8',
+          input: PASSPHRASE,
+        },
+      );
+      const tamperedOut = join(workdir, 'tampered.tar.gz');
+      let producedBytesIdentical = false;
+      if (existsSync(tamperedOut)) {
+        const produced = readFileSync(tamperedOut);
+        producedBytesIdentical = produced.equals(readFileSync(archivePath));
+      }
+      expect(producedBytesIdentical).toBe(false);
+      void decryptTampered;
+
+      decrypt(encryptedPath, decryptedPath, PASSPHRASE);
+      expect(existsSync(decryptedPath)).toBe(true);
+      expect(readFileSync(decryptedPath).equals(readFileSync(archivePath))).toBe(true);
+
+      execFileSync('tar', ['-xzf', decryptedPath, '-C', workdir], { stdio: 'pipe' });
+      const restoredSchema = join(workdir, 'schema.sql');
+      const restoredData = join(workdir, 'data.sql');
+      expect(existsSync(restoredSchema)).toBe(true);
+      expect(existsSync(restoredData)).toBe(true);
+
+      // Drop schema before applying; pg_dump's schema dump includes
+      // CREATE SCHEMA public, which fails when public already exists.
+      resetTarget();
+      runSql(readFileSync(restoredSchema, 'utf8'));
+      runSql(readFileSync(restoredData, 'utf8'));
+
+      const tables = ['users', 'pto_requests', 'audit_logs'];
+      for (const table of tables) {
+        const sourceCount = await selectCount(SOURCE_URL, table);
+        const targetCount = await selectCount(TARGET_URL, table);
+        expect({ table, source: sourceCount, target: targetCount }).toEqual({
+          table,
+          source: sourceCount,
+          target: sourceCount,
+        });
+      }
+    },
+    120_000,
+  );
 });
