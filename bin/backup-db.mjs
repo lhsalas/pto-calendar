@@ -22,14 +22,50 @@
 //   2  tool error (gpg/tar/supabase/gcloud exit non-zero)
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync, statSync } from 'node:fs';
+import {
+  chmodSync,
+  closeSync,
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  openSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
+import { assertStrongEncryptionKey } from './backupSecurity.mjs';
+
+process.umask(0o077);
+
+class ScriptError extends Error {
+  constructor(message, code = 1) {
+    super(message);
+    this.code = code;
+  }
+}
+
+let activeWorkdir;
+
+function cleanupWorkdir() {
+  if (!activeWorkdir) return;
+  rmSync(activeWorkdir, { recursive: true, force: true });
+  activeWorkdir = undefined;
+}
 
 function fail(message, code = 1) {
-  console.error(`error: ${message}`);
-  process.exit(code);
+  throw new ScriptError(message, code);
 }
+
+process.once('SIGINT', () => {
+  cleanupWorkdir();
+  process.exit(130);
+});
+process.once('SIGTERM', () => {
+  cleanupWorkdir();
+  process.exit(143);
+});
 
 function parseArgs(argv) {
   const args = { label: null, bucket: null, keepLocal: false };
@@ -83,12 +119,10 @@ function run(label, command, args, options = {}) {
     ...options,
   });
   if (result.error) {
-    fail(`${label} failed to start: ${result.error.message}`, 2);
+    fail(`${label} failed to start`, 2);
   }
   if (result.status !== 0) {
-    const stderr = result.stderr ? result.stderr.toString() : '';
-    const stdout = result.stdout ? result.stdout.toString() : '';
-    fail(`${label} exited with status ${result.status}\n${stderr}\n${stdout}`.trim(), 2);
+    fail(`${label} exited with status ${result.status}`, 2);
   }
   return result;
 }
@@ -149,6 +183,11 @@ function main() {
   const dbUrl = requireEnv('DATABASE_URL');
   const bucket = args.bucket ?? requireEnv('BACKUP_BUCKET');
   const encryptionKey = requireEnv('ENCRYPTION_KEY');
+  try {
+    assertStrongEncryptionKey(encryptionKey);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : 'invalid encryption key', 1);
+  }
 
   requireTool('gpg', 'Install gnupg.');
   requireTool('tar', 'Install tar.');
@@ -156,6 +195,7 @@ function main() {
   requireTool('gcloud', 'Install the Google Cloud CLI and run `gcloud auth login`.');
 
   const workdir = mkdtempSync(join(tmpdir(), 'pto-backup-'));
+  activeWorkdir = workdir;
   const stamp = new Date().toISOString().replace(/[:.]/g, '').replace(/-/g, '').slice(0, 15) + 'Z';
   const labelPart = args.label ? `-${args.label.replace(/[^A-Za-z0-9._-]/g, '_')}` : '';
   const baseName = `pto-${stamp}${labelPart}`;
@@ -176,9 +216,9 @@ function main() {
     run('tar archive', 'tar', ['-C', workdir, '-czf', archive, 'schema.sql', 'data.sql']);
 
     const passphrasePath = join(workdir, 'passphrase');
-    const passphraseFd = require('node:fs').openSync(passphrasePath, 'w', 0o600);
-    require('node:fs').writeFileSync(passphraseFd, encryptionKey);
-    require('node:fs').closeSync(passphraseFd);
+    const passphraseFd = openSync(passphrasePath, 'w', 0o600);
+    writeFileSync(passphraseFd, encryptionKey);
+    closeSync(passphraseFd);
     run(
       'gpg encrypt',
       'gpg',
@@ -205,7 +245,7 @@ function main() {
       cwd: workdir,
       stdio: ['ignore', 'pipe', 'inherit'],
     });
-    require('node:fs').writeFileSync(checksum, sha.stdout);
+    writeFileSync(checksum, sha.stdout, { mode: 0o600 });
 
     const objectName = `pto/${basename(encrypted)}`;
     run(
@@ -218,15 +258,25 @@ function main() {
     if (args.keepLocal) {
       const localArchive = join(process.cwd(), basename(encrypted));
       const localChecksum = `${localArchive}.sha256`;
-      require('node:fs').copyFileSync(encrypted, localArchive);
-      require('node:fs').copyFileSync(checksum, localChecksum);
+      copyFileSync(encrypted, localArchive);
+      copyFileSync(checksum, localChecksum);
+      chmodSync(localArchive, 0o600);
+      chmodSync(localChecksum, 0o600);
+      console.warn('WARNING: --keep-local retains a sensitive encrypted backup on disk.');
       console.log(`local copy: ${localArchive}`);
     }
 
     console.log(`Backup uploaded: gs://${bucket}/${objectName}`);
   } finally {
-    rmSync(workdir, { recursive: true, force: true });
+    cleanupWorkdir();
   }
 }
 
-main();
+try {
+  main();
+} catch (error) {
+  const code = error instanceof ScriptError ? error.code : 2;
+  const message = error instanceof Error ? error.message : 'Unknown backup failure';
+  console.error(`error: ${message}`);
+  process.exit(code);
+}

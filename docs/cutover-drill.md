@@ -188,7 +188,9 @@ Supabase project (or local Postgres) — never into production:
 BACKUP_BUCKET='<backup-bucket>' \
 TARGET_DATABASE_URL='<disposable-target-url>' \
 ENCRYPTION_KEY='<passphrase>' \
-  node bin/restore-backup.mjs --archive pto-<timestamp>.tar.gz.gpg
+  node bin/restore-backup.mjs \
+    --archive pto-<timestamp>.tar.gz.gpg \
+    --allow-disposable-target
 ```
 
 Verify:
