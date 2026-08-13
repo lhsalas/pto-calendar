@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CalendarRangeSchema } from '../calendar/range.js';
 
 export const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 export const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -6,10 +7,7 @@ export const COUNTRY_CODE_REGEX = /^[A-Z]{2}$/;
 export const SUPPORTED_COUNTRY_CODES = ['US', 'MX', 'CO', 'CL'] as const;
 export type SupportedCountryCode = (typeof SUPPORTED_COUNTRY_CODES)[number];
 
-export const RangeQuerySchema = z.object({
-  start: z.string().regex(ISO_DATE, 'start must be YYYY-MM-DD'),
-  end: z.string().regex(ISO_DATE, 'end must be YYYY-MM-DD'),
-});
+export const RangeQuerySchema = CalendarRangeSchema;
 
 export const CreateHolidaySchema = z.object({
   date: z.string().regex(ISO_DATE, 'date must be YYYY-MM-DD'),

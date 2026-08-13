@@ -199,7 +199,7 @@ paths:
       description: |
         Public endpoint. The lead creates a user via `POST /users` and shares
         the returned one-time `setupToken` link with the new member; the member
-        opens `/setup-account?token=...` and submits a password. The token is
+        opens `/setup-account#token=...` and submits a password. The token is
         sha256-hashed in the database, expires after `SETUP_TOKEN_TTL_MS`
         (default 24h), and is single-use. Rate-limited by the same login
         limiter as `POST /auth/login`.
@@ -363,7 +363,7 @@ paths:
             type: string
             format: date
             example: 2026-04-27
-          description: Visible calendar grid start date in YYYY-MM-DD format
+          description: Visible calendar grid start date in YYYY-MM-DD format. The range must be valid, ordered, and no more than 366 days.
         - in: query
           name: end
           required: true
@@ -371,7 +371,7 @@ paths:
             type: string
             format: date
             example: 2026-05-31
-          description: Visible calendar grid end date in YYYY-MM-DD format
+          description: Visible calendar grid end date in YYYY-MM-DD format. The range must be valid, ordered, and no more than 366 days.
       responses:
         '200':
           description: PTO entries overlapping the requested visible calendar date range
@@ -612,7 +612,7 @@ paths:
   /holidays:
     get:
       summary: List holidays in a date range
-      description: Returns every holiday whose `date` falls within `[start, end]` (inclusive). Open to any authenticated user.
+      description: Returns up to 1000 holidays whose `date` falls within `[start, end]` (inclusive). The valid range may not exceed 366 days. Open to any authenticated user.
       parameters:
         - in: query
           name: start
@@ -933,8 +933,10 @@ components:
         email:
           type: string
           format: email
+          maxLength: 254
         password:
           type: string
+          maxLength: 72
     Password:
       type: string
       format: password
@@ -975,7 +977,7 @@ components:
           description: |
             One-time plaintext setup token. Shown ONCE to the team lead and never
             recoverable from the server. The new member redeems it at
-            /setup-account?token=...
+            /setup-account#token=...
         expiresAt:
           type: string
           format: date-time

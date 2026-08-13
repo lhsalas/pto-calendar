@@ -20,6 +20,10 @@ describe('holidays schemas', () => {
     it('rejects bad end', () => {
       expect(() => RangeQuerySchema.parse({ start: '2026-01-01', end: 'bad' })).toThrow();
     });
+    it('rejects reversed and oversized ranges', () => {
+      expect(() => RangeQuerySchema.parse({ start: '2026-02-01', end: '2026-01-31' })).toThrow();
+      expect(() => RangeQuerySchema.parse({ start: '2026-01-01', end: '2027-01-02' })).toThrow();
+    });
   });
 
   describe('CreateHolidaySchema', () => {

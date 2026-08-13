@@ -113,7 +113,7 @@ describe('AdminUsersPage', () => {
 
     expect(writeText).toHaveBeenCalledTimes(1);
     const [written] = writeText.mock.calls[0] ?? [];
-    expect(written).toMatch(/^http:\/\/[^/]+\/setup-account\?token=/);
+    expect(written).toMatch(/^http:\/\/[^/]+\/setup-account#token=/);
     expect(written).toBe((input as HTMLInputElement).value);
     expect(written).toContain('a'.repeat(64));
     expect(written).not.toBe('a'.repeat(64));

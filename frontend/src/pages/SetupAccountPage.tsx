@@ -1,19 +1,34 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import { useAuth } from '../context/useAuth';
 import { ThemeToggle } from '../components/ThemeToggle';
 
 export function SetupAccountPage(): JSX.Element {
-  const [searchParams] = useSearchParams();
-  const token = searchParams.get('token') ?? '';
+  const location = useLocation();
+  const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const queryToken = new URLSearchParams(location.search).get('token');
+  const hashToken = hashParams.get('token');
+  const token = queryToken ?? hashToken ?? '';
   const { setupAccount } = useAuth();
   const navigate = useNavigate();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!queryToken && !hashToken) return;
+    const queryParams = new URLSearchParams(location.search);
+    queryParams.delete('token');
+    const query = queryParams.toString();
+    window.history.replaceState(
+      null,
+      document.title,
+      `${location.pathname}${query ? `?${query}` : ''}`,
+    );
+  }, [hashToken, location.pathname, location.search, queryToken]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();

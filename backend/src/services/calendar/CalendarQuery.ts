@@ -1,5 +1,6 @@
 import type { DayPart, PTORequest, Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
+import { MAX_CALENDAR_RESULTS } from './range.js';
 
 export interface PTOWithUser {
   id: string;
@@ -36,6 +37,7 @@ export async function listVisibleRange(start: string, end: string): Promise<PTOW
   const rows = await prisma.pTORequest.findMany({
     where,
     orderBy: [{ startDate: 'asc' }, { userId: 'asc' }],
+    take: MAX_CALENDAR_RESULTS,
     select: PTO_LIST_SELECT,
   });
   return rows.map((r) => ({

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CalendarRangeSchema } from '../calendar/range.js';
 
 export const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -13,10 +14,7 @@ export const CreatePtoSchema = z.object({
   note: z.string().max(500).optional(),
 });
 
-export const RangeQuerySchema = z.object({
-  start: z.string().regex(ISO_DATE),
-  end: z.string().regex(ISO_DATE),
-});
+export const RangeQuerySchema = CalendarRangeSchema;
 
 export const IdParamSchema = z.string().regex(UUID_REGEX);
 

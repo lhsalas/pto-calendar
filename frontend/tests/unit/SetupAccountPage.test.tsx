@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -24,11 +24,29 @@ function renderWithProviders(initialPath: string): ReturnType<typeof render> {
 }
 
 describe('SetupAccountPage', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('renders the password + confirm form', () => {
     renderWithProviders('/setup-account?token=abc');
     expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/confirm password/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /set password/i })).toBeInTheDocument();
+  });
+
+  it('scrubs a token from the browser URL after reading it', () => {
+    const replaceState = vi.spyOn(window.history, 'replaceState');
+    renderWithProviders('/setup-account?token=abc');
+
+    expect(replaceState).toHaveBeenCalled();
+    const lastCall = replaceState.mock.calls.at(-1);
+    expect(String(lastCall?.[2])).not.toContain('token=');
+  });
+
+  it('accepts a token in the URL fragment', () => {
+    renderWithProviders('/setup-account#token=abc');
+    expect(screen.getByRole('button', { name: /set password/i })).not.toBeDisabled();
   });
 
   it('rejects passwords shorter than 8 characters', async () => {
