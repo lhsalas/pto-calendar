@@ -29,6 +29,9 @@ const SEED_USERS = [
 const DEFAULT_ROUNDS = 10;
 
 export async function runSeed(prisma: PrismaClient): Promise<void> {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Development seed is disabled in production; use db:bootstrap instead.');
+  }
   const rounds = Number.parseInt(process.env.BCRYPT_ROUNDS ?? String(DEFAULT_ROUNDS), 10);
   for (const u of SEED_USERS) {
     const passwordHash = await bcrypt.hash(u.password, rounds);

@@ -51,6 +51,12 @@ All project documentation lives under [`docs/`](docs/).
 - **Purpose:** GCP Cloud Run, Firebase Hosting, Supabase operations, and
   encrypted backup/restore procedures.
 
+The comment-triggered `.github/workflows/opencode.yml` workflow requires a
+trusted repository owner/member comment and the protected `opencode` GitHub
+environment. Keep that environment approval-gated and store
+`OPENCODE_API_KEY` as an environment secret, not an unrestricted repository
+secret.
+
 ## Functional Summary
 
 The app is intended to support:
@@ -143,7 +149,7 @@ If you only have Docker installed (no Node.js / npm), you can run the entire sta
 npm run app:up          # or: docker compose -f docker-compose.app.yml up --build
 ```
 
-This builds and starts four containers — Postgres, a one-shot migrate+seed job, the backend, and an nginx-served SPA. Only **host port 5173** is exposed; the database and backend live on an internal Docker network. The seeded users are created automatically; log in at <http://localhost:5173> with any of the [seeded dev users](#seeded-dev-users) below. Stop with Ctrl+C and `npm run app:down` to remove the containers; add `-v` (`npm run app:reset`) to wipe the database volume too.
+This builds and starts four containers — Postgres, a one-shot migrate+seed job, the backend, and an nginx-served SPA. Only **localhost port 5173** is exposed; the database and backend live on an internal Docker network. The stack is development-only and refuses the development seed when `NODE_ENV=production`. The seeded users are created automatically; log in at <http://localhost:5173> with any of the [seeded dev users](#seeded-dev-users) below. Stop with Ctrl+C and `npm run app:down` to remove the containers; add `-v` (`npm run app:reset`) to wipe the database volume too.
 
 The standalone host flow (`npm run dev`) and the dev-only Postgres (`npm run db:up`) are unchanged — the new compose file lives at `docker-compose.app.yml` and is purely additive.
 
