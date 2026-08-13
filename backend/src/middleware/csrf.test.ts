@@ -8,10 +8,14 @@ const STRONG_SECRET = 'aB1!cD2@eF3#gH4$iJ5%kL6&mN7*oP8+';
 function requestFor(
   method: string,
   headers: Record<string, string> = {},
+  session?: {
+    user?: { id: string; role: 'member' | 'team_lead' | 'admin'; sessionVersion: number };
+  },
 ): { method: string; get: (name: string) => string | undefined } {
   return {
     method,
     get: (name) => headers[name.toLowerCase()],
+    ...(session ? { session } : {}),
   };
 }
 
@@ -80,10 +84,30 @@ describe('csrfOriginMiddleware', () => {
     });
   });
 
-  it('allows non-browser requests without Origin or Referer', () => {
+  it('allows unauthenticated non-browser requests without Origin or Referer', () => {
     const next = vi.fn();
     csrfOriginMiddleware()(requestFor('PATCH') as never, {} as never, next);
 
     expect(next).toHaveBeenCalledWith();
+  });
+
+  it('rejects authenticated state-changing requests without Origin or Referer', () => {
+    const next = vi.fn();
+    csrfOriginMiddleware()(
+      requestFor(
+        'PATCH',
+        {},
+        {
+          user: { id: 'u1', role: 'member', sessionVersion: 0 },
+        },
+      ) as never,
+      {} as never,
+      next,
+    );
+
+    expect(next.mock.calls[0]?.[0]).toMatchObject({
+      status: 403,
+      code: 'CSRF_REJECTED',
+    });
   });
 });

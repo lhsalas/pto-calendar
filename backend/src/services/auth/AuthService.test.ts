@@ -25,6 +25,7 @@ const FULL_USER = {
   passwordHash: '',
   setupTokenHash: null,
   setupTokenExpiresAt: null,
+  sessionVersion: 0,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
@@ -51,7 +52,8 @@ describe('AuthService', () => {
     it('returns the public user on successful login', async () => {
       vi.mocked(UserService.getUserWithCredentialsByEmail).mockResolvedValueOnce(FULL_USER);
       const result = await login('alice@example.com', PASSWORD);
-      expect(result).toEqual(PUBLIC_USER);
+      expect(result).toMatchObject(PUBLIC_USER);
+      expect(result.sessionVersion).toBe(0);
       expect(UserService.getUserWithCredentialsByEmail).toHaveBeenCalledWith('alice@example.com');
     });
 

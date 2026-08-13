@@ -29,6 +29,7 @@ model User {
   passwordHash       String?   @map("password_hash")
   setupTokenHash     String?   @map("setup_token_hash") @db.VarChar(64)
   setupTokenExpiresAt DateTime? @map("setup_token_expires_at")
+  sessionVersion     Int       @default(0) @map("session_version")
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 

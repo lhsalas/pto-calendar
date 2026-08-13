@@ -10,8 +10,11 @@ export function createAuthRouter(loginLimiter: RequestHandler): Router {
   router.post('/login', loginLimiter, async (req, res, next) => {
     try {
       const { email, password } = LoginSchema.parse(req.body);
-      const user = await login(email, password);
-      req.session = { user: { id: user.id, role: user.role } } as typeof req.session;
+      const authenticated = await login(email, password);
+      const { sessionVersion, ...user } = authenticated;
+      req.session = {
+        user: { id: user.id, role: user.role, sessionVersion },
+      } as typeof req.session;
       res.json({ user });
     } catch (err) {
       next(err);
@@ -22,7 +25,9 @@ export function createAuthRouter(loginLimiter: RequestHandler): Router {
     try {
       const { token, password } = SetupAccountSchema.parse(req.body);
       const { user } = await setupAccount({ token, password });
-      req.session = { user: { id: user.id, role: user.role } } as typeof req.session;
+      req.session = {
+        user: { id: user.id, role: user.role, sessionVersion: user.sessionVersion },
+      } as typeof req.session;
       res.json({
         user: {
           id: user.id,

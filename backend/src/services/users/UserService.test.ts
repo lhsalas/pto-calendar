@@ -19,9 +19,15 @@ vi.mock('../../lib/prisma.js', () => {
     findMany: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
     count: vi.fn(),
   };
-  return { prisma: { user } };
+  return {
+    prisma: {
+      user,
+      $transaction: vi.fn(),
+    },
+  };
 });
 
 import { prisma } from '../../lib/prisma.js';
@@ -31,7 +37,9 @@ const mockFindFirst = prisma.user.findFirst as unknown as ReturnType<typeof vi.f
 const mockFindMany = prisma.user.findMany as unknown as ReturnType<typeof vi.fn>;
 const mockCreate = prisma.user.create as unknown as ReturnType<typeof vi.fn>;
 const mockUpdate = prisma.user.update as unknown as ReturnType<typeof vi.fn>;
+const mockUpdateMany = prisma.user.updateMany as unknown as ReturnType<typeof vi.fn>;
 const mockCount = prisma.user.count as unknown as ReturnType<typeof vi.fn>;
+const mockTransaction = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
 
 const SEED_EMAILS = ['lead@example.com', 'dev1@example.com', 'dev2@example.com'];
 
@@ -47,7 +55,12 @@ beforeEach(() => {
   mockFindMany.mockReset();
   mockCreate.mockReset();
   mockUpdate.mockReset();
+  mockUpdateMany.mockReset();
   mockCount.mockReset();
+  mockTransaction.mockReset();
+  mockTransaction.mockImplementation((callback: (tx: unknown) => Promise<unknown>) =>
+    callback(prisma),
+  );
 });
 
 afterEach(() => {
@@ -161,6 +174,7 @@ describe('createUser', () => {
 describe('setupAccount', () => {
   it('sets the password, clears the token, and returns the user', async () => {
     const token = generateSetupToken();
+    let updatedData: Record<string, unknown> = {};
     mockFindFirst.mockResolvedValueOnce({
       id: 'u1',
       email: 'newcomer@example.com',
@@ -170,13 +184,32 @@ describe('setupAccount', () => {
       passwordHash: null,
       setupTokenHash: token.hash,
       setupTokenExpiresAt: token.expiresAt,
+      sessionVersion: 0,
     });
-    mockUpdate.mockImplementationOnce(({ data }) => Promise.resolve({ id: 'u1', ...data }));
+    mockUpdateMany.mockImplementationOnce(({ data }) => {
+      updatedData = data;
+      return Promise.resolve({ count: 1 });
+    });
+    mockFindUnique.mockImplementationOnce(() =>
+      Promise.resolve({ id: 'u1', ...updatedData, sessionVersion: 1 }),
+    );
     const result = await setupAccount({ token: token.plaintext, password: 'correct-horse' });
     expect(result.user.id).toBe('u1');
+    expect(result.user.sessionVersion).toBe(1);
+    expect(mockUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'u1',
+          setupTokenHash: token.hash,
+        }),
+        data: expect.objectContaining({
+          setupTokenHash: null,
+          setupTokenExpiresAt: null,
+          sessionVersion: { increment: 1 },
+        }),
+      }),
+    );
     expect(result.user.passwordHash).not.toBeNull();
-    expect(result.user.setupTokenHash).toBeNull();
-    expect(result.user.setupTokenExpiresAt).toBeNull();
     const matches = await bcrypt.compare('correct-horse', result.user.passwordHash!);
     expect(matches).toBe(true);
   });
@@ -192,8 +225,10 @@ describe('setupAccount', () => {
       passwordHash: null,
       setupTokenHash: token.hash,
       setupTokenExpiresAt: token.expiresAt,
+      sessionVersion: 0,
     });
-    mockUpdate.mockImplementationOnce(({ data }) => Promise.resolve({ id: 'u1', ...data }));
+    mockUpdateMany.mockResolvedValueOnce({ count: 1 });
+    mockFindUnique.mockResolvedValueOnce({ id: 'u1', sessionVersion: 1 });
     await setupAccount({ token: token.plaintext, password: 'first-password' });
     // second redemption of the same token — findFirst returns null because
     // the token columns are now cleared.
@@ -236,8 +271,9 @@ describe('setupAccount', () => {
       passwordHash: null,
       setupTokenHash: token.hash,
       setupTokenExpiresAt: past,
+      sessionVersion: 0,
     });
-    mockUpdate.mockResolvedValueOnce({ id: 'u1' });
+    mockUpdateMany.mockResolvedValueOnce({ count: 1 });
     let caught: unknown;
     try {
       await setupAccount({ token: token.plaintext, password: 'whatever123' });
@@ -248,9 +284,12 @@ describe('setupAccount', () => {
     const err = caught as HttpError;
     expect(err.status).toBe(401);
     expect(err.code).toBe('UNAUTHENTICATED');
-    expect(mockUpdate).toHaveBeenCalledWith(
+    expect(mockUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'u1' },
+        where: expect.objectContaining({
+          id: 'u1',
+          setupTokenHash: token.hash,
+        }),
         data: expect.objectContaining({
           setupTokenHash: null,
           setupTokenExpiresAt: null,
@@ -272,6 +311,7 @@ describe('resetUserPassword', () => {
         data: expect.objectContaining({
           passwordHash: null,
           setupTokenHash: result.setupToken.hash,
+          sessionVersion: { increment: 1 },
         }),
       }),
     );

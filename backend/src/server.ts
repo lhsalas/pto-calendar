@@ -31,7 +31,6 @@ export function createApp(): Express {
       credentials: true,
     }),
   );
-  app.use(csrfOriginMiddleware());
   app.use(express.json({ limit: '100kb' }));
   const pinoHttpOptions: PinoHttpOptions = {
     logger,
@@ -46,6 +45,7 @@ export function createApp(): Express {
   };
   app.use(pinoHttp(pinoHttpOptions));
   app.use(cookieSessionMiddleware());
+  app.use(csrfOriginMiddleware());
   app.use(createGlobalLimiter());
 
   app.use(healthRouter);

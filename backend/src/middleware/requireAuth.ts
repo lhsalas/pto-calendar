@@ -10,7 +10,7 @@ declare module 'express-serve-static-core' {
   }
 }
 
-type CachedUser = SessionUser | null;
+type CachedUser = Pick<SessionUser, 'id' | 'role'> | null;
 
 interface CacheEntry {
   user: CachedUser;
@@ -35,6 +35,11 @@ async function loadCachedUser(id: string): Promise<CachedUser> {
   return value;
 }
 
+async function loadSessionVersion(id: string): Promise<number | null> {
+  const user = await prisma.user.findUnique({ where: { id }, select: { sessionVersion: true } });
+  return user?.sessionVersion ?? null;
+}
+
 export function __resetAuthUserCacheForTests(): void {
   userCache.clear();
 }
@@ -57,10 +62,19 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       });
       return;
     }
-    if (req.session) {
-      req.session.user = live;
+    const sessionVersion = await loadSessionVersion(sessionUser.id);
+    if (sessionVersion === null || sessionVersion !== sessionUser.sessionVersion) {
+      req.session = null;
+      res.status(401).json({
+        error: { code: 'UNAUTHENTICATED', message: 'Session is no longer valid.' },
+      });
+      return;
     }
-    req.user = live;
+    const authenticatedUser: SessionUser = { ...live, sessionVersion };
+    if (req.session) {
+      req.session.user = authenticatedUser;
+    }
+    req.user = authenticatedUser;
     next();
   } catch (err) {
     next(err);

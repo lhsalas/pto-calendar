@@ -31,6 +31,10 @@ export function csrfOriginMiddleware(): RequestHandler {
       next(new HttpError(403, 'CSRF_REJECTED', 'Request origin is not allowed.'));
       return;
     }
+    if (env.NODE_ENV === 'production' && !requestOrigin && req.session?.user) {
+      next(new HttpError(403, 'CSRF_REJECTED', 'Request origin is not allowed.'));
+      return;
+    }
 
     next();
   };

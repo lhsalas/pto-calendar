@@ -17,7 +17,9 @@ function unauthenticated(): never {
   throw new HttpError(401, 'UNAUTHENTICATED', 'Invalid email or password.');
 }
 
-export async function login(email: string, password: string): Promise<ApiUser> {
+export type AuthenticatedUser = ApiUser & { sessionVersion: number };
+
+export async function login(email: string, password: string): Promise<AuthenticatedUser> {
   if (password.length === 0) {
     await equalizeTiming();
     unauthenticated();
@@ -40,6 +42,7 @@ export async function login(email: string, password: string): Promise<ApiUser> {
     email: user.email,
     role: user.role,
     colorCode: user.colorCode,
+    sessionVersion: user.sessionVersion,
   };
 }
 
