@@ -175,7 +175,7 @@ jobs:
               'id-token: none',
               'actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803',
               'anomalyco/opencode/github@a3b97d9090ccf4aa9ac32268486283e3131e36b4',
-              'ref: ${{ github.event.repository.default_branch }}',
+              'github.event.repository.default_branch',
           ]
           missing = [item for item in required if item not in workflow]
           if missing:
