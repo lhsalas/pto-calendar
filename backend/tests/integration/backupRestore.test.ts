@@ -131,6 +131,7 @@ function dumpSchema(): string {
     '--schema-only',
     '--no-owner',
     '--schema=public',
+    '--dbname',
     SOURCE_DB,
   ]);
 }
@@ -147,6 +148,7 @@ function dumpData(): string {
     '--data-only',
     '--no-owner',
     '--schema=public',
+    '--dbname',
     SOURCE_DB,
   ]);
 }
