@@ -40,11 +40,16 @@ function runPgSql(sqlArgs: string[], input?: string): string {
   if (runner === 'none') {
     throw new Error('no pg_dump / podman runner available');
   }
+  const tool = sqlArgs[0];
+  if (!tool) {
+    throw new Error('sqlArgs must include a tool name');
+  }
+  const subArgs = sqlArgs.slice(1);
   const fullArgs =
     runner === 'pg_dump'
-      ? sqlArgs
-      : ['exec', '-i', '-e', 'PGPASSWORD=pto', LOCAL_CONTAINER, ...sqlArgs];
-  const cmd = runner === 'pg_dump' ? 'pg_dump' : 'podman';
+      ? [tool, ...subArgs]
+      : ['exec', '-i', '-e', `PGPASSWORD=pto`, LOCAL_CONTAINER, tool, ...subArgs];
+  const cmd = runner === 'pg_dump' ? tool : 'podman';
   const env = runner === 'pg_dump' ? { PGPASSWORD: 'pto' } : undefined;
   const result = spawnSync(cmd, fullArgs, {
     encoding: 'utf8',
@@ -53,9 +58,7 @@ function runPgSql(sqlArgs: string[], input?: string): string {
     maxBuffer: 64 * 1024 * 1024,
   });
   if (result.status !== 0) {
-    throw new Error(
-      `${cmd} ${sqlArgs.join(' ')} failed (status=${result.status}): ${result.stderr || result.stdout}`,
-    );
+    throw new Error(`${tool} failed (status=${result.status}): ${result.stderr || result.stdout}`);
   }
   return result.stdout;
 }
