@@ -65,6 +65,13 @@ const EnvSchema = z
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
     AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
+    RATE_LIMIT_REDIS_URL: z
+      .string()
+      .url()
+      .refine((value) => value.startsWith('redis://') || value.startsWith('rediss://'), {
+        message: 'RATE_LIMIT_REDIS_URL must use redis:// or rediss://',
+      })
+      .optional(),
 
     SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
 
@@ -102,6 +109,13 @@ const EnvSchema = z
         code: z.ZodIssueCode.custom,
         path: ['BCRYPT_ROUNDS'],
         message: 'BCRYPT_ROUNDS must be at least 10 in production',
+      });
+    }
+    if (!env.RATE_LIMIT_REDIS_URL) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['RATE_LIMIT_REDIS_URL'],
+        message: 'RATE_LIMIT_REDIS_URL is required in production',
       });
     }
     if (env.INSECURE_COOKIES_ALLOWED) {

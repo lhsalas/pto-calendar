@@ -30,6 +30,7 @@ describe('csrfOriginMiddleware', () => {
       COOKIE_SECURE: 'true',
       BCRYPT_ROUNDS: '12',
       CORS_ORIGIN: 'https://pto.example.com',
+      RATE_LIMIT_REDIS_URL: 'rediss://:test-password@redis.example.test:6379/0',
     });
     resetEnvForTests();
   });

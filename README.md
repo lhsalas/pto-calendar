@@ -207,7 +207,8 @@ The runtime environment uses a Supabase pooler URL for `DATABASE_URL`, while
 the migration job temporarily overrides `DATABASE_URL` with a direct or
 session-mode URL. Production should use `COOKIE_SECURE=true`,
 `COOKIE_SAME_SITE=none`, an empty `COOKIE_DOMAIN`, exact `CORS_ORIGIN`, and
-`TRUST_PROXY_HOPS=1`.
+`TRUST_PROXY_HOPS=1`. The login and global rate limiters use the shared TLS
+Redis/Valkey store configured by `RATE_LIMIT_REDIS_URL`.
 
 The local Docker path remains separate and unchanged: `docker-compose.app.yml`
 continues to use `frontend/nginx.conf` to serve the SPA and proxy local API

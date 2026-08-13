@@ -23,6 +23,7 @@ const BASE_ENV = {
   RATE_LIMIT_WINDOW_MS: '900000',
   RATE_LIMIT_MAX: '100',
   AUTH_RATE_LIMIT_MAX: '5',
+  RATE_LIMIT_REDIS_URL: 'rediss://:test-password@redis.example.test:6379/0',
   SHUTDOWN_TIMEOUT_MS: '10000',
   READY_TIMEOUT_MS: '5000',
   SESSION_SECRET: STRONG_SECRET_A,
@@ -195,6 +196,18 @@ describe('loadEnv — production guards', () => {
     ).toThrow(/BCRYPT_ROUNDS/);
   });
 
+  it('requires a shared rate-limit store in production', () => {
+    const envSource: Record<string, string> = {
+      ...BASE_ENV,
+      NODE_ENV: 'production',
+      COOKIE_SECURE: 'true',
+      BCRYPT_ROUNDS: '12',
+    };
+    delete envSource.RATE_LIMIT_REDIS_URL;
+
+    expect(() => loadEnv(envSource)).toThrow(/RATE_LIMIT_REDIS_URL/);
+  });
+
   it('accepts a fully-valid production env', () => {
     const env = loadEnv({
       ...BASE_ENV,
@@ -206,6 +219,7 @@ describe('loadEnv — production guards', () => {
     expect(env.NODE_ENV).toBe('production');
     expect(env.COOKIE_SECURE).toBe(true);
     expect(env.BCRYPT_ROUNDS).toBe(12);
+    expect(env.RATE_LIMIT_REDIS_URL).toBe(BASE_ENV.RATE_LIMIT_REDIS_URL);
     expect(env.SESSION_SECRET).toEqual([STRONG_SECRET_A]);
   });
 });
