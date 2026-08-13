@@ -59,7 +59,7 @@ function runPgSql(sqlArgs: string[], input?: string): string {
   const resolvedTool = runner === 'pg_dump' ? resolveTool(tool) : tool;
   const fullArgs =
     runner === 'pg_dump'
-      ? [resolvedTool, ...subArgs]
+      ? subArgs
       : ['exec', '-i', '-e', `PGPASSWORD=pto`, LOCAL_CONTAINER, resolvedTool, ...subArgs];
   const cmd = runner === 'pg_dump' ? resolvedTool : 'podman';
   const env = runner === 'pg_dump' ? { PGPASSWORD: 'pto' } : undefined;
