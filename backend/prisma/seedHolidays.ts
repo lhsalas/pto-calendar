@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { z } from 'zod';
 import { PrismaClient } from '@prisma/client';
+import { parseSeedHolidaysArgs } from '../scripts/args.js';
 import { seedDefaults } from '../src/services/holidays/HolidayService.js';
 import {
   SUPPORTED_COUNTRY_CODES,
@@ -11,24 +12,6 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().url(),
   LEAD_EMAIL: z.string().email().optional(),
 });
-
-interface ParsedArgs {
-  countryCode?: string;
-  all: boolean;
-}
-
-function parseArgs(argv: string[]): ParsedArgs {
-  const args: ParsedArgs = { all: false };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--country' && i + 1 < argv.length) {
-      args.countryCode = argv[++i];
-    } else if (a === '--all') {
-      args.all = true;
-    }
-  }
-  return args;
-}
 
 interface SeedOutcome {
   countryCode: SupportedCountryCode;
@@ -68,7 +51,7 @@ async function main(): Promise<void> {
   if (!parsed.success) {
     throw new Error('Invalid environment for db:seed-holidays: DATABASE_URL is required.');
   }
-  const args = parseArgs(process.argv.slice(2));
+  const args = parseSeedHolidaysArgs(process.argv.slice(2));
   if (!args.all && !args.countryCode) {
     throw new Error(
       `db:seed-holidays requires either --country=<${SUPPORTED_COUNTRY_CODES.join('|')}> or --all`,
@@ -82,13 +65,13 @@ async function main(): Promise<void> {
   if (args.all) {
     targets = [...SUPPORTED_COUNTRY_CODES];
   } else {
-    const cc = args.countryCode as string;
-    if (!(SUPPORTED_COUNTRY_CODES as readonly string[]).includes(cc)) {
+    const cc = args.countryCode;
+    if (!cc || !(SUPPORTED_COUNTRY_CODES as readonly string[]).includes(cc)) {
       throw new Error(
         `Unsupported country "${cc}". Supported: ${SUPPORTED_COUNTRY_CODES.join(', ')}.`,
       );
     }
-    targets = [cc];
+    targets = [cc as SupportedCountryCode];
   }
 
   const prisma = new PrismaClient();

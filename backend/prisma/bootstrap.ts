@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { z } from 'zod';
 import { PrismaClient, Role } from '@prisma/client';
+import { parseBootstrapArgs } from '../scripts/args.js';
 import {
   createUser,
   generateSetupToken,
@@ -20,17 +21,6 @@ const EnvSchema = z.object({
 
 type BootstrapEnv = z.infer<typeof EnvSchema>;
 
-function parseArgs(argv: string[]): { baseUrl?: string } {
-  const args: { baseUrl?: string } = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--base-url' && i + 1 < argv.length) {
-      args.baseUrl = argv[++i];
-    }
-  }
-  return args;
-}
-
 async function main(): Promise<void> {
   const parsed = EnvSchema.safeParse(process.env);
   if (!parsed.success) {
@@ -43,7 +33,7 @@ async function main(): Promise<void> {
     );
   }
   const env: BootstrapEnv = parsed.data;
-  const args = parseArgs(process.argv.slice(2));
+  const args = parseBootstrapArgs(process.argv.slice(2));
   const baseUrl = (args.baseUrl ?? env.APP_PUBLIC_BASE_URL).replace(/\/$/, '');
 
   const prisma = new PrismaClient();
