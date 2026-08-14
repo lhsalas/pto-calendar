@@ -16,6 +16,13 @@
     "isolatedModules": true,
     "types": ["node"]
   },
-  "include": ["src/**/*", "tests/**/*", "prisma/seed.ts"],
+  "include": [
+    "src/**/*",
+    "tests/**/*",
+    "prisma/seed.ts",
+    "prisma/seedHolidays.ts",
+    "prisma/bootstrap.ts",
+    "scripts/**/*"
+  ],
   "exclude": ["node_modules", "dist", "coverage"]
 }
