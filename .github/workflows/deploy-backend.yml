@@ -1,0 +1,121 @@
+name: Deploy backend only
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (required, e.g. v1.2.3 or a commit SHA).'
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-deploy-backend
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '24'
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  GCP_REGION: ${{ vars.GCP_REGION }}
+  GCP_ARTIFACT_REGISTRY_REPOSITORY: ${{ vars.GCP_ARTIFACT_REGISTRY_REPOSITORY }}
+  CLOUD_RUN_SERVICE: pto-api
+  FIREBASE_SITE_ORIGIN: ${{ vars.FIREBASE_SITE_ORIGIN }}
+  GCP_DIRECT_URL_SECRET: ${{ vars.GCP_DIRECT_URL_SECRET }}
+  GCP_DATABASE_URL_SECRET: ${{ vars.GCP_DATABASE_URL_SECRET }}
+  GCP_SESSION_SECRET_SECRET: ${{ vars.GCP_SESSION_SECRET_SECRET }}
+  GCP_RATE_LIMIT_REDIS_URL_SECRET: ${{ vars.GCP_RATE_LIMIT_REDIS_URL_SECRET }}
+  GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+
+jobs:
+  backend:
+    name: Deploy Cloud Run backend
+    if: vars.PRODUCTION_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      service_url: ${{ steps.deploy.outputs.service_url }}
+    env:
+      IMAGE_TAG: ${{ inputs.image_tag }}
+    steps:
+      - name: Check out master
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: master
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+
+      - name: Verify image exists in Artifact Registry
+        run: |
+          set -euo pipefail
+          IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_ARTIFACT_REGISTRY_REPOSITORY}/pto-api:${IMAGE_TAG}"
+          if ! gcloud artifacts docker images describe "${IMAGE}" --project "${GCP_PROJECT_ID}" > /dev/null 2>&1; then
+            echo "::error::Image ${IMAGE} not found in Artifact Registry."
+            exit 1
+          fi
+          echo "Image verified: ${IMAGE}"
+
+      - name: Apply Prisma migrations
+        env:
+          IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REGISTRY_REPOSITORY }}/pto-api:${{ env.IMAGE_TAG }}
+        run: |
+          set -euo pipefail
+          set +x
+          WORKDIR="$(mktemp -d)"
+          chmod 700 "${WORKDIR}"
+          trap 'rm -rf "${WORKDIR}"' EXIT
+          if ! gcloud secrets versions access latest \
+              --project="${GCP_PROJECT_ID}" \
+              --secret="${GCP_DIRECT_URL_SECRET}" \
+              > "${WORKDIR}/direct-url" 2> "${WORKDIR}/direct-url.err"; then
+            echo "::error::Failed to fetch direct URL secret." >&2
+            cat "${WORKDIR}/direct-url.err" >&2
+            exit 1
+          fi
+          chmod 600 "${WORKDIR}/direct-url"
+          rm -f "${WORKDIR}/direct-url.err"
+          DIRECT_URL="$(<"${WORKDIR}/direct-url")"
+          printf '::add-mask::%s\n' "${DIRECT_URL}"
+          docker run --rm \
+            --env "DATABASE_URL=${DIRECT_URL}" \
+            "${IMAGE}" \
+            npx prisma migrate deploy --schema=backend/prisma/schema.prisma
+          unset DIRECT_URL
+          rm -rf "${WORKDIR}"
+
+      - name: Deploy Cloud Run revision
+        id: deploy
+        env:
+          IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REGISTRY_REPOSITORY }}/pto-api:${{ env.IMAGE_TAG }}
+        run: |
+          set -euo pipefail
+          gcloud run deploy "${CLOUD_RUN_SERVICE}" \
+            --image "${IMAGE}" \
+            --project "${GCP_PROJECT_ID}" \
+            --region "${GCP_REGION}" \
+            --platform managed \
+            --allow-unauthenticated \
+            --service-account "${GCP_RUNTIME_SERVICE_ACCOUNT}" \
+            --port 3000 \
+            --min-instances 0 \
+            --max-instances 3 \
+            --update-env-vars "NODE_ENV=production,CORS_ORIGIN=${FIREBASE_SITE_ORIGIN},COOKIE_SECURE=true,COOKIE_SAME_SITE=none,COOKIE_DOMAIN=,TRUST_PROXY_HOPS=1,BCRYPT_ROUNDS=12,LOG_LEVEL=info,RATE_LIMIT_WINDOW_MS=900000,RATE_LIMIT_MAX=100,AUTH_RATE_LIMIT_MAX=5" \
+            --update-secrets "SESSION_SECRET=${GCP_SESSION_SECRET_SECRET}:latest,DATABASE_URL=${GCP_DATABASE_URL_SECRET}:latest,RATE_LIMIT_REDIS_URL=${GCP_RATE_LIMIT_REDIS_URL_SECRET}:latest" \
+            --quiet
+          SERVICE_URL="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" --project "${GCP_PROJECT_ID}" --region "${GCP_REGION}" --format='value(status.url)')"
+          echo "service_url=${SERVICE_URL}" >> "${GITHUB_OUTPUT}"
+          curl --fail --silent --show-error --max-time 30 "${SERVICE_URL}/health"
+          curl --fail --silent --show-error --max-time 30 "${SERVICE_URL}/ready"

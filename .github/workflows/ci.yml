@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [master]
+    tags: ['v*.*.*']
 
 permissions:
   contents: read
@@ -177,21 +178,83 @@ jobs:
       - name: Validate production deployment guard
         run: |
           python3 - <<'PY'
+          import re
           from pathlib import Path
 
           workflow = Path('.github/workflows/deploy.yml').read_text()
           required = [
               "actions: read",
-              "github.ref == 'refs/heads/master'",
-              "github.event.workflow_run.conclusion == 'success'",
+              "tags: ['v*.*.*']",
               'GCP_RATE_LIMIT_REDIS_URL_SECRET',
               'RATE_LIMIT_REDIS_URL=${GCP_RATE_LIMIT_REDIS_URL_SECRET}:latest',
-              'Verify manual dispatch has successful CI',
+              'Verify CI succeeded for this commit',
               'environment: production',
+              '"refs/heads/master"',
+              'refs/tags/v',
           ]
           missing = [item for item in required if item not in workflow]
           if missing:
               raise SystemExit(f'Missing production deploy guard: {missing}')
+          if not re.search(
+              r"v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+",
+              workflow,
+          ):
+              raise SystemExit('Missing semver tag-format regex in deploy.yml')
+          PY
+      - name: Validate deploy-secrets workflow
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/deploy-secrets.yml').read_text()
+          required = [
+              'workflow_dispatch',
+              'RATE_LIMIT_REDIS_URL=${GCP_RATE_LIMIT_REDIS_URL_SECRET}:latest',
+              "gcloud run services update \"${CLOUD_RUN_SERVICE}\"",
+              'environment: production',
+              "concurrency:\n  group: production-deploy-secrets",
+          ]
+          missing = [item for item in required if item not in workflow]
+          if missing:
+              raise SystemExit(f'Missing deploy-secrets guard: {missing}')
+          PY
+      - name: Validate deploy-backend workflow
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/deploy-backend.yml').read_text()
+          required = [
+              'workflow_dispatch',
+              'image_tag:',
+              'Artifact Registry',
+              "concurrency:\n  group: production-deploy-backend",
+              'environment: production',
+              'gcloud run deploy',
+              'prisma migrate deploy',
+          ]
+          missing = [item for item in required if item not in workflow]
+          if missing:
+              raise SystemExit(f'Missing deploy-backend guard: {missing}')
+          PY
+      - name: Validate deploy-frontend workflow
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/deploy-frontend.yml').read_text()
+          required = [
+              'workflow_dispatch',
+              "concurrency:\n  group: production-deploy-frontend",
+              'environment: production',
+              'gcloud run services describe',
+              'firebase-tools@15.26.0',
+              'VITE_API_BASE_URL',
+              'CLOUD_RUN_ORIGIN',
+          ]
+          missing = [item for item in required if item not in workflow]
+          if missing:
+              raise SystemExit(f'Missing deploy-frontend guard: {missing}')
           PY
       - name: Validate privileged OpenCode workflow
         run: |

@@ -1,0 +1,93 @@
+name: Deploy frontend only
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-deploy-frontend
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '24'
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  GCP_REGION: ${{ vars.GCP_REGION }}
+  FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+  CLOUD_RUN_SERVICE: pto-api
+
+jobs:
+  frontend:
+    name: Deploy Firebase Hosting frontend
+    if: vars.PRODUCTION_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Check out master
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: master
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+          export_environment_variables: true
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+
+      - name: Resolve Cloud Run service URL
+        id: backend
+        run: |
+          set -euo pipefail
+          SERVICE_URL="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" --project "${GCP_PROJECT_ID}" --region "${GCP_REGION}" --format='value(status.url)')"
+          if [[ -z "${SERVICE_URL}" ]]; then
+            echo "::error::Could not resolve Cloud Run service URL for ${CLOUD_RUN_SERVICE}."
+            exit 1
+          fi
+          echo "service_url=${SERVICE_URL}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend with the Cloud Run API URL
+        env:
+          VITE_API_BASE_URL: ${{ steps.backend.outputs.service_url }}
+        run: npm run build -w frontend
+
+      - name: Render exact Cloud Run origin in Firebase CSP
+        env:
+          CLOUD_RUN_ORIGIN: ${{ steps.backend.outputs.service_url }}
+        run: node bin/render-firebase-config.mjs
+
+      - name: Deploy Firebase Hosting
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@15.26.0 deploy --config firebase.deploy.json --only hosting --project "${FIREBASE_PROJECT_ID}" --non-interactive
+          rm -f firebase.deploy.json
+
+      - name: Smoke-test Firebase Hosting SPA + cross-origin /health
+        run: |
+          set -euo pipefail
+          SITE_URL="https://${FIREBASE_PROJECT_ID}.web.app"
+          echo "Fetching SPA root from ${SITE_URL}"
+          curl --fail --silent --show-error --max-time 30 "${SITE_URL}/" -o /tmp/index.html
+          grep -q 'id="root"' /tmp/index.html
+          echo "SPA index served; /auth/* and /health are reachable from the SPA origin:"
+          curl --fail --silent --show-error --max-time 30 "${SITE_URL}/auth/me" -o /dev/null
+          SERVICE_URL="${{ steps.backend.outputs.service_url }}"
+          echo "Cross-origin smoke: SPA -> Cloud Run /health"
+          curl --fail --silent --show-error --max-time 30 -H "Origin: ${SITE_URL}" "${SERVICE_URL}/health"

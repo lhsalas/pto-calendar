@@ -198,10 +198,28 @@ Production uses **Firebase Hosting → Cloud Run → Supabase PostgreSQL**. Fire
 
 The complete operator runbook is [`docs/deploy.md`](docs/deploy.md). Database backup and restore procedures are in [`docs/database-backups.md`](docs/database-backups.md). The end-to-end production cutover and DR drill checklists are in [`docs/cutover-drill.md`](docs/cutover-drill.md).
 
-Production deployment is automated by `.github/workflows/deploy.yml`. It builds
-the backend image, applies Prisma migrations once, deploys Cloud Run with
-minimum instances set to `0`, builds the frontend with the Cloud Run API URL,
-and publishes `frontend/dist` to Firebase Hosting.
+Production deployment is automated by four workflows. The main pipeline
+(`.github/workflows/deploy.yml`) is triggered by a semver tag push
+(`v*.*.*`) on `master`, or manually through `workflow_dispatch` from `master`.
+The tag is the image tag (`pto-api:v1.0.0`), so each release has a
+human-readable label in both Artifact Registry and Cloud Run revisions. A
+manual dispatch uses the commit SHA as the image tag. Both paths validate
+that a successful `CI` push run for the exact commit exists before cloud
+authentication and deployment begin. It builds the backend image, applies
+Prisma migrations once, deploys Cloud Run with minimum instances set to `0`,
+builds the frontend with the Cloud Run API URL, and publishes `frontend/dist`
+to Firebase Hosting.
+
+Three additional workflows ship targeted deploys so common changes don't run
+the full pipeline:
+
+| Workflow                                | Trigger                                  | What it does                                                                                                         |
+| --------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `.github/workflows/deploy-secrets.yml`  | `workflow_dispatch`                      | Reuses the latest Artifact Registry image; only runs `gcloud run services update` with the new env vars and secrets. |
+| `.github/workflows/deploy-backend.yml`  | `workflow_dispatch` (image_tag required) | Reuses a specific Artifact Registry image; runs migrations + Cloud Run rollout.                                      |
+| `.github/workflows/deploy-frontend.yml` | `workflow_dispatch`                      | Resolves the current Cloud Run service URL dynamically; builds + deploys Firebase Hosting only.                      |
+
+See `docs/deploy.md` §8 for the decision tree and the tag-push release flow.
 
 The runtime environment uses a Supabase pooler URL for `DATABASE_URL`, while
 the migration job temporarily overrides `DATABASE_URL` with a direct or

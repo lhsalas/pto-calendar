@@ -121,14 +121,27 @@ Set repository secrets:
 - `GCP_DEPLOY_SERVICE_ACCOUNT`
 - `GCP_BACKUP_SERVICE_ACCOUNT`
 
-The `Deploy production` workflow runs after the `CI` workflow succeeds on
-`master`, or manually through `workflow_dispatch` from `master` only. A manual
-dispatch must also find a successful `CI` push run for the exact commit SHA
-before cloud authentication and deployment begin. Both Cloud Run and Firebase
-deployment jobs use the protected `production` environment, so configure
-required reviewers and restrict its deployment branches to `master`. The
-workflow builds `backend/Dockerfile`, pushes an image, applies migrations once,
-and deploys Cloud Run.
+The `Deploy production` workflow is triggered by a semver tag push
+(`v*.*.*`) on `master`, or manually through `workflow_dispatch` from `master`.
+The tag is the image tag (`pto-api:v1.0.0`), so each release has a
+human-readable label in both Artifact Registry and Cloud Run revisions. A
+manual dispatch uses the commit SHA as the image tag. Both paths validate
+that a successful `CI` push run for the exact commit exists before cloud
+authentication and deployment begin. Both Cloud Run and Firebase deployment
+jobs use the protected `production` environment, so configure required
+reviewers and restrict its deployment branches to `master`. The workflow
+builds `backend/Dockerfile`, pushes an image, applies migrations once, and
+deploys Cloud Run.
+
+Four workflows ship deploys; see
+[§8 Releasing a Version](#8-releasing-a-version) for the decision tree.
+
+| Workflow | Trigger | Image | Frontend | Migrations | Firebase |
+|---|---|---|---|---|---|
+| `deploy.yml` | tag `v*.*.*` push OR master dispatch | builds + tags with the git tag | builds + deploys | yes | yes |
+| `deploy-backend.yml` | `workflow_dispatch` (image_tag required) | reuses Artifact Registry image | no | yes | no |
+| `deploy-frontend.yml` | `workflow_dispatch` | n/a | builds + deploys | no | yes |
+| `deploy-secrets.yml` | `workflow_dispatch` (image_tag optional) | reuses Artifact Registry image | no | no | no |
 
 ## 5. Deploy the Backend
 
@@ -234,15 +247,85 @@ LEAD_EMAIL='lead@yourcompany.com' \
   npm run db:seed-holidays -w backend -- --all
 ```
 
-## 8. Release and Rollback
+## 8. Releasing a Version
 
-Push to `master` after the normal CI gates pass. The deployment workflow uses
-the tested commit SHA as the container tag, so each commit has a corresponding
-immutable image in Artifact Registry. The same SHA is recorded as a Cloud Run
-revision, which makes it possible to list revisions and pick an earlier one by
-name.
+Production deploys follow a tag-based release model. The main pipeline
+(`deploy.yml`) runs only when a semver tag is pushed; the three targeted
+workflows stay `workflow_dispatch` only.
 
-### Finding a previous revision
+### Cutting a release ("ship v1.2.0")
+
+```bash
+git checkout master && git pull
+git tag -a v1.2.0 -m "Release v1.2.0"
+git push origin v1.2.0
+```
+
+What happens:
+
+1. `CI` runs on the tag push (it also runs on `tags: ['v*.*.*']`).
+2. `Deploy production` runs in parallel, but its first step is
+   `Verify CI succeeded for this commit`, which polls for the CI run
+   (up to 6 × 15 s) before doing anything else.
+3. After the gate passes, the deploy starts: image build + push
+   (`pto-api:v1.2.0`), Prisma migrations, Cloud Run rollout, Firebase
+   Hosting publish, and the cross-origin smoke test.
+
+The tag is rejected with a clear `::error::` if it does not match
+`^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`. A
+typo (`v1.0`, `v1`) silently falls through GitHub's tag filter, so the
+explicit validation is defensive.
+
+### Picking the right workflow
+
+| Action | Workflow |
+|---|---|
+| Cutting a release (`ship v1.2.0`) | push tag `v1.2.0` → `deploy.yml` |
+| Rotating a secret | `deploy-secrets.yml` (manual) |
+| Backend-only hotfix between releases | `deploy-backend.yml` (manual, with image tag) |
+| UI / copy change between releases | `deploy-frontend.yml` (manual) |
+| Re-running a failed deploy | re-dispatch the original workflow (manual path) |
+
+### Tag-based image traceability
+
+The Docker image is tagged with the git tag, not the commit SHA:
+
+```text
+${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_ARTIFACT_REGISTRY_REPOSITORY}/pto-api:v1.2.0
+```
+
+Listing revisions and listing Artifact Registry images both reference the
+same human-readable tag. The Cloud Run revision name keeps the existing
+suffix convention (`pto-api-00042-abc`); the `abc` portion is the short
+commit SHA at the time of the tag.
+
+### Why a separate workflow for each surface
+
+- **Secrete rotation only** (the canonical case from the recent
+  `pto-rate-limit-redis-url` swap): the image does not change, no
+  migration is needed, and the frontend bundle is identical. A full
+  pipeline is wasteful. `deploy-secrets.yml` only runs
+  `gcloud run services update` with the same `--update-env-vars` and
+  `--update-secrets` flags as the main pipeline, and finishes in under
+  60 seconds on a warm cache.
+- **Backend-only hotfix** (e.g. a Prisma migration between releases):
+  `deploy-backend.yml` reuses an existing Artifact Registry image
+  (built by a prior `deploy.yml` push or by a local build) and only
+  runs the migrations + Cloud Run rollout.
+- **Frontend-only change** (e.g. a copy fix in a Vite component):
+  `deploy-frontend.yml` resolves the current Cloud Run service URL
+  dynamically via `gcloud run services describe`, builds the SPA, and
+  publishes to Firebase Hosting. No backend rebuild.
+
+### Concurrency and rollback
+
+All four workflows use `cancel-in-progress: false` with their own
+concurrency group (`production-deploy`, `production-deploy-secrets`,
+`-backend`, `-frontend`). The first run to claim a group blocks
+subsequent runs in the same group, so there is never more than one
+deploy per surface in flight.
+
+#### Finding a previous revision
 
 List revisions newest first; the most recent ready revision is the live one:
 
@@ -257,7 +340,7 @@ A revision's name looks like `pto-api-00042-abc`. The `abc` portion is the
 short commit SHA — cross-reference it with the commit history to find the
 exact commit you want to roll back to.
 
-### Rolling traffic back
+#### Rolling traffic back
 
 Move 100 % of traffic to an older revision. Cloud Run keeps the previous
 revision's container image around, so this is a label switch, not an image
@@ -269,10 +352,12 @@ gcloud run services update-traffic pto-api \
   --to-revisions=pto-api-00041-abc=100
 ```
 
-Verify the rollback with `/health` and `/ready` against the service URL, then
-check Cloud Logging for the new revision's startup logs.
+Note that rollback restores the previous revision's image, not the
+previous tag. Verify the rollback with `/health` and `/ready` against
+the service URL, then check Cloud Logging for the new revision's startup
+logs.
 
-### Migrations are forward-only
+#### Migrations are forward-only
 
 `prisma migrate deploy` is run once before each new revision. Database
 migrations are forward-only: rolling back application code requires that the
