@@ -1,9 +1,8 @@
 name: Deploy production
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  push:
+    tags: ['v*.*.*']
   workflow_dispatch:
 
 permissions:
@@ -34,43 +33,58 @@ jobs:
     name: Deploy Cloud Run backend
     if: >-
       vars.PRODUCTION_DEPLOY_ENABLED == 'true' &&
-      ((github.event_name == 'workflow_dispatch' &&
-      github.ref == 'refs/heads/master') ||
-      (github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'master'))
+      (github.event_name == 'workflow_dispatch' || github.event_name == 'push')
     runs-on: ubuntu-latest
     environment: production
     outputs:
       service_url: ${{ steps.deploy.outputs.service_url }}
     env:
-      IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+      IMAGE_TAG: ${{ github.event_name == 'push' && github.ref_name || github.sha }}
     steps:
       - name: Check out the tested commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.sha }}
 
-      - name: Verify manual dispatch has successful CI
-        if: github.event_name == 'workflow_dispatch'
+      - name: Validate tag format
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '${TAG}' does not match semver with a v-prefix (e.g. v1.0.0)."
+            exit 1
+          fi
+          echo "Tag ${TAG} is valid semver."
+
+      - name: Verify CI succeeded for this commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_REF}" != "refs/heads/master" ]]; then
-            echo "::error::Production deployment can only be dispatched from master."
+          if [[ "${GITHUB_REF}" != "refs/heads/master" && ! "${GITHUB_REF}" =~ ^refs/tags/v.* ]]; then
+            echo "::error::Production deployment can only be triggered from master or a v* tag."
             exit 1
           fi
-          successful_runs="$(gh run list \
-            --workflow ci.yml \
-            --commit "${GITHUB_SHA}" \
-            --event push \
-            --status completed \
-            --limit 20 \
-            --json headBranch,headSha,conclusion \
-            --jq '[.[] | select(.headBranch == "master" and .headSha == "'"${GITHUB_SHA}"'" and .conclusion == "success")] | length')"
+          successful_runs=""
+          for attempt in 1 2 3 4 5 6; do
+            successful_runs="$(gh run list \
+              --workflow ci.yml \
+              --commit "${GITHUB_SHA}" \
+              --event push \
+              --status completed \
+              --limit 20 \
+              --json headSha,conclusion \
+              --jq '[.[] | select(.headSha == "'"${GITHUB_SHA}"'" and .conclusion == "success")] | length')"
+            if [[ "${successful_runs}" -ge 1 ]]; then
+              echo "CI succeeded for ${GITHUB_SHA} on attempt ${attempt}."
+              break
+            fi
+            echo "::notice::No CI run found for ${GITHUB_SHA} yet (attempt ${attempt}/6); sleeping 15s."
+            sleep 15
+          done
           if [[ "${successful_runs}" -lt 1 ]]; then
-            echo "::error::No successful CI run found for ${GITHUB_SHA} on master."
+            echo "::error::No successful CI run found for ${GITHUB_SHA} after 6 attempts."
             exit 1
           fi
 
@@ -160,7 +174,7 @@ jobs:
       - name: Check out the tested commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.sha }}
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
