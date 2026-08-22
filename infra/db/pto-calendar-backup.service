@@ -1,0 +1,18 @@
+[Unit]
+Description=PTO Calendar encrypted PostgreSQL backup
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=deploy
+Group=deploy
+WorkingDirectory=/opt/pto-calendar
+ExecStart=/opt/pto-calendar/infra/deploy/backup.sh
+TimeoutStartSec=1800
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

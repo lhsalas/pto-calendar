@@ -179,7 +179,12 @@ Additional shipped journeys (frontend enhancements #18–#26):
 ## 10. CI/CD Automation (GitHub Actions)
 
 ### 10.1 Pipeline layout
-Single workflow file: `.github/workflows/ci.yml`.
+
+The test gate is `.github/workflows/ci.yml`. Production deployment is kept in
+separate workflows so the CI gate never receives production credentials. The
+OCI tag workflow (`deploy-oci.yml`) checks for a successful CI run for the exact
+commit before it connects to the VM. The GCP/Firebase workflows are manual-only
+fallbacks.
 
 Jobs (run in order, with `needs:` dependencies):
 
@@ -191,23 +196,30 @@ Jobs (run in order, with `needs:` dependencies):
 | 4 | `test-backend-integration` | ubuntu-latest + postgres service | — | vitest run backend integration suite, coverage |
 | 5 | `test-frontend` | ubuntu-latest | — | vitest run frontend, coverage |
 | 6 | `build` | ubuntu-latest | lint, typecheck | build backend + frontend |
-| 7 | `e2e` | ubuntu-latest + postgres service | build | playwright install, playwright test, upload trace/video on failure |
-| 8 | `docker-smoke` | ubuntu-latest | build | start the all-in-one compose stack, poll `/health`, login + validate auto-seeded holidays + validate the seed endpoint, tear down with `-v` |
-| 9 | `coverage-gate` | ubuntu-latest | 4, 5 | enforce thresholds; post coverage diff as PR comment |
+| 7 | `deployment-config` | ubuntu-latest | lint, typecheck | validate Firebase/GCP fallback configuration, OCI Compose/Caddy headers, deployment scripts, workflow guards, and supply-chain pins |
+| 8 | `e2e` | ubuntu-latest + postgres service | build | playwright install, playwright test, upload trace/video on failure |
+| 9 | `docker-smoke` | ubuntu-latest | build | start the all-in-one compose stack, poll `/health`, login + validate auto-seeded holidays + validate the seed endpoint, tear down with `-v` |
+| 10 | `coverage-gate` | ubuntu-latest | 4, 5 | enforce thresholds; post coverage diff as PR comment |
 
 ### 10.2 Triggers
-- `pull_request` to `main`: full pipeline.
-- `push` to `main`: full pipeline + build production images (post-MVP).
-- `schedule`: nightly cron at 02:00 UTC — full E2E + coverage trend (post-MVP).
+- `pull_request`: full pipeline.
+- `push` to `master`: full pipeline.
+- `push` of a semver `v*.*.*` tag: full pipeline for release gating.
+- Supabase backups run in the separate `database-backup.yml` workflow.
 
 ### 10.3 Caching
 - Cache `node_modules` and Playwright browsers keyed on lockfile hashes.
 
 ### 10.4 Required status checks
-`lint`, `typecheck`, `test-backend-unit`, `test-backend-integration`, `test-frontend`, `e2e`, `docker-smoke`, `coverage-gate` must all pass before merge to `main`.
+`lint`, `typecheck`, `test-backend-unit`, `test-backend-integration`,
+`test-frontend`, `deployment-config`, `e2e`, `docker-smoke`, and
+`coverage-gate` must all pass before merge to `master`.
 
 ### 10.5 Secrets
 - `DATABASE_URL` for the Postgres service container (set per job, never from repo secrets).
+- OCI deployment uses protected-environment values `OCI_HOST`,
+  `OCI_DEPLOY_USER`, `OCI_KNOWN_HOSTS`, and `OCI_SSH_PRIVATE_KEY`; the OCI
+  workflow has no OIDC permission.
 - No real user data in CI; seed only.
 
 ## 11. Pre-commit & Local Hooks
@@ -216,7 +228,7 @@ Jobs (run in order, with `needs:` dependencies):
 - `husky` pre-commit hook invokes `lint-staged`.
 - Local `npm run test:ci` mirrors CI jobs for fast feedback.
 
-### npm scripts (to be added)
+### npm scripts
 ```
 "test":            "vitest run"
 "test:watch":      "vitest"
@@ -225,6 +237,8 @@ Jobs (run in order, with `needs:` dependencies):
 "test:ci":         "npm run lint && npm run typecheck && npm run test:coverage && npm run test:e2e"
 "lint":            "eslint ."
 "format":          "prettier --write ."
+"prod:config:check": "node infra/tests/prod-headers.test.mjs"
+"deploy:scripts:check": "node infra/tests/deploy-scripts.test.mjs"
 ```
 
 ## 12. Reporting & Artifacts

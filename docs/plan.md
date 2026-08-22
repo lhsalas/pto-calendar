@@ -425,26 +425,29 @@ holiday that applies to everyone.
   holiday-feed sync (Nager.Date, ICS subscription), per-user "ignore
   holiday" preferences, holiday-colored PTO chips, locales beyond US + MX.
 
-## 19. ADR: Cloud Run + Firebase Hosting + Supabase
+## 19. ADR: OCI VM + PostgreSQL + Upstash
 
 ### Decision
 
-Deploy the Node/Express API to Google Cloud Run with request-based billing and
-minimum instances set to `0`. Deploy the Vite SPA as static files on Firebase
-Hosting. Keep PostgreSQL and Prisma migrations on Supabase.
+Deploy the Node/Express API and Vite SPA to an OCI Always Free ARM64 VM. Use
+Caddy for TLS/HSTS, nginx for static files and API proxying, PostgreSQL in a
+persistent container, and the existing Upstash TLS Redis store for distributed
+rate limiting. PostgreSQL and Prisma migrations run on the OCI VM.
 
 ### Consequences
 
-- The frontend calls the Cloud Run URL directly with `credentials: 'include'`.
-- Production uses exact CORS, `COOKIE_SECURE=true`, and
-  `COOKIE_SAME_SITE=none` for the default split Firebase/Cloud Run hostnames.
-- State-changing requests validate the browser `Origin` or `Referer`.
-- Cloud Run uses a Supabase pooler URL at runtime; migrations and backups use a
-  direct or session-mode URL in one-off jobs.
-- Firebase Hosting rewrites are not used because they strip cookies other than
-  `__session`, which is incompatible with the current signed cookie-session
-  pair.
-- Supabase Free does not provide downloadable managed backups. Daily encrypted
-  logical dumps are stored outside Supabase in private GCS storage.
-- The Deno adapter and OCI production infrastructure are retired. The local
-  Docker/Podman development stack remains supported.
+- The browser uses one custom HTTPS hostname, making the signed cookie
+  first-party. Production uses exact CORS, `COOKIE_SECURE=true`,
+  `COOKIE_SAME_SITE=lax`, and an empty `COOKIE_DOMAIN`.
+- State-changing requests validate the browser `Origin` or `Referer`; missing
+  origin metadata is rejected for authenticated production sessions.
+- `TRUST_PROXY_HOPS=2` reflects the Caddy -> nginx -> backend chain.
+- The application requires the existing Upstash `rediss://` URL in production;
+  the rate-limit middleware fails closed if the store is unavailable.
+- A final encrypted logical backup is taken from Supabase before migration.
+  Ongoing OCI backups are encrypted and stored off-VM in private OCI Object
+  Storage.
+- Cloud Run, Firebase, and Supabase remain documented and manually available as
+  a rollback path. The deferred shared-parent custom-domain option is tracked
+  in `docs/gcp-firebase-custom-domain.md` and issue #163.
+- The local Docker/Podman development stack remains supported.

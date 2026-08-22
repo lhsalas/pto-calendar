@@ -79,9 +79,9 @@ the wrapper single-purpose and the script small is the goal.
 
 ## Out of scope
 
-- **Cloud production deployment** — production uses Cloud Run, Firebase
-  Hosting, and Supabase. Podman remains supported for the local Docker Compose
-  development and all-in-one demo stacks only; see `docs/deploy.md`.
+- **Cloud production deployment** — production uses the OCI Docker Compose
+  stack. Podman remains supported for the local Docker Compose development and
+  all-in-one demo stacks only; see `docs/deploy.md`.
 - **Podman quadlets / `podman kube play`** — separate architectural
   decision.
 - **CI runners** — GitHub Actions uses the `postgres:16` service

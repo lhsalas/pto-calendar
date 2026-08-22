@@ -143,6 +143,10 @@ jobs:
       - name: Validate Firebase Hosting configuration
         run: |
           node -e "const c=require('./firebase.json'); if (c.hosting?.public !== 'frontend/dist') process.exit(1); if (!c.hosting?.rewrites?.some((r) => r.destination === '/index.html')) process.exit(1)"
+      - name: Validate OCI deployment scripts and production config
+        run: |
+          npm run prod:config:check
+          npm run deploy:scripts:check
       - name: Validate exact Firebase CSP template
         run: |
           CLOUD_RUN_ORIGIN=https://pto-api.example.a.run.app node bin/render-firebase-config.mjs
@@ -157,7 +161,7 @@ jobs:
           import re
           from pathlib import Path
 
-          for name in ('.github/workflows/deploy.yml', '.github/workflows/database-backup.yml'):
+          for name in ('.github/workflows/deploy.yml', '.github/workflows/deploy-backend.yml', '.github/workflows/deploy-frontend.yml', '.github/workflows/deploy-secrets.yml', '.github/workflows/deploy-oci.yml', '.github/workflows/database-backup.yml'):
               workflow = Path(name).read_text()
               action_refs = re.findall(r'uses:\s+[^\s#]+@([^\s#]+)', workflow)
               if any(not re.fullmatch(r'[0-9a-f]{40}', ref) for ref in action_refs):
@@ -184,22 +188,41 @@ jobs:
           workflow = Path('.github/workflows/deploy.yml').read_text()
           required = [
               "actions: read",
-              "tags: ['v*.*.*']",
               'GCP_RATE_LIMIT_REDIS_URL_SECRET',
               'RATE_LIMIT_REDIS_URL=${GCP_RATE_LIMIT_REDIS_URL_SECRET}:latest',
               'Verify CI succeeded for this commit',
               'environment: production',
-              '"refs/heads/master"',
-              'refs/tags/v',
+              'GCP_FALLBACK_DEPLOY_ENABLED',
+              'workflow_dispatch:',
           ]
           missing = [item for item in required if item not in workflow]
           if missing:
               raise SystemExit(f'Missing production deploy guard: {missing}')
-          if not re.search(
-              r"v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+",
-              workflow,
-          ):
-              raise SystemExit('Missing semver tag-format regex in deploy.yml')
+          if re.search(r'^  push:\s*$', workflow, re.MULTILINE) or re.search(r'^    tags:', workflow, re.MULTILINE):
+              raise SystemExit('GCP fallback deploy.yml must not have a tag trigger')
+          PY
+      - name: Validate OCI deployment workflow
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/deploy-oci.yml').read_text()
+          required = [
+              "tags: ['v*.*.*']",
+              'workflow_dispatch:',
+              'OCI_PRODUCTION_DEPLOY_ENABLED',
+              'OCI_KNOWN_HOSTS',
+              'OCI_SSH_PRIVATE_KEY',
+              'Verify CI succeeded for this commit',
+              'StrictHostKeyChecking=yes',
+              'environment: production',
+              'production-deploy-oci',
+              'id-token: none',
+              '/opt/pto-calendar/infra/deploy/deploy.sh',
+          ]
+          missing = [item for item in required if item not in workflow]
+          if missing:
+              raise SystemExit(f'Missing OCI production deploy guard: {missing}')
           PY
       - name: Validate deploy-secrets workflow
         run: |
@@ -212,6 +235,7 @@ jobs:
               'RATE_LIMIT_REDIS_URL=${GCP_RATE_LIMIT_REDIS_URL_SECRET}:latest',
               "gcloud run services update \"${CLOUD_RUN_SERVICE}\"",
               'environment: production',
+              'GCP_FALLBACK_DEPLOY_ENABLED',
               "concurrency:\n  group: production-deploy-secrets",
           ]
           missing = [item for item in required if item not in workflow]
@@ -230,6 +254,7 @@ jobs:
               'Artifact Registry',
               "concurrency:\n  group: production-deploy-backend",
               'environment: production',
+              'GCP_FALLBACK_DEPLOY_ENABLED',
               'gcloud run deploy',
               'prisma migrate deploy',
           ]
@@ -247,6 +272,7 @@ jobs:
               'workflow_dispatch',
               "concurrency:\n  group: production-deploy-frontend",
               'environment: production',
+              'GCP_FALLBACK_DEPLOY_ENABLED',
               'gcloud run services describe',
               'firebase-tools@15.26.0',
               'VITE_API_BASE_URL',

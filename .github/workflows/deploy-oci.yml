@@ -1,0 +1,127 @@
+name: Deploy OCI production
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Exact release tag or commit to deploy.'
+        required: true
+        default: master
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  id-token: none
+
+concurrency:
+  group: production-deploy-oci
+  cancel-in-progress: false
+
+env:
+  OCI_HOST: ${{ vars.OCI_HOST }}
+  OCI_DEPLOY_USER: ${{ vars.OCI_DEPLOY_USER || 'deploy' }}
+
+jobs:
+  deploy:
+    name: Deploy OCI VM
+    if: vars.OCI_PRODUCTION_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: Check out the target ref
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || inputs.ref }}
+          persist-credentials: false
+
+      - name: Resolve and validate target
+        id: target
+        env:
+          TARGET_REF: ${{ github.event_name == 'push' && github.ref_name || inputs.ref }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TARGET_REF}" || ! "${TARGET_REF}" =~ ^[A-Za-z0-9._/-]+$ || "${TARGET_REF}" == -* || "${TARGET_REF}" == *..* ]]; then
+            echo "::error::Target ref contains unsafe characters."
+            exit 1
+          fi
+          if [[ -z "${OCI_HOST}" || ! "${OCI_HOST}" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
+            echo "::error::OCI_HOST must be a bare hostname repository variable."
+            exit 1
+          fi
+          if [[ -z "${OCI_DEPLOY_USER}" || ! "${OCI_DEPLOY_USER}" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]; then
+            echo "::error::OCI_DEPLOY_USER is invalid."
+            exit 1
+          fi
+          TARGET_SHA="$(git rev-parse HEAD)"
+          echo "target_ref=${TARGET_REF}" >> "${GITHUB_OUTPUT}"
+          echo "target_sha=${TARGET_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "Deploy target ${TARGET_REF} resolves to ${TARGET_SHA}."
+
+      - name: Validate tag format
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '${GITHUB_REF_NAME}' does not match semver with a v-prefix."
+            exit 1
+          fi
+
+      - name: Verify CI succeeded for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.target.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          successful_runs=""
+          for attempt in 1 2 3 4 5 6; do
+            successful_runs="$(gh run list \
+              --workflow ci.yml \
+              --commit "${TARGET_SHA}" \
+              --event push \
+              --status completed \
+              --limit 20 \
+              --json headSha,conclusion \
+              --jq '[.[] | select(.headSha == "'"${TARGET_SHA}"'" and .conclusion == "success")] | length')"
+            if [[ "${successful_runs}" -ge 1 ]]; then
+              echo "CI succeeded for ${TARGET_SHA}."
+              exit 0
+            fi
+            echo "::notice::No successful CI run for ${TARGET_SHA} yet (${attempt}/6); sleeping 15s."
+            sleep 15
+          done
+          echo "::error::No successful CI run found for ${TARGET_SHA}."
+          exit 1
+
+      - name: Deploy exact ref on OCI
+        env:
+          TARGET_REF: ${{ steps.target.outputs.target_ref }}
+          TARGET_SHA: ${{ steps.target.outputs.target_sha }}
+          OCI_KNOWN_HOSTS: ${{ secrets.OCI_KNOWN_HOSTS }}
+          OCI_SSH_PRIVATE_KEY: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "${OCI_KNOWN_HOSTS}" ]] || { echo "::error::OCI_KNOWN_HOSTS is required."; exit 1; }
+          [[ -n "${OCI_SSH_PRIVATE_KEY}" ]] || { echo "::error::OCI_SSH_PRIVATE_KEY is required."; exit 1; }
+          install -d -m 700 "${HOME}/.ssh"
+          printf '%s\n' "${OCI_KNOWN_HOSTS}" > "${HOME}/.ssh/known_hosts"
+          chmod 600 "${HOME}/.ssh/known_hosts"
+          eval "$(ssh-agent -s)"
+          trap 'ssh-agent -k >/dev/null' EXIT
+          printf '%s\n' "${OCI_SSH_PRIVATE_KEY}" | tr -d '\r' | ssh-add -
+          printf -v REMOTE_COMMAND '/opt/pto-calendar/infra/deploy/deploy.sh %q %q' "${TARGET_REF}" "${TARGET_SHA}"
+          ssh \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="${HOME}/.ssh/known_hosts" \
+            "${OCI_DEPLOY_USER}@${OCI_HOST}" \
+            "${REMOTE_COMMAND}"
+
+      - name: Smoke-test OCI deployment
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 30 "https://${OCI_HOST}/health"
+          curl --fail --silent --show-error --max-time 30 "https://${OCI_HOST}/ready"

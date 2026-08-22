@@ -1,0 +1,160 @@
+name: pto-calendar-prod
+
+# Production topology:
+#   Caddy (TLS/HSTS) -> nginx (SPA/API proxy) -> backend -> PostgreSQL
+#   backend -> Upstash Redis/Valkey (external TLS rate-limit store)
+#
+# Only Caddy publishes host ports. All application secrets are supplied through
+# the VM's untracked .env file and are never committed to this repository.
+
+services:
+  db:
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    container_name: pto-calendar-db-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-pto}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      POSTGRES_DB: ${DB_NAME:-pto}
+    volumes:
+      - pto_pgdata_prod:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${DB_USER:-pto} -d ${DB_NAME:-pto}
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+
+  migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-pto}:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/${DB_NAME:-pto}?schema=public
+    command:
+      - npx
+      - prisma
+      - migrate
+      - deploy
+      - --schema=backend/prisma/schema.prisma
+    restart: 'no'
+    networks:
+      - internal
+
+  # This profile is intentionally not started by the normal production stack.
+  # It targets the build stage because the slim runtime image excludes tsx and
+  # the TypeScript source used by prisma/bootstrap.ts.
+  bootstrap:
+    profiles:
+      - bootstrap
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: build
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${DB_USER:-pto}:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/${DB_NAME:-pto}?schema=public
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
+      COOKIE_SECURE: 'true'
+      COOKIE_SAME_SITE: lax
+      COOKIE_DOMAIN: ''
+      CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
+      BCRYPT_ROUNDS: '12'
+      RATE_LIMIT_REDIS_URL: ${RATE_LIMIT_REDIS_URL:?RATE_LIMIT_REDIS_URL is required}
+      LEAD_EMAIL: ${LEAD_EMAIL:-}
+      LEAD_NAME: ${LEAD_NAME:-Team Lead}
+      LEAD_COLOR_CODE: ${LEAD_COLOR_CODE:-#3B82F6}
+      APP_PUBLIC_BASE_URL: ${CORS_ORIGIN:?CORS_ORIGIN is required}
+    command:
+      - npx
+      - tsx
+      - backend/prisma/bootstrap.ts
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+    networks:
+      - internal
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: pto-calendar-backend-prod
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      DATABASE_URL: postgresql://${DB_USER:-pto}:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/${DB_NAME:-pto}?schema=public
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
+      COOKIE_SECURE: 'true'
+      COOKIE_SAME_SITE: lax
+      COOKIE_DOMAIN: ''
+      CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
+      BCRYPT_ROUNDS: '12'
+      AUTH_USER_CACHE_TTL_MS: '15000'
+      TRUST_PROXY_HOPS: '2'
+      LOG_LEVEL: info
+      RATE_LIMIT_WINDOW_MS: '900000'
+      RATE_LIMIT_MAX: '100'
+      AUTH_RATE_LIMIT_MAX: '5'
+      RATE_LIMIT_REDIS_URL: ${RATE_LIMIT_REDIS_URL:?RATE_LIMIT_REDIS_URL is required}
+      INSECURE_COOKIES_ALLOWED: 'false'
+    expose:
+      - '3000'
+    networks:
+      - internal
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: pto-calendar-nginx-prod
+    depends_on:
+      backend:
+        condition: service_started
+    expose:
+      - '80'
+    networks:
+      - internal
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    container_name: pto-calendar-caddy-prod
+    depends_on:
+      nginx:
+        condition: service_started
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      HOST: ${HOST:?HOST is required}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - internal
+    restart: unless-stopped
+
+volumes:
+  pto_pgdata_prod:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:
+    driver: bridge
