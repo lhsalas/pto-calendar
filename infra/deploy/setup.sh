@@ -2,8 +2,10 @@
 # First-time provisioning for the PTO Calendar OCI Always Free VM.
 #
 # This script deliberately deploys an explicit release ref. It never silently
-# turns a moving branch into production. Run it as root on an Ubuntu 22.04
-# ARM64 VM after DNS, the OCI CLI, and the required secret values are ready.
+# turns a moving branch into production. Run it as root on an Ubuntu 22.04 or
+# 24.04 ARM64 VM after DNS, the OCI CLI, and the required secret values are
+# ready. The VM must carry the tag `pto.role=production` so the instance
+# principal policy can grant Object Storage access.
 
 set -Eeuo pipefail
 
@@ -86,8 +88,8 @@ fi
 # shellcheck disable=SC1091
 . /etc/os-release
 [[ "${ID:-}" == ubuntu ]] || fail "this script targets Ubuntu"
-if [[ "${VERSION_ID:-}" != "22.04" ]]; then
-  log "WARNING: Ubuntu ${VERSION_ID:-unknown}; 22.04 is the supported image"
+if [[ "${VERSION_ID:-}" != "22.04" && "${VERSION_ID:-}" != "24.04" ]]; then
+  log "WARNING: Ubuntu ${VERSION_ID:-unknown}; 22.04 or 24.04 is the supported image"
 fi
 [[ "$(dpkg --print-architecture)" == arm64 ]] || fail "OCI A1 deployment requires an ARM64 VM"
 
