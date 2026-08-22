@@ -1,8 +1,6 @@
-name: Deploy production
+name: Deploy GCP fallback
 
 on:
-  push:
-    tags: ['v*.*.*']
   workflow_dispatch:
 
 permissions:
@@ -32,30 +30,18 @@ jobs:
   backend:
     name: Deploy Cloud Run backend
     if: >-
-      vars.PRODUCTION_DEPLOY_ENABLED == 'true' &&
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'push')
+      vars.GCP_FALLBACK_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: production
     outputs:
       service_url: ${{ steps.deploy.outputs.service_url }}
     env:
-      IMAGE_TAG: ${{ github.event_name == 'push' && github.ref_name || github.sha }}
+      IMAGE_TAG: ${{ github.sha }}
     steps:
       - name: Check out the tested commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.sha }}
-
-      - name: Validate tag format
-        if: github.event_name == 'push'
-        run: |
-          set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::Tag '${TAG}' does not match semver with a v-prefix (e.g. v1.0.0)."
-            exit 1
-          fi
-          echo "Tag ${TAG} is valid semver."
 
       - name: Verify CI succeeded for this commit
         env:

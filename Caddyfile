@@ -1,0 +1,23 @@
+# Production Caddy configuration for the OCI single-host deployment.
+#
+# Caddy terminates TLS, owns HSTS, and forwards the original request metadata
+# to nginx. nginx serves the SPA and proxies the API to Express.
+# TRUST_PROXY_HOPS=2 in docker-compose.prod.yml matches this Caddy -> nginx ->
+# backend chain.
+
+{
+    email {$ACME_EMAIL:ops@example.com}
+}
+
+{$HOST:localhost} {
+    encode zstd gzip
+
+    reverse_proxy nginx:80 {
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
+    }
+
+    # HSTS is emitted only here. nginx must not duplicate this header.
+    header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+}

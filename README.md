@@ -48,8 +48,15 @@ All project documentation lives under [`docs/`](docs/).
 ### 7. Deployment and Backup Runbooks
 
 - **Files:** `docs/deploy.md` and `docs/database-backups.md`
-- **Purpose:** GCP Cloud Run, Firebase Hosting, Supabase operations, and
-  encrypted backup/restore procedures.
+- **Purpose:** OCI VM deployment, Supabase-to-OCI migration, OCI Object Storage
+  backups, and encrypted backup/restore procedures.
+
+The previous GCP Cloud Run/Firebase Hosting deployment remains documented in
+[`docs/gcp-firebase-deploy.md`](docs/gcp-firebase-deploy.md) as a manual
+fallback. Its cutover checklist is
+[`docs/gcp-firebase-cutover-drill.md`](docs/gcp-firebase-cutover-drill.md).
+The deferred shared-parent custom-domain plan is in
+[`docs/gcp-firebase-custom-domain.md`](docs/gcp-firebase-custom-domain.md).
 
 The comment-triggered `.github/workflows/opencode.yml` workflow requires a
 trusted repository owner/member comment and the protected `opencode` GitHub
@@ -194,39 +201,29 @@ Sign in as the team lead to see (and edit) every member's PTO; sign in as a memb
 
 ## Production Deployment
 
-Production uses **Firebase Hosting → Cloud Run → Supabase PostgreSQL**. Firebase serves the static Vite SPA. The browser calls the public Cloud Run API directly with `credentials: 'include'`; the API uses exact CORS and secure cookie settings. Firebase Hosting rewrites are deliberately not used because they strip incoming cookies except for a specially named `__session` cookie, while this app uses `cookie-session` with a session and signature cookie.
+Production uses **OCI VM -> Caddy -> nginx -> Node/Express -> PostgreSQL**.
+The application is served from one custom HTTPS hostname, so the session
+cookie is first-party. The API uses the existing Upstash TLS Redis/Valkey
+store for shared login and global rate-limit counters.
 
-The complete operator runbook is [`docs/deploy.md`](docs/deploy.md). Database backup and restore procedures are in [`docs/database-backups.md`](docs/database-backups.md). The end-to-end production cutover and DR drill checklists are in [`docs/cutover-drill.md`](docs/cutover-drill.md).
+The complete operator runbook is [`docs/deploy.md`](docs/deploy.md). Database
+backup and restore procedures are in [`docs/database-backups.md`](docs/database-backups.md).
+The OCI cutover and recovery checklist is in
+[`docs/cutover-drill.md`](docs/cutover-drill.md).
 
-Production deployment is automated by four workflows. The main pipeline
-(`.github/workflows/deploy.yml`) is triggered by a semver tag push
-(`v*.*.*`) on `master`, or manually through `workflow_dispatch` from `master`.
-The tag is the image tag (`pto-api:v1.0.0`), so each release has a
-human-readable label in both Artifact Registry and Cloud Run revisions. A
-manual dispatch uses the commit SHA as the image tag. Both paths validate
-that a successful `CI` push run for the exact commit exists before cloud
-authentication and deployment begin. It builds the backend image, applies
-Prisma migrations once, deploys Cloud Run with minimum instances set to `0`,
-builds the frontend with the Cloud Run API URL, and publishes `frontend/dist`
-to Firebase Hosting.
+The tag-triggered `.github/workflows/deploy-oci.yml` workflow verifies that CI
+passed for the exact commit, then SSHes to the VM and runs the ref-aware
+deployment script. The existing GCP workflows are manual-only and gated by
+`GCP_FALLBACK_DEPLOY_ENABLED`, so a release tag cannot deploy to both
+platforms.
 
-Three additional workflows ship targeted deploys so common changes don't run
-the full pipeline:
+The OCI runtime uses `COOKIE_SECURE=true`, `COOKIE_SAME_SITE=lax`, an empty
+`COOKIE_DOMAIN`, exact `CORS_ORIGIN=https://<oci-host>`, and
+`TRUST_PROXY_HOPS=2` for the Caddy -> nginx -> backend chain. The backend
+requires `RATE_LIMIT_REDIS_URL` and uses the existing Upstash `rediss://` URL.
 
-| Workflow                                | Trigger                                  | What it does                                                                                                         |
-| --------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `.github/workflows/deploy-secrets.yml`  | `workflow_dispatch`                      | Reuses the latest Artifact Registry image; only runs `gcloud run services update` with the new env vars and secrets. |
-| `.github/workflows/deploy-backend.yml`  | `workflow_dispatch` (image_tag required) | Reuses a specific Artifact Registry image; runs migrations + Cloud Run rollout.                                      |
-| `.github/workflows/deploy-frontend.yml` | `workflow_dispatch`                      | Resolves the current Cloud Run service URL dynamically; builds + deploys Firebase Hosting only.                      |
-
-See `docs/deploy.md` §8 for the decision tree and the tag-push release flow.
-
-The runtime environment uses a Supabase pooler URL for `DATABASE_URL`, while
-the migration job temporarily overrides `DATABASE_URL` with a direct or
-session-mode URL. Production should use `COOKIE_SECURE=true`,
-`COOKIE_SAME_SITE=none`, an empty `COOKIE_DOMAIN`, exact `CORS_ORIGIN`, and
-`TRUST_PROXY_HOPS=1`. The login and global rate limiters use the shared TLS
-Redis/Valkey store configured by `RATE_LIMIT_REDIS_URL`.
+The current GCP/Firebase/Supabase path remains available as a deliberate
+fallback; see [`docs/gcp-firebase-deploy.md`](docs/gcp-firebase-deploy.md).
 
 The local Docker path remains separate and unchanged: `docker-compose.app.yml`
 continues to use `frontend/nginx.conf` to serve the SPA and proxy local API
@@ -257,7 +254,7 @@ requests.
 ## Optional Next Artifacts
 
 - Wireframes or low-fidelity mockups (not currently tracked; design is encoded directly in the Tailwind v4 `@theme` tokens and the component library)
-- Architecture diagram (the runtime topology is Firebase Hosting → Cloud Run → Supabase — see `## Production Deployment`)
+- Architecture diagram (the runtime topology is OCI VM -> Caddy -> nginx -> backend -> PostgreSQL; see `## Production Deployment`)
 - ER diagram (the schema is in `docs/schema.sql` and `backend/prisma/schema.prisma`)
 - Postman / Insomnia collection (the OpenAPI contract at `docs/openapi.yaml` is the source of truth; importable into either tool)
 - Seed data script (already shipped as `npm run db:seed -w backend`; idempotent and re-runnable)

@@ -28,6 +28,8 @@
     "db:bootstrap": "npm run db:bootstrap -w backend",
     "db:seed-holidays": "npm run db:seed-holidays -w backend --",
     "prisma:generate": "npm run prisma:generate -w backend",
+    "prod:config:check": "node infra/tests/prod-headers.test.mjs",
+    "deploy:scripts:check": "node infra/tests/deploy-scripts.test.mjs",
     "prepare": "husky || true"
   },
   "devDependencies": {

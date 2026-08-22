@@ -22,7 +22,7 @@ env:
 jobs:
   frontend:
     name: Deploy Firebase Hosting frontend
-    if: vars.PRODUCTION_DEPLOY_ENABLED == 'true'
+    if: vars.GCP_FALLBACK_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: production
     steps:

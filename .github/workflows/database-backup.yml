@@ -79,6 +79,14 @@ jobs:
           # Mask secrets so a later echo / error never reveals them in logs.
           printf '::add-mask::%s\n' "${DB_URL}"
           printf '::add-mask::%s\n' "${ENCRYPTION_KEY}"
+          # Supabase direct database endpoints are IPv6-only for this project.
+          # GitHub-hosted runners may have no IPv6 route, so fail with an
+          # actionable message instead of attempting a doomed dump. The secret
+          # must contain the project's IPv4-compatible pooler URL.
+          if [[ "${DB_URL}" =~ @db\.[^:/]+\.supabase\.co(:[0-9]+)?/ ]]; then
+            echo "::error::GCP_BACKUP_DB_URL_SECRET contains the IPv6-only Supabase direct endpoint. Replace it with the project's IPv4-compatible pooler URL from Supabase Connect." >&2
+            exit 1
+          fi
           KEY_LENGTH="${#ENCRYPTION_KEY}"
           UNIQUE_CHARS="$(printf '%s' "${ENCRYPTION_KEY}" | LC_ALL=C fold -w1 | sort -u | wc -l)"
           case "${ENCRYPTION_KEY}" in
