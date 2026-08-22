@@ -73,7 +73,7 @@ jobs:
       - name: Verify CI succeeded for this commit
         env:
           TARGET_SHA: ${{ steps.target.outputs.target_sha }}
-        uses: actions/github-script@ed597411d8f924073f98df4b0f7b86e8c4ad68a9 # v7
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
             const sha = process.env.TARGET_SHA;
