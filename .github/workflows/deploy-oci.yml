@@ -87,15 +87,14 @@ jobs:
                   head_sha: sha,
                   per_page: 100,
                 },
-                (response) =>
-                  response.data.workflow_runs.filter(
-                    (run) =>
-                      run.path &&
-                      run.path.endsWith(workflow) &&
-                      run.conclusion === 'success',
-                  ),
               );
-              if (runs.length >= 1) {
+              const successful = (runs || []).filter(
+                (run) =>
+                  run.path &&
+                  run.path.endsWith(workflow) &&
+                  run.conclusion === 'success',
+              );
+              if (successful.length >= 1) {
                 core.info(`CI succeeded for ${sha}.`);
                 return;
               }
