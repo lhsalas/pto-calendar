@@ -198,7 +198,7 @@ jobs:
           missing = [item for item in required if item not in workflow]
           if missing:
               raise SystemExit(f'Missing production deploy guard: {missing}')
-          if 'push:' in workflow or "tags: ['v*.*.*']" in workflow:
+          if re.search(r'^  push:\s*$', workflow, re.MULTILINE) or re.search(r'^    tags:', workflow, re.MULTILINE):
               raise SystemExit('GCP fallback deploy.yml must not have a tag trigger')
           PY
       - name: Validate OCI deployment workflow
