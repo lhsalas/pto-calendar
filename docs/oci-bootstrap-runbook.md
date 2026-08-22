@@ -1,5 +1,10 @@
 # OCI Bootstrap Runbook
 
+> **Hostname for this deployment:** `pto-calendar.lhsalas.com`
+>
+> Every command in this file substitutes this value as `$HOST`. Replace it
+> with your own hostname in a new release if you fork the deployment.
+
 These steps provision the OCI Always Free VM and complete the Supabase-to-OCI
 cutover. The repository ships the application code, Docker Compose, Caddy
 config, deployment scripts, systemd timer, and the OCI tag-triggered
@@ -74,7 +79,7 @@ Create the DNS `A` record pointing to the OCI reserved public IP at least
 24 hours before cutover with a 300-second TTL:
 
 ```
-pto.example.com.   300   A   <reserved-public-ip>
+pto-calendar.lhsalas.com.   300   A   <reserved-public-ip>
 ```
 
 Lower TTL after cutover if the old value was higher.
@@ -86,7 +91,7 @@ Lower TTL after cutover if the old value was higher.
 | Variable | Value |
 |---|---|
 | `OCI_PRODUCTION_DEPLOY_ENABLED` | `true` |
-| `OCI_HOST` | the OCI hostname, e.g. `pto.example.com` |
+| `OCI_HOST` | `pto-calendar.lhsalas.com` |
 | `OCI_DEPLOY_USER` | the SSH user, e.g. `deploy` |
 | `GCP_FALLBACK_DEPLOY_ENABLED` | `false` |
 
@@ -94,7 +99,7 @@ Lower TTL after cutover if the old value was higher.
 
 | Secret | Source |
 |---|---|
-| `OCI_KNOWN_HOSTS` | output of `ssh-keyscan -H <OCI_HOST>` on the VM |
+| `OCI_KNOWN_HOSTS` | output of `ssh-keyscan -H pto-calendar.lhsalas.com` on the VM |
 | `OCI_SSH_PRIVATE_KEY` | the deploy key's private key (no passphrase) |
 
 `PRODUCTION_DEPLOY_ENABLED` (the old GCP variable) must be removed or set to
@@ -103,7 +108,7 @@ Lower TTL after cutover if the old value was higher.
 ## 5. Run setup.sh on the VM
 
 ```bash
-ssh deploy@<OCI_HOST>
+ssh deploy@pto-calendar.lhsalas.com
 
 # Install the prerequisites Ubuntu 24.04 may not include by default
 sudo apt-get update -qq
@@ -117,8 +122,8 @@ sudo ufw allow 443/tcp
 sudo ufw enable
 
 # Copy infra/deploy/setup.sh from the repo, then run
-export HOST=pto.example.com
-export CORS_ORIGIN=https://pto.example.com
+export HOST=pto-calendar.lhsalas.com
+export CORS_ORIGIN=https://pto-calendar.lhsalas.com
 export ACME_EMAIL=ops@example.com
 export RELEASE_REF=v1.1.0
 export DB_PASSWORD="$(openssl rand -hex 24)"
@@ -134,7 +139,8 @@ sudo -E bash setup.sh
 ```
 
 `setup.sh` must end with `[setup] OCI setup complete`. Both
-`https://${HOST}/health` and `https://${HOST}/ready` must respond `200`.
+`https://pto-calendar.lhsalas.com/health` and
+`https://pto-calendar.lhsalas.com/ready` must respond `200`.
 
 ## 6. Restore the Supabase database into the OCI container
 
@@ -144,10 +150,10 @@ ARCHIVE=$(gh workflow run database-backup.yml --ref v1.1.0 >/dev/null && \
   gh run list --workflow database-backup.yml --limit 1 --json databaseId \
     --jq '.[0].databaseId' | xargs -I{} gh run view {} --json jobs \
     --jq '.jobs[0].outputs.archive_name')
-scp ${ARCHIVE} ${ARCHIVE}.sha256 deploy@${HOST}:/home/deploy/
+scp ${ARCHIVE} ${ARCHIVE}.sha256 deploy@pto-calendar.lhsalas.com:/home/deploy/
 
 # Restore into the OCI PostgreSQL container
-ssh deploy@${HOST}
+ssh deploy@pto-calendar.lhsalas.com
 /opt/pto-calendar/infra/deploy/restore-oci.sh \
   --archive /home/deploy/${ARCHIVE} \
   --confirm-production-target
@@ -156,9 +162,9 @@ ssh deploy@${HOST}
 ## 7. Verify and cut over
 
 ```bash
-ssh deploy@${HOST}
-curl -kfsS --max-time 10 https://${HOST}/health
-curl -kfsS --max-time 10 https://${HOST}/ready
+ssh deploy@pto-calendar.lhsalas.com
+curl -kfsS --max-time 10 https://pto-calendar.lhsalas.com/health
+curl -kfsS --max-time 10 https://pto-calendar.lhsalas.com/ready
 
 # Login and test PTO CRUD in the browser through the OCI host
 ```
