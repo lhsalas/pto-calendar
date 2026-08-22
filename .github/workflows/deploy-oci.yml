@@ -77,7 +77,6 @@ jobs:
         with:
           script: |
             const sha = process.env.TARGET_SHA;
-            const workflowName = 'CI';
             const workflowFile = 'ci.yml';
             for (let attempt = 1; attempt <= 6; attempt += 1) {
               const runs = await github.paginate(
@@ -89,20 +88,27 @@ jobs:
                   per_page: 100,
                 },
               );
-              core.info(`Fetched ${runs.length} workflow runs for ${sha}.`);
-              const summary = runs
-                .map((run) => `${run.name}|${run.path}|${run.conclusion}`)
-                .slice(0, 10)
-                .join('\n');
-              if (summary) core.info(summary);
-              const successful = (runs || []).filter(
+              const ciRuns = (runs || []).filter(
                 (run) =>
-                  run.name === workflowName &&
-                  (run.path ? run.path.endsWith(workflowFile) : true) &&
-                  run.conclusion === 'success',
+                  run.path &&
+                  run.path.endsWith(workflowFile) &&
+                  run.status === 'completed',
               );
-              if (successful.length >= 1) {
+              core.info(
+                `Found ${ciRuns.length} completed CI runs for ${sha} on attempt ${attempt}.`,
+              );
+              const successes = ciRuns.filter(
+                (run) => run.conclusion === 'success',
+              );
+              const failures = ciRuns.filter(
+                (run) => run.conclusion === 'failure',
+              );
+              if (successes.length >= 1) {
                 core.info(`CI succeeded for ${sha}.`);
+                return;
+              }
+              if (failures.length >= 1) {
+                core.setFailed(`CI failed for ${sha}; aborting deploy.`);
                 return;
               }
               core.notice(
