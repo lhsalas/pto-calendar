@@ -26,11 +26,12 @@ side:
 
 ```text
 Compute -> Instances -> pto-calendar -> Edit -> Tags
-  Key:   pto.role
+  Key:   ptorole
   Value: production
 ```
 
-The tag is mandatory: the dynamic group matches `tag.pto.role=production`,
+The tag key cannot contain dots (OCI rejects them), so the production tag
+is `ptorole=production`. The dynamic group matches `tag.ptorole=production`,
 and `infra/deploy/backup.sh` uses the instance principal to put encrypted
 archives into the bucket. Without the tag, `backup.sh` fails with
 `Authorization failed or requested resource not found`.

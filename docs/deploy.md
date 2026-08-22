@@ -26,9 +26,10 @@ option is documented in
 - Boot volume: 50 GB or larger according to the expected database and image
   cache size.
 - Reserve the public IP. Do not use an ephemeral IP for a TLS production host.
-- Add the tag `pto.role = production` to the instance. The dynamic group
-  policy granted to this tag is what allows the VM to call Object Storage
-  via the instance principal.
+- Add the freeform tag `ptorole = production` to the instance (the key
+  cannot contain dots — OCI rejects them). The dynamic group policy granted
+  to this tag is what allows the VM to call Object Storage via the
+  instance principal.
 - Keep the PostgreSQL Docker volume persistent. Never use `docker compose down
   -v` on the production stack.
 

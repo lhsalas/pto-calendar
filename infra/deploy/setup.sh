@@ -4,8 +4,9 @@
 # This script deliberately deploys an explicit release ref. It never silently
 # turns a moving branch into production. Run it as root on an Ubuntu 22.04 or
 # 24.04 ARM64 VM after DNS, the OCI CLI, and the required secret values are
-# ready. The VM must carry the tag `pto.role=production` so the instance
-# principal policy can grant Object Storage access.
+# ready. The VM must carry the freeform tag `ptorole=production` (no dot) so
+# the dynamic group `pto-calendar-vm` matches the instance and the IAM
+# policy can grant Object Storage access via the instance principal.
 
 set -Eeuo pipefail
 
