@@ -81,9 +81,8 @@ jobs:
             successful_runs="$(gh run list \
               --workflow ci.yml \
               --commit "${TARGET_SHA}" \
-              --event push \
               --status completed \
-              --limit 20 \
+              --limit 50 \
               --json headSha,conclusion \
               --jq '[.[] | select(.headSha == "'"${TARGET_SHA}"'" and .conclusion == "success")] | length')"
             if [[ "${successful_runs}" -ge 1 ]]; then
