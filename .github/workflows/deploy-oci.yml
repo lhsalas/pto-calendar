@@ -72,24 +72,39 @@ jobs:
 
       - name: Verify CI succeeded for this commit
         env:
-          GH_TOKEN: ${{ github.token }}
           TARGET_SHA: ${{ steps.target.outputs.target_sha }}
-        run: |
-          set -euo pipefail
-          successful_runs=""
-          for attempt in 1 2 3 4 5 6; do
-            successful_runs="$(gh api \
-              "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${TARGET_SHA}&per_page=100" \
-              --jq '[.workflow_runs[] | select(.name == "CI" and .conclusion == "success")] | length')"
-            if [[ "${successful_runs}" -ge 1 ]]; then
-              echo "CI succeeded for ${TARGET_SHA}."
-              exit 0
-            fi
-            echo "::notice::No successful CI run for ${TARGET_SHA} yet (${attempt}/6); sleeping 15s."
-            sleep 15
-          done
-          echo "::error::No successful CI run found for ${TARGET_SHA}."
-          exit 1
+        uses: actions/github-script@ed597411d8f924073f98df4b0f7b86e8c4ad68a9 # v7
+        with:
+          script: |
+            const sha = process.env.TARGET_SHA;
+            const workflow = 'ci.yml';
+            for (let attempt = 1; attempt <= 6; attempt += 1) {
+              const runs = await github.paginate(
+                github.rest.actions.listWorkflowRunsForRepo,
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  head_sha: sha,
+                  per_page: 100,
+                },
+                (response) =>
+                  response.data.workflow_runs.filter(
+                    (run) =>
+                      run.path &&
+                      run.path.endsWith(workflow) &&
+                      run.conclusion === 'success',
+                  ),
+              );
+              if (runs.length >= 1) {
+                core.info(`CI succeeded for ${sha}.`);
+                return;
+              }
+              core.notice(
+                `No successful CI run for ${sha} yet (${attempt}/6); sleeping 15s.`,
+              );
+              await new Promise((resolve) => setTimeout(resolve, 15000));
+            }
+            core.setFailed(`No successful CI run found for ${sha}.`);
 
       - name: Deploy exact ref on OCI
         env:
