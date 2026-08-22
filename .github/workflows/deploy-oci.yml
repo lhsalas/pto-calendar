@@ -77,7 +77,8 @@ jobs:
         with:
           script: |
             const sha = process.env.TARGET_SHA;
-            const workflow = 'ci.yml';
+            const workflowName = 'CI';
+            const workflowFile = 'ci.yml';
             for (let attempt = 1; attempt <= 6; attempt += 1) {
               const runs = await github.paginate(
                 github.rest.actions.listWorkflowRunsForRepo,
@@ -88,10 +89,16 @@ jobs:
                   per_page: 100,
                 },
               );
+              core.info(`Fetched ${runs.length} workflow runs for ${sha}.`);
+              const summary = runs
+                .map((run) => `${run.name}|${run.path}|${run.conclusion}`)
+                .slice(0, 10)
+                .join('\n');
+              if (summary) core.info(summary);
               const successful = (runs || []).filter(
                 (run) =>
-                  run.path &&
-                  run.path.endsWith(workflow) &&
+                  run.name === workflowName &&
+                  (run.path ? run.path.endsWith(workflowFile) : true) &&
                   run.conclusion === 'success',
               );
               if (successful.length >= 1) {
