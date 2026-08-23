@@ -77,45 +77,37 @@ jobs:
         with:
           script: |
             const sha = process.env.TARGET_SHA;
-            const workflowFile = 'ci.yml';
             for (let attempt = 1; attempt <= 6; attempt += 1) {
-              const response =
-                await github.rest.actions.listWorkflowRunsForRepo({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  head_sha: sha,
-                  per_page: 100,
-                });
-              const runs = response.data.workflow_runs || [];
+              const response = await github.rest.checks.listForRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: sha,
+                per_page: 100,
+              });
+              const checks = response.data.check_runs || [];
               core.info(
-                `Fetched ${runs.length} workflow runs for ${sha} on attempt ${attempt}.`,
+                `Fetched ${checks.length} check runs for ${sha} on attempt ${attempt}.`,
               );
-              const summary = runs
-                .map(
-                  (run) =>
-                    `${run.name}|${run.path}|${run.status}|${run.conclusion}`,
-                )
-                .join('\n');
-              if (summary) core.info(summary);
-              const ciRuns = runs.filter(
-                (run) => run.path && run.path.endsWith(workflowFile),
+              const ciCheck = checks.find(
+                (run) =>
+                  run.name === 'CI' &&
+                  run.app?.slug === 'github-actions',
               );
-              const successes = ciRuns.filter(
-                (run) => run.conclusion === 'success',
+              const status = ciCheck?.status;
+              const conclusion = ciCheck?.conclusion;
+              core.info(
+                `CI check: id=${ciCheck?.id ?? 'none'} status=${status} conclusion=${conclusion}`,
               );
-              const failures = ciRuns.filter(
-                (run) => run.conclusion === 'failure',
-              );
-              if (successes.length >= 1) {
+              if (status === 'completed' && conclusion === 'success') {
                 core.info(`CI succeeded for ${sha}.`);
                 return;
               }
-              if (failures.length >= 1) {
+              if (status === 'completed' && conclusion === 'failure') {
                 core.setFailed(`CI failed for ${sha}; aborting deploy.`);
                 return;
               }
               core.notice(
-                `No successful CI run for ${sha} yet (${attempt}/6); sleeping 15s.`,
+                `No completed CI run for ${sha} yet (${attempt}/6); sleeping 15s.`,
               );
               await new Promise((resolve) => setTimeout(resolve, 15000));
             }
