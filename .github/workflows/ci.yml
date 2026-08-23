@@ -208,7 +208,7 @@ jobs:
 
           workflow = Path('.github/workflows/deploy-oci.yml').read_text()
           required = [
-              "tags: ['v*.*.*']",
+              "workflows: [CI]",
               'workflow_dispatch:',
               'OCI_PRODUCTION_DEPLOY_ENABLED',
               'OCI_KNOWN_HOSTS',
@@ -223,6 +223,14 @@ jobs:
           missing = [item for item in required if item not in workflow]
           if missing:
               raise SystemExit(f'Missing OCI production deploy guard: {missing}')
+          forbidden = [
+              "tags: ['v*.*.*']",
+          ]
+          unexpected = [item for item in forbidden if item in workflow]
+          if unexpected:
+              raise SystemExit(
+                  f'deploy-oci.yml must not define a push:tags trigger: {unexpected}',
+              )
           PY
       - name: Validate deploy-secrets workflow
         run: |
