@@ -226,6 +226,14 @@ touch /home/deploy/.ssh/authorized_keys
 chown deploy:deploy /home/deploy/.ssh/authorized_keys
 chmod 0600 /home/deploy/.ssh/authorized_keys
 
+# --- Mark the install directory as git-safe for both root and deploy -------
+# /opt is owned by root on stock Ubuntu images; when we chown it to deploy
+# before cloning, git's "dubious ownership" guard still triggers on the
+# subsequent fetch/checkout in some OCI Ubuntu 24.04 images. Whitelist the
+# path explicitly so subsequent reruns are idempotent.
+git config --global --add safe.directory "${INSTALL_DIR}"
+sudo -u deploy -H git config --global --add safe.directory "${INSTALL_DIR}"
+
 # --- Clone and check out the exact release --------------------------------
 if [[ -d "${INSTALL_DIR}/.git" ]]; then
   log "updating repository at ${INSTALL_DIR}"
