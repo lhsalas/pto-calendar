@@ -224,6 +224,20 @@ if command -v sshd >/dev/null 2>&1; then
   systemctl reload ssh || systemctl reload sshd || true
 fi
 
+# --- Open 80/443 in UFW ----------------------------------------------------
+# Caddy terminates TLS on 443 and serves the ACME HTTP-01 challenge on 80.
+# Port 22 is opened in the bootstrap runbook; UFW defaults to deny, so
+# without these rules Caddy can't serve public traffic and Let's Encrypt
+# can't reach the challenge endpoint.
+if command -v ufw >/dev/null 2>&1; then
+  for port in 80 443; do
+    if ! ufw status | grep -E "^${port}/tcp" | grep -q ALLOW; then
+      ufw allow "${port}/tcp" >/dev/null
+      log "opened ${port}/tcp in UFW"
+    fi
+  done
+fi
+
 # --- Create deploy user ----------------------------------------------------
 if ! id -u deploy >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash deploy
