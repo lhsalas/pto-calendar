@@ -77,6 +77,18 @@ jobs:
         with:
           script: |
             const sha = process.env.TARGET_SHA;
+            const CI_JOB_NAMES = [
+              'Lint',
+              'Typecheck',
+              'Backend unit tests',
+              'Backend integration tests',
+              'Frontend tests',
+              'Build',
+              'Deployment config (static checks)',
+              'E2E (Playwright)',
+              'Docker smoke (app:up)',
+              'Coverage gate',
+            ];
             for (let attempt = 1; attempt <= 6; attempt += 1) {
               const response = await github.rest.checks.listForRef({
                 owner: context.repo.owner,
@@ -84,26 +96,34 @@ jobs:
                 ref: sha,
                 per_page: 100,
               });
-              const checks = response.data.check_runs || [];
-              core.info(
-                `Fetched ${checks.length} check runs for ${sha} on attempt ${attempt}.`,
-              );
-              const ciCheck = checks.find(
+              const checks = (response.data.check_runs || []).filter(
                 (run) =>
-                  run.name === 'CI' &&
-                  run.app?.slug === 'github-actions',
+                  run.app && run.app.slug === 'github-actions',
               );
-              const status = ciCheck?.status;
-              const conclusion = ciCheck?.conclusion;
+              const ciChecks = checks.filter((run) =>
+                CI_JOB_NAMES.includes(run.name),
+              );
               core.info(
-                `CI check: id=${ciCheck?.id ?? 'none'} status=${status} conclusion=${conclusion}`,
+                `Fetched ${checks.length} check runs (${ciChecks.length} CI jobs) for ${sha} on attempt ${attempt}.`,
               );
-              if (status === 'completed' && conclusion === 'success') {
-                core.info(`CI succeeded for ${sha}.`);
+              const failures = ciChecks.filter(
+                (run) => run.conclusion === 'failure',
+              );
+              if (failures.length >= 1) {
+                core.setFailed(
+                  `CI failed for ${sha}: ${failures
+                    .map((run) => run.name)
+                    .join(', ')}; aborting deploy.`,
+                );
                 return;
               }
-              if (status === 'completed' && conclusion === 'failure') {
-                core.setFailed(`CI failed for ${sha}; aborting deploy.`);
+              const allDone = ciChecks.length >= CI_JOB_NAMES.length &&
+                ciChecks.every((run) => run.status === 'completed');
+              const allSuccess = ciChecks.every(
+                (run) => run.conclusion === 'success',
+              );
+              if (allDone && allSuccess) {
+                core.info(`CI succeeded for ${sha}.`);
                 return;
               }
               core.notice(
