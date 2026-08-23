@@ -79,23 +79,26 @@ jobs:
             const sha = process.env.TARGET_SHA;
             const workflowFile = 'ci.yml';
             for (let attempt = 1; attempt <= 6; attempt += 1) {
-              const runs = await github.paginate(
-                github.rest.actions.listWorkflowRunsForRepo,
-                {
+              const response =
+                await github.rest.actions.listWorkflowRunsForRepo({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   head_sha: sha,
                   per_page: 100,
-                },
-              );
-              const ciRuns = (runs || []).filter(
-                (run) =>
-                  run.path &&
-                  run.path.endsWith(workflowFile) &&
-                  run.status === 'completed',
-              );
+                });
+              const runs = response.data.workflow_runs || [];
               core.info(
-                `Found ${ciRuns.length} completed CI runs for ${sha} on attempt ${attempt}.`,
+                `Fetched ${runs.length} workflow runs for ${sha} on attempt ${attempt}.`,
+              );
+              const summary = runs
+                .map(
+                  (run) =>
+                    `${run.name}|${run.path}|${run.status}|${run.conclusion}`,
+                )
+                .join('\n');
+              if (summary) core.info(summary);
+              const ciRuns = runs.filter(
+                (run) => run.path && run.path.endsWith(workflowFile),
               );
               const successes = ciRuns.filter(
                 (run) => run.conclusion === 'success',
