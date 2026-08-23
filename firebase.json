@@ -2,6 +2,13 @@
   "hosting": {
     "public": "frontend/dist",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "redirects": [
+      {
+        "source": "**",
+        "destination": "https://pto-calendar.lhsalas.com",
+        "type": 302
+      }
+    ],
     "rewrites": [
       {
         "source": "**",
