@@ -243,6 +243,40 @@ if ! id -u deploy >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash deploy
 fi
 usermod -aG docker deploy
+
+# The OCI CLI is often installed by the bootstrap operator in a home
+# directory. The backup timer runs as deploy, so expose that installation
+# read-only without granting deploy general access to the operator's home.
+grant_deploy_traverse() {
+  local path="$1"
+  while [[ "${path}" != "/" ]]; do
+    setfacl -m "u:deploy:x" "${path}"
+    path="$(dirname "${path}")"
+  done
+}
+
+OCI_COMMAND="$(command -v oci)"
+OCI_REAL_COMMAND="$(readlink -f "${OCI_COMMAND}")"
+case "${OCI_REAL_COMMAND}" in
+  /home/*)
+    if ! command -v setfacl >/dev/null 2>&1; then
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -qq
+      apt-get install -y --no-install-recommends acl
+    fi
+    if [[ ! -e /usr/local/bin/oci ]]; then
+      ln -s "${OCI_REAL_COMMAND}" /usr/local/bin/oci
+    fi
+    grant_deploy_traverse "$(dirname "${OCI_REAL_COMMAND}")"
+    setfacl -m "u:deploy:rx" "${OCI_REAL_COMMAND}"
+    OCI_INTERPRETER="$(awk 'NR == 1 && /^#!/ { sub(/^#!/, ""); print; exit }' "${OCI_REAL_COMMAND}")"
+    if [[ "${OCI_INTERPRETER}" == /home/* ]]; then
+      OCI_VENV="$(dirname "$(dirname "${OCI_INTERPRETER}")")"
+      grant_deploy_traverse "${OCI_VENV}"
+      setfacl -R -m "u:deploy:rX" "${OCI_VENV}"
+    fi
+    ;;
+esac
 install -d -m 0700 -o deploy -g deploy /home/deploy/.ssh
 touch /home/deploy/.ssh/authorized_keys
 chown deploy:deploy /home/deploy/.ssh/authorized_keys

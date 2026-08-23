@@ -105,10 +105,32 @@ tar -xzf "${DECRYPTED}" -C "${WORKDIR}" \
 rm -f "${DECRYPTED}"
 [[ -s "${WORKDIR}/schema.sql" && -s "${WORKDIR}/data.sql" ]] || fail "archive files are missing or empty" 2
 
+# Supabase dumps can contain ownership and ACL statements for roles that exist
+# only in Supabase. The OCI database intentionally creates only DB_USER, so
+# omit source-role metadata while retaining the actual schema DDL.
+TARGET_SCHEMA="${WORKDIR}/schema-target.sql"
+sed -E \
+  -e '/^[[:space:]]*SET ROLE /d' \
+  -e '/^[[:space:]]*ALTER .* OWNER TO /d' \
+  -e '/^[[:space:]]*ALTER DEFAULT PRIVILEGES /d' \
+  -e '/^[[:space:]]*(GRANT|REVOKE) /d' \
+  -e '/^[[:space:]]*SET transaction_timeout[[:space:]]*=/d' \
+  "${WORKDIR}/schema.sql" > "${TARGET_SCHEMA}"
+[[ -s "${TARGET_SCHEMA}" ]] || fail "target schema is empty after removing source-role metadata" 2
+TARGET_DATA="${WORKDIR}/data-target.sql"
+sed -E \
+  -e '/^[[:space:]]*SET transaction_timeout[[:space:]]*=/d' \
+  "${WORKDIR}/data.sql" > "${TARGET_DATA}"
+[[ -s "${TARGET_DATA}" ]] || fail "target data is empty after removing unsupported session metadata" 2
+
 log "stopping application containers before destructive restore"
 docker compose --env-file "${INSTALL_DIR}/.env" -f "${INSTALL_DIR}/${COMPOSE_FILE}" \
   stop caddy nginx backend >/dev/null || true
 
+log "ensuring the target public schema exists for the pre-restore backup"
+docker compose --env-file "${INSTALL_DIR}/.env" -f "${INSTALL_DIR}/${COMPOSE_FILE}" exec -T db \
+  psql -U "${DB_USER}" -d "${DB_NAME}" -v ON_ERROR_STOP=1 -q \
+  -c 'CREATE SCHEMA IF NOT EXISTS public;'
 log "creating an encrypted pre-restore backup"
 "${INSTALL_DIR}/infra/deploy/backup.sh"
 
@@ -118,9 +140,9 @@ docker compose --env-file "${INSTALL_DIR}/.env" -f "${INSTALL_DIR}/${COMPOSE_FIL
   -c 'DROP SCHEMA public CASCADE;'
 log "applying schema and data"
 docker compose --env-file "${INSTALL_DIR}/.env" -f "${INSTALL_DIR}/${COMPOSE_FILE}" exec -T db \
-  psql -U "${DB_USER}" -d "${DB_NAME}" -v ON_ERROR_STOP=1 -q --single-transaction -f - < "${WORKDIR}/schema.sql"
+  psql -U "${DB_USER}" -d "${DB_NAME}" -v ON_ERROR_STOP=1 -q --single-transaction -f - < "${TARGET_SCHEMA}"
 docker compose --env-file "${INSTALL_DIR}/.env" -f "${INSTALL_DIR}/${COMPOSE_FILE}" exec -T db \
-  psql -U "${DB_USER}" -d "${DB_NAME}" -v ON_ERROR_STOP=1 -q --single-transaction -f - < "${WORKDIR}/data.sql"
+  psql -U "${DB_USER}" -d "${DB_NAME}" -v ON_ERROR_STOP=1 -q --single-transaction -f - < "${TARGET_DATA}"
 
 log "checking Prisma migration state"
 docker compose --env-file "${INSTALL_DIR}/.env" -f "${INSTALL_DIR}/${COMPOSE_FILE}" \
