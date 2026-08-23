@@ -49,13 +49,14 @@ jobs:
           set -euo pipefail
           TARGET_REF=""
           TARGET_SHA=""
+          SHOULD_DEPLOY="false"
 
           case "${EVENT_NAME}" in
             push)
               TARGET_REF="${PUSH_REF_NAME}"
+              SHOULD_DEPLOY="true"
               ;;
             workflow_run)
-              # Only deploy when CI completed successfully for a tag push.
               if [[ "${WORKFLOW_RUN_CONCLUSION}" != "success" ]]; then
                 echo "::error::CI conclusion for upstream run is '${WORKFLOW_RUN_CONCLUSION}'; aborting deploy."
                 exit 1
@@ -70,9 +71,11 @@ jobs:
               fi
               TARGET_REF="${WORKFLOW_RUN_HEAD_BRANCH#refs/tags/}"
               TARGET_SHA="${WORKFLOW_RUN_HEAD_SHA}"
+              SHOULD_DEPLOY="true"
               ;;
             workflow_dispatch)
               TARGET_REF="${DISPATCH_REF}"
+              SHOULD_DEPLOY="true"
               ;;
             *)
               echo "::error::Unsupported event '${EVENT_NAME}'."
@@ -80,28 +83,33 @@ jobs:
               ;;
           esac
 
-          if [[ -z "${TARGET_REF}" || ! "${TARGET_REF}" =~ ^[A-Za-z0-9._/-]+$ || "${TARGET_REF}" == -* || "${TARGET_REF}" == *..* ]]; then
-            echo "::error::Target ref contains unsafe characters."
-            exit 1
-          fi
-          if [[ -z "${OCI_HOST}" || ! "${OCI_HOST}" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
-            echo "::error::OCI_HOST must be a bare hostname repository variable."
-            exit 1
-          fi
-          if [[ -z "${OCI_DEPLOY_USER}" || ! "${OCI_DEPLOY_USER}" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]; then
-            echo "::error::OCI_DEPLOY_USER is invalid."
-            exit 1
+          if [[ "${SHOULD_DEPLOY}" == "true" ]]; then
+            if [[ -z "${TARGET_REF}" || ! "${TARGET_REF}" =~ ^[A-Za-z0-9._/-]+$ || "${TARGET_REF}" == -* || "${TARGET_REF}" == *..* ]]; then
+              echo "::error::Target ref contains unsafe characters."
+              exit 1
+            fi
+            if [[ -z "${OCI_HOST}" || ! "${OCI_HOST}" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
+              echo "::error::OCI_HOST must be a bare hostname repository variable."
+              exit 1
+            fi
+            if [[ -z "${OCI_DEPLOY_USER}" || ! "${OCI_DEPLOY_USER}" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]; then
+              echo "::error::OCI_DEPLOY_USER is invalid."
+              exit 1
+            fi
           fi
 
-          echo "target_ref=${TARGET_REF}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "target_ref=${TARGET_REF}"
+            echo "should_deploy=${SHOULD_DEPLOY}"
+          } >> "${GITHUB_OUTPUT}"
           # For push events the SHA comes from the checkout below.
           if [[ -n "${TARGET_SHA}" ]]; then
             echo "target_sha=${TARGET_SHA}" >> "${GITHUB_OUTPUT}"
           fi
-          echo "Deploy target ${TARGET_REF}."
+          echo "Deploy target ${TARGET_REF:-<none>} (should_deploy=${SHOULD_DEPLOY})."
 
       - name: Check out the target ref
-        if: github.event_name != 'workflow_run'
+        if: github.event_name != 'workflow_run' && steps.target.outputs.should_deploy == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ steps.target.outputs.target_ref }}
@@ -109,7 +117,7 @@ jobs:
 
       - name: Resolve target SHA for push / dispatch events
         id: resolve_sha
-        if: github.event_name != 'workflow_run'
+        if: github.event_name != 'workflow_run' && steps.target.outputs.should_deploy == 'true'
         env:
           TARGET_REF: ${{ steps.target.outputs.target_ref }}
         run: |
@@ -118,7 +126,7 @@ jobs:
           echo "target_sha=${TARGET_SHA}" >> "${GITHUB_OUTPUT}"
 
       - name: Validate tag format
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && steps.target.outputs.should_deploy == 'true'
         run: |
           set -euo pipefail
           if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
@@ -127,7 +135,7 @@ jobs:
           fi
 
       - name: Verify CI succeeded for this commit
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && steps.target.outputs.should_deploy == 'true'
         env:
           TARGET_SHA: ${{ steps.resolve_sha.outputs.target_sha }}
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
@@ -192,6 +200,7 @@ jobs:
             core.setFailed(`No successful CI run found for ${sha}.`);
 
       - name: Deploy exact ref on OCI
+        if: steps.target.outputs.should_deploy == 'true'
         env:
           TARGET_REF: ${{ steps.target.outputs.target_ref }}
           TARGET_SHA: ${{ steps.target.outputs.target_sha || steps.resolve_sha.outputs.target_sha }}
@@ -216,6 +225,7 @@ jobs:
             "${REMOTE_COMMAND}"
 
       - name: Smoke-test OCI deployment
+        if: steps.target.outputs.should_deploy == 'true'
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --max-time 30 "https://${OCI_HOST}/health"
