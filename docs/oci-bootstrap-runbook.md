@@ -149,9 +149,14 @@ export SKIP_BOOTSTRAP=true
 sudo -E bash setup.sh
 ```
 
-`setup.sh` must end with `[setup] OCI setup complete`. Both
-`https://pto-calendar.lhsalas.com/health` and
-`https://pto-calendar.lhsalas.com/ready` must respond `200`.
+`setup.sh` must end with `[setup] OCI setup complete`. It verifies
+the backend `/health` and `/ready` over the docker network (no DNS/cert
+required). It then attempts `https://${HOST}/health` through Caddy as a
+best-effort check — if Caddy has not yet obtained a certificate because
+the DNS `A` record for `${HOST}` does not resolve to this VM, `setup.sh`
+prints a warning explaining how to fix it (switch the `A` record, then
+`sudo docker compose -f /opt/pto-calendar/docker-compose.prod.yml
+restart caddy`) but exits 0 because the stack itself is functional.
 
 ## 6. Restore the Supabase database into the OCI container
 

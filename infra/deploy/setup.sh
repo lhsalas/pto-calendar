@@ -129,6 +129,14 @@ LEAD_NAME="${LEAD_NAME:-${DEFAULT_LEAD_NAME}}"
 LEAD_COLOR_CODE="${LEAD_COLOR_CODE:-${DEFAULT_LEAD_COLOR_CODE}}"
 SKIP_BOOTSTRAP="${SKIP_BOOTSTRAP:-false}"
 
+# Best-effort public IP detection for the warning message. The operator can
+# override with PUBLIC_IP=<ip> if the metadata service is unreachable.
+if [[ -z "${PUBLIC_IP:-}" ]]; then
+  PUBLIC_IP="$(curl -fsS --max-time 5 -H 'Metadata-Flavor: Oracle' \
+    http://169.254.169.254/opc/v2/instance/metadata/PublicIp 2>/dev/null || true)"
+fi
+: "${PUBLIC_IP:=}"
+
 [[ "${HOST}" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] ||
   fail "HOST must be a bare public hostname"
 [[ "${CORS_ORIGIN}" == "https://${HOST}" ]] ||
@@ -292,18 +300,48 @@ if ! sudo -u deploy -H docker compose --env-file "${ENV_FILE}" \
   fail "docker compose up failed" 3
 fi
 
-log "waiting for HTTPS /health"
-ready=0
+log "waiting for backend /health (via docker network)"
+healthy=0
 for _ in $(seq 1 "${HEALTH_TIMEOUT_SECONDS}"); do
-  if curl -kfsS --max-time 5 --resolve "${HOST}:443:127.0.0.1" "https://${HOST}/health" >/dev/null; then
-    ready=1
+  if sudo -u deploy -H docker compose --env-file "${ENV_FILE}" \
+      -f "${INSTALL_DIR}/${COMPOSE_FILE}" exec -T backend \
+      node -e "fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" \
+      >/dev/null 2>&1; then
+    healthy=1
     break
   fi
   sleep 1
 done
-[[ "${ready}" -eq 1 ]] || fail "https://${HOST}/health did not return 200" 3
-curl -kfsS --max-time 10 --resolve "${HOST}:443:127.0.0.1" "https://${HOST}/ready" >/dev/null ||
-  fail "https://${HOST}/ready did not return 200" 3
+[[ "${healthy}" -eq 1 ]] || fail "backend /health did not return 200 within ${HEALTH_TIMEOUT_SECONDS}s" 3
+
+sudo -u deploy -H docker compose --env-file "${ENV_FILE}" \
+  -f "${INSTALL_DIR}/${COMPOSE_FILE}" exec -T backend \
+  node -e "fetch('http://127.0.0.1:3000/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" \
+  >/dev/null 2>&1 ||
+  fail "backend /ready did not return 200" 3
+
+log "verifying HTTPS /health through Caddy (best-effort)"
+https_ready=0
+for _ in $(seq 1 "${HEALTH_TIMEOUT_SECONDS}"); do
+  if curl -kfsS --max-time 5 --resolve "${HOST}:443:127.0.0.1" \
+      "https://${HOST}/health" >/dev/null 2>&1; then
+    https_ready=1
+    break
+  fi
+  sleep 1
+done
+if [[ "${https_ready}" -eq 1 ]]; then
+  curl -kfsS --max-time 10 --resolve "${HOST}:443:127.0.0.1" \
+    "https://${HOST}/ready" >/dev/null 2>&1 || true
+  log "HTTPS ${HOST}/health is responding"
+else
+  printf '[setup] WARN: https://${HOST}/health did not return 200 within ${HEALTH_TIMEOUT_SECONDS}s\n' >&2
+  printf '        Caddy needs a valid certificate. Ensure the A record for\n' >&2
+  printf '        %s points to this VM (%s), then restart Caddy:\n' "${HOST}" "${PUBLIC_IP:-<this VM>}" >&2
+  printf '          sudo docker compose -f %s/%s restart caddy\n' "${INSTALL_DIR}" "${COMPOSE_FILE}" >&2
+  printf '        The backend is reachable via the docker network, so the\n' >&2
+  printf '        stack is functional; only public TLS is pending.\n' >&2
+fi
 
 # --- Install the encrypted backup timer -----------------------------------
 install -m 0644 -o root -g root "${INSTALL_DIR}/infra/db/pto-calendar-backup.service" \
