@@ -7,6 +7,21 @@
 # ready. The VM must carry the freeform tag `ptorole=production` (no dot) so
 # the dynamic group `pto-calendar-vm` matches the instance and the IAM
 # policy can grant Object Storage access via the instance principal.
+#
+# Required environment variables (sourced from GitHub Secrets):
+#   HOST                      Bare public hostname (e.g. pto-calendar.example.com)
+#   CORS_ORIGIN               https://${HOST}
+#   ACME_EMAIL                Email for Let's Encrypt registration
+#   RELEASE_REF               Exact tag or commit SHA to deploy
+#   SKIP_BOOTSTRAP            true to leave existing app data untouched
+#   OCI_SESSION_SECRET        Same value as OCI_SESSION_SECRET in GitHub Secrets
+#   OCI_BACKUP_ENCRYPTION_KEY Same value as OCI_BACKUP_ENCRYPTION_KEY in GitHub Secrets
+#   OCI_RATE_LIMIT_REDIS_URL  Same value as OCI_RATE_LIMIT_REDIS_URL in GitHub Secrets
+#   OCI_DB_PASSWORD           Same value as OCI_DB_PASSWORD in GitHub Secrets
+#   LEAD_EMAIL                Required only when SKIP_BOOTSTRAP=false
+#   OCI_BACKUP_BUCKET         Object Storage bucket for encrypted backups
+#   OCI_OBJECT_STORAGE_NAMESPACE  Tenancy namespace
+#   OCI_REGION                Home region (e.g. us-ashburn-1)
 
 set -Eeuo pipefail
 
@@ -98,9 +113,10 @@ require_env HOST
 require_env ACME_EMAIL
 require_env RELEASE_REF
 require_env CORS_ORIGIN
-require_env RATE_LIMIT_REDIS_URL
-require_env SESSION_SECRET
-require_env BACKUP_ENCRYPTION_KEY
+require_env OCI_RATE_LIMIT_REDIS_URL
+require_env OCI_SESSION_SECRET
+require_env OCI_BACKUP_ENCRYPTION_KEY
+require_env OCI_DB_PASSWORD
 require_env OCI_BACKUP_BUCKET
 require_env OCI_OBJECT_STORAGE_NAMESPACE
 require_env OCI_REGION
@@ -133,11 +149,11 @@ if [[ "${SKIP_BOOTSTRAP}" == false ]]; then
     fail "LEAD_EMAIL is not a valid email address"
 fi
 
-valid_env_value "${RATE_LIMIT_REDIS_URL}" || fail "RATE_LIMIT_REDIS_URL contains a newline"
-[[ "${RATE_LIMIT_REDIS_URL}" == rediss://* ]] ||
-  fail "RATE_LIMIT_REDIS_URL must be an Upstash TLS URL beginning with rediss://"
-require_strong_key SESSION_SECRET "${SESSION_SECRET}"
-require_strong_key BACKUP_ENCRYPTION_KEY "${BACKUP_ENCRYPTION_KEY}"
+valid_env_value "${OCI_RATE_LIMIT_REDIS_URL}" || fail "OCI_RATE_LIMIT_REDIS_URL contains a newline"
+[[ "${OCI_RATE_LIMIT_REDIS_URL}" == rediss://* ]] ||
+  fail "OCI_RATE_LIMIT_REDIS_URL must be an Upstash TLS URL beginning with rediss://"
+require_strong_key OCI_SESSION_SECRET "${OCI_SESSION_SECRET}"
+require_strong_key OCI_BACKUP_ENCRYPTION_KEY "${OCI_BACKUP_ENCRYPTION_KEY}"
 valid_env_value "${OCI_BACKUP_BUCKET}" || fail "OCI_BACKUP_BUCKET contains a newline"
 valid_env_value "${OCI_OBJECT_STORAGE_NAMESPACE}" || fail "OCI_OBJECT_STORAGE_NAMESPACE contains a newline"
 valid_env_value "${OCI_REGION}" || fail "OCI_REGION contains a newline"
@@ -145,7 +161,7 @@ valid_env_value "${OCI_REGION}" || fail "OCI_REGION contains a newline"
 if [[ -f "${INSTALL_DIR}/.env" ]]; then
   DB_PASSWORD="$(existing_or_input DB_PASSWORD "${INSTALL_DIR}/.env")"
 else
-  require_env DB_PASSWORD
+  DB_PASSWORD="${OCI_DB_PASSWORD}"
 fi
 valid_env_value "${DB_PASSWORD}" || fail "DB_PASSWORD contains a newline"
 [[ "${DB_PASSWORD}" =~ ^[A-Za-z0-9._~-]{16,128}$ ]] ||
@@ -244,12 +260,12 @@ trap 'rm -f "${ENV_TMP}"' EXIT
   printf 'DB_PASSWORD=%s\n' "${DB_PASSWORD}"
   printf 'DB_USER=%s\n' "${DB_USER}"
   printf 'DB_NAME=%s\n' "${DB_NAME}"
-  printf 'SESSION_SECRET=%s\n' "${SESSION_SECRET}"
+  printf 'SESSION_SECRET=%s\n' "${OCI_SESSION_SECRET}"
   printf 'COOKIE_SECURE=true\n'
   printf 'COOKIE_SAME_SITE=lax\n'
   printf 'COOKIE_DOMAIN=\n'
-  printf 'RATE_LIMIT_REDIS_URL=%s\n' "${RATE_LIMIT_REDIS_URL}"
-  printf 'BACKUP_ENCRYPTION_KEY=%s\n' "${BACKUP_ENCRYPTION_KEY}"
+  printf 'RATE_LIMIT_REDIS_URL=%s\n' "${OCI_RATE_LIMIT_REDIS_URL}"
+  printf 'BACKUP_ENCRYPTION_KEY=%s\n' "${OCI_BACKUP_ENCRYPTION_KEY}"
   printf 'OCI_BACKUP_BUCKET=%s\n' "${OCI_BACKUP_BUCKET}"
   printf 'OCI_OBJECT_STORAGE_NAMESPACE=%s\n' "${OCI_OBJECT_STORAGE_NAMESPACE}"
   printf 'OCI_REGION=%s\n' "${OCI_REGION}"
@@ -299,4 +315,16 @@ else
 fi
 
 log "OCI setup complete at ${INSTALL_DIR} (${RELEASE_REF})"
+
+# --- Reminder to back up the secrets ---------------------------------------
+# /opt/pto-calendar/.env is the only on-VM copy of DB_PASSWORD. Echo it once
+# so the operator can record it alongside OCI_DB_PASSWORD in GitHub Secrets
+# and any external password manager.
+cat <<EOF
+
+[setup] Save the following values externally (e.g. update OCI_DB_PASSWORD in
+[setup] GitHub repository secrets and copy into your password manager):
+
+[setup]   DB_PASSWORD = ${DB_PASSWORD}
+EOF
 log "SSH day-to-day operations as deploy; keep ${ENV_FILE} and the backup key protected"

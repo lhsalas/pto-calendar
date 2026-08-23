@@ -74,13 +74,20 @@ commit, issue, tag, or workflow log:
 | `CORS_ORIGIN` | Exactly `https://$HOST` |
 | `ACME_EMAIL` | Certificate notification address |
 | `RELEASE_REF` | An exact release tag, for example `v1.1.0` |
-| `DB_PASSWORD` | A new URL-safe password for the local PostgreSQL role |
-| `SESSION_SECRET` | The exact existing Cloud Run secret, including key-rotation order |
-| `RATE_LIMIT_REDIS_URL` | The existing Upstash `rediss://` connection URL |
-| `BACKUP_ENCRYPTION_KEY` | A strong key stored separately from the VM |
+| `OCI_DB_PASSWORD` | URL-safe password for the local PostgreSQL role (16-128 chars) |
+| `OCI_SESSION_SECRET` | GitHub repository secret; same value as the legacy Cloud Run `pto-session-secret` |
+| `OCI_RATE_LIMIT_REDIS_URL` | GitHub repository secret; Upstash `rediss://` connection URL |
+| `OCI_BACKUP_ENCRYPTION_KEY` | GitHub repository secret; strong key for `gpg --symmetric` on daily archives |
 | `OCI_BACKUP_BUCKET` | Private OCI Object Storage bucket name |
 | `OCI_OBJECT_STORAGE_NAMESPACE` | OCI tenancy Object Storage namespace |
 | `OCI_REGION` | Region containing the bucket and VM |
+
+`OCI_DB_PASSWORD`, `OCI_SESSION_SECRET`, `OCI_RATE_LIMIT_REDIS_URL`, and
+`OCI_BACKUP_ENCRYPTION_KEY` are GitHub Actions repository secrets (Settings
+→ Secrets and variables → Actions → Repository secrets). They replace the
+legacy GCP Secret Manager entries; the GCP secrets can be deleted once the
+OCI deploy is healthy. The Supabase backup workflow still reads from GCP
+Secret Manager for `pto-backup-db-url` and `pto-backup-encryption-key`.
 
 The existing `SESSION_SECRET` can be reused. It preserves cryptographic
 compatibility for any cookie that is presented to the new service, although a
@@ -96,10 +103,10 @@ export HOST=pto.example.com
 export CORS_ORIGIN=https://pto.example.com
 export ACME_EMAIL=ops@example.com
 export RELEASE_REF=v1.1.0
-export DB_PASSWORD="$(openssl rand -hex 24)"
-export SESSION_SECRET='<copied-from-cloud-run-secret-manager>'
-export RATE_LIMIT_REDIS_URL='rediss://<upstash-connection-url>'
-export BACKUP_ENCRYPTION_KEY='<strong-key-from-secure-vault>'
+export OCI_SESSION_SECRET='<value of OCI_SESSION_SECRET GitHub secret>'
+export OCI_RATE_LIMIT_REDIS_URL='<value of OCI_RATE_LIMIT_REDIS_URL GitHub secret>'
+export OCI_BACKUP_ENCRYPTION_KEY='<value of OCI_BACKUP_ENCRYPTION_KEY GitHub secret>'
+export OCI_DB_PASSWORD='<value of OCI_DB_PASSWORD GitHub secret>'
 export OCI_BACKUP_BUCKET=pto-calendar-backups
 export OCI_OBJECT_STORAGE_NAMESPACE=<object-storage-namespace>
 export OCI_REGION=<oci-region>
@@ -306,8 +313,13 @@ to a disposable VM or isolated PostgreSQL target, and use the same validation
 steps. Never run the production restore command against a disposable target or
 the disposable restore command against production.
 
-Keep `BACKUP_ENCRYPTION_KEY` in a separate password vault. Losing the VM and
-the key together makes the encrypted backups unrecoverable.
+Keep `OCI_BACKUP_ENCRYPTION_KEY`, `OCI_SESSION_SECRET`, `OCI_DB_PASSWORD`,
+and `OCI_RATE_LIMIT_REDIS_URL` in GitHub repository secrets and mirror them
+into a separate password vault. Losing the VM and the key together makes the
+encrypted backups unrecoverable; losing `OCI_SESSION_SECRET` invalidates
+every browser session; losing `OCI_DB_PASSWORD` requires recovering
+`/opt/pto-calendar/.env` from backup or restoring the database into a new
+container with a fresh password.
 
 ## 6. Disaster recovery and rollback
 

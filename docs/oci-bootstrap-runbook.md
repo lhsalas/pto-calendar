@@ -126,15 +126,21 @@ sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 sudo ufw enable
 
-# Copy infra/deploy/setup.sh from the repo, then run
+# Copy infra/deploy/setup.sh from the repo, then run.
+# All four secrets below are GitHub repository secrets (Settings -> Secrets
+# and variables -> Actions -> Repository secrets):
+#   OCI_SESSION_SECRET          Same value as the legacy Cloud Run pto-session-secret
+#   OCI_BACKUP_ENCRYPTION_KEY   Strong key for gpg --symmetric on daily archives
+#   OCI_RATE_LIMIT_REDIS_URL    Upstash rediss:// connection URL
+#   OCI_DB_PASSWORD             PostgreSQL role password; generate fresh or reuse
 export HOST=pto-calendar.lhsalas.com
 export CORS_ORIGIN=https://pto-calendar.lhsalas.com
 export ACME_EMAIL=ops@example.com
 export RELEASE_REF=v1.1.0
-export DB_PASSWORD="$(openssl rand -hex 24)"
-export SESSION_SECRET='<copied-from-cloud-run-secret-manager>'
-export RATE_LIMIT_REDIS_URL='rediss://<upstash-connection-url>'
-export BACKUP_ENCRYPTION_KEY='<strong-key-from-secure-vault>'
+export OCI_SESSION_SECRET='<value of the OCI_SESSION_SECRET GitHub secret>'
+export OCI_RATE_LIMIT_REDIS_URL='<value of the OCI_RATE_LIMIT_REDIS_URL GitHub secret>'
+export OCI_BACKUP_ENCRYPTION_KEY='<value of the OCI_BACKUP_ENCRYPTION_KEY GitHub secret>'
+export OCI_DB_PASSWORD='<value of the OCI_DB_PASSWORD GitHub secret (16-128 URL-safe chars)>'
 export OCI_BACKUP_BUCKET=pto-calendar-backups
 export OCI_OBJECT_STORAGE_NAMESPACE=$(oci os ns get --auth instance_principal | jq -r .data)
 export OCI_REGION=$(oci iam region-subscription list --auth instance_principal | jq -r '.data[0].region-name')
