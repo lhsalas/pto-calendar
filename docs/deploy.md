@@ -127,11 +127,24 @@ Do not run the development seed in production.
 
 ## 3. Deploying releases
 
-The OCI deployment workflow is `.github/workflows/deploy-oci.yml`. It runs for
-semver tag pushes when the repository variable
-`OCI_PRODUCTION_DEPLOY_ENABLED=true`. It checks that CI succeeded for the
-exact commit, then connects over SSH with a pinned known-hosts file and runs
-the ref-aware deploy script as `deploy`.
+The OCI deployment workflow is `.github/workflows/deploy-oci.yml`. It is
+gated by `OCI_PRODUCTION_DEPLOY_ENABLED=true` and triggers from three
+sources:
+
+- `push: tags: ['v*.*.*']` — fires when a release tag is pushed. Runs the
+  resolve, checkout, and tag-format steps, then attempts to deploy.
+- `workflow_run: workflows: [CI], types: [completed]` — fires when the CI
+  workflow finishes for any push event. The job filters to tag pushes
+  (`refs/tags/v*` or bare `v*.*.*`) and `conclusion=success`; if the filter
+  fails the job exits 0 with a `::notice::` so non-tag events do not block
+  the queue.
+- `workflow_dispatch` — manual deployment. The job still polls the CI check
+  runs API for up to 5 minutes (20 × 15 s) before failing.
+
+Because `workflow_run` runs only after CI completes, the deploy never races
+the CI gate. The CI itself triggers on the same tag push, runs all ten
+checks, and on success hands off to the OCI deploy via the `workflow_run`
+event.
 
 Configure these production repository values:
 

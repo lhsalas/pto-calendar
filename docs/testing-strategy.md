@@ -182,9 +182,10 @@ Additional shipped journeys (frontend enhancements #18–#26):
 
 The test gate is `.github/workflows/ci.yml`. Production deployment is kept in
 separate workflows so the CI gate never receives production credentials. The
-OCI tag workflow (`deploy-oci.yml`) checks for a successful CI run for the exact
-commit before it connects to the VM. The GCP/Firebase workflows are manual-only
-fallbacks.
+OCI tag workflow (`deploy-oci.yml`) is gated by CI through the
+`workflow_run` trigger (it fires when the CI workflow completes for a tag
+push); the `push: tags` and `workflow_dispatch` triggers are retained as
+fallbacks. The GCP/Firebase workflows are manual-only fallbacks.
 
 Jobs (run in order, with `needs:` dependencies):
 
