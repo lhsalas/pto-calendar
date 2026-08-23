@@ -116,9 +116,10 @@ sudo -E bash /tmp/setup.sh
 ```
 
 `setup.sh` installs Docker Engine and Compose, creates the unprivileged
-`deploy` user, checks out the exact release, writes `/opt/pto-calendar/.env`
-with mode `0600`, builds the stack, enables the encrypted backup timer, and
-waits for `/health` and `/ready`.
+`deploy` user, makes a home-installed OCI CLI available to the backup service,
+checks out the exact release, writes `/opt/pto-calendar/.env` with mode `0600`,
+builds the stack, enables the encrypted backup timer, and waits for `/health`
+and `/ready`.
 
 The normal production runtime is the slim image. The Compose `bootstrap`
 profile intentionally uses the build stage because the runtime image does not

@@ -78,6 +78,12 @@ check('OCI restore rejects disposable-target bypass terminology',
 check('OCI restore validates archive basename', /basename.*ARCHIVE|ARCHIVE.*basename/.test(restore));
 check('OCI restore verifies a strict checksum', /sha256sum --check --strict/.test(restore));
 check('OCI restore limits archive members', /archive must contain exactly schema\.sql and data\.sql/.test(restore));
+check('OCI restore strips source-role ownership and ACL metadata',
+  /TARGET_SCHEMA/.test(restore) && /ALTER .* OWNER TO/.test(restore) && /GRANT\|REVOKE/.test(restore));
+check('OCI restore strips unsupported source session metadata',
+  /TARGET_DATA/.test(restore) && /transaction_timeout/.test(restore));
+check('OCI restore recovers a missing target public schema before backup',
+  /CREATE SCHEMA IF NOT EXISTS public/.test(restore));
 check('OCI restore cleans a temporary working directory', /trap cleanup EXIT INT TERM/.test(restore));
 check('OCI backup encrypts with AES-256', /--cipher-algo AES256/.test(backup));
 check('OCI backup uses instance-principal Object Storage auth', /--auth instance_principal/.test(backup));
@@ -85,6 +91,8 @@ check('OCI backup cleans its temporary working directory', /trap cleanup EXIT IN
 check('deployment requires an exact ref', /usage: \$0 <release-ref>/.test(deploy));
 check('deployment can verify an expected commit SHA', /EXPECTED_SHA/.test(deploy));
 check('setup requires a release ref', /require_env RELEASE_REF/.test(setup));
+check('setup exposes a home-installed OCI CLI to deploy',
+  /setfacl/.test(setup) && /usr\/local\/bin\/oci/.test(setup));
 check('setup never enables insecure production cookies', /COOKIE_SECURE=true/.test(setup) && !/INSECURE_COOKIES_ALLOWED=true/.test(setup));
 check('runtime scripts do not sudo back into deploy', !/sudo -u deploy/.test(`${deploy}\n${backup}`));
 

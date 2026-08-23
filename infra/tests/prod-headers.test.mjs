@@ -23,6 +23,9 @@ function check(label, condition) {
 }
 
 console.log('nginx security headers:');
+check('nginx preserves Caddy forwarded protocol',
+  /map\s+\$http_x_forwarded_proto\s+\$upstream_forwarded_proto/.test(nginx) &&
+  /proxy_set_header\s+X-Forwarded-Proto\s+\$upstream_forwarded_proto/.test(nginx));
 check('Content-Security-Policy exists', /add_header\s+Content-Security-Policy\b/.test(nginx));
 const cspHeader = nginx.match(/add_header\s+Content-Security-Policy\s+"([^"]+)"/)?.[1] ?? '';
 check('CSP has no unsafe-inline scripts', !/script-src[^;]*unsafe-inline/.test(cspHeader));
@@ -33,9 +36,10 @@ check('Permissions-Policy disables sensitive features', /Permissions-Policy\s+.*
 check('X-Frame-Options is DENY', /X-Frame-Options\s+"DENY"/.test(nginx));
 check('nginx does not duplicate HSTS', !/add_header\s+Strict-Transport-Security/.test(nginx));
 
-for (const route of ['auth', 'pto', 'holidays']) {
+for (const route of ['auth', 'pto', 'holidays', 'users']) {
   const block = new RegExp(`location \\~ \\^/${route}[^\\{]*\\{[\\s\\S]*?\\n  \\}`);
-  check(`${route} proxy forwards X-Forwarded-Proto`, block.test(nginx) && /X-Forwarded-Proto/.test(nginx.match(block)?.[0] ?? ''));
+  check(`${route} proxy preserves X-Forwarded-Proto`,
+    block.test(nginx) && /X-Forwarded-Proto\s+\$upstream_forwarded_proto/.test(nginx.match(block)?.[0] ?? ''));
   check(`${route} proxy forwards X-Forwarded-Host`, block.test(nginx) && /X-Forwarded-Host/.test(nginx.match(block)?.[0] ?? ''));
 }
 
