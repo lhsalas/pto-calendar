@@ -3,6 +3,9 @@ name: Deploy OCI production
 on:
   push:
     tags: ['v*.*.*']
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
   workflow_dispatch:
     inputs:
       ref:
@@ -32,18 +35,51 @@ jobs:
     timeout-minutes: 15
     environment: production
     steps:
-      - name: Check out the target ref
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ github.event_name == 'push' && github.ref || inputs.ref }}
-          persist-credentials: false
-
       - name: Resolve and validate target
         id: target
         env:
-          TARGET_REF: ${{ github.event_name == 'push' && github.ref_name || inputs.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_EVENT: ${{ github.event.workflow_run.event }}
+          WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          DISPATCH_REF: ${{ inputs.ref }}
+          PUSH_REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          TARGET_REF=""
+          TARGET_SHA=""
+
+          case "${EVENT_NAME}" in
+            push)
+              TARGET_REF="${PUSH_REF_NAME}"
+              ;;
+            workflow_run)
+              # Only deploy when CI completed successfully for a tag push.
+              if [[ "${WORKFLOW_RUN_CONCLUSION}" != "success" ]]; then
+                echo "::error::CI conclusion for upstream run is '${WORKFLOW_RUN_CONCLUSION}'; aborting deploy."
+                exit 1
+              fi
+              if [[ "${WORKFLOW_RUN_EVENT}" != "push" ]]; then
+                echo "::notice::Upstream CI ran for event '${WORKFLOW_RUN_EVENT}'; skipping deploy (only push events are deployable)."
+                exit 0
+              fi
+              if [[ "${WORKFLOW_RUN_HEAD_BRANCH}" != refs/tags/v* ]]; then
+                echo "::notice::Upstream CI ran for branch '${WORKFLOW_RUN_HEAD_BRANCH}'; skipping deploy (only tag pushes are deployable)."
+                exit 0
+              fi
+              TARGET_REF="${WORKFLOW_RUN_HEAD_BRANCH#refs/tags/}"
+              TARGET_SHA="${WORKFLOW_RUN_HEAD_SHA}"
+              ;;
+            workflow_dispatch)
+              TARGET_REF="${DISPATCH_REF}"
+              ;;
+            *)
+              echo "::error::Unsupported event '${EVENT_NAME}'."
+              exit 1
+              ;;
+          esac
+
           if [[ -z "${TARGET_REF}" || ! "${TARGET_REF}" =~ ^[A-Za-z0-9._/-]+$ || "${TARGET_REF}" == -* || "${TARGET_REF}" == *..* ]]; then
             echo "::error::Target ref contains unsafe characters."
             exit 1
@@ -56,10 +92,30 @@ jobs:
             echo "::error::OCI_DEPLOY_USER is invalid."
             exit 1
           fi
-          TARGET_SHA="$(git rev-parse HEAD)"
+
           echo "target_ref=${TARGET_REF}" >> "${GITHUB_OUTPUT}"
+          # For push events the SHA comes from the checkout below.
+          if [[ -n "${TARGET_SHA}" ]]; then
+            echo "target_sha=${TARGET_SHA}" >> "${GITHUB_OUTPUT}"
+          fi
+          echo "Deploy target ${TARGET_REF}."
+
+      - name: Check out the target ref
+        if: github.event_name != 'workflow_run'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ steps.target.outputs.target_ref }}
+          persist-credentials: false
+
+      - name: Resolve target SHA for push / dispatch events
+        id: resolve_sha
+        if: github.event_name != 'workflow_run'
+        env:
+          TARGET_REF: ${{ steps.target.outputs.target_ref }}
+        run: |
+          set -euo pipefail
+          TARGET_SHA="$(git rev-parse HEAD)"
           echo "target_sha=${TARGET_SHA}" >> "${GITHUB_OUTPUT}"
-          echo "Deploy target ${TARGET_REF} resolves to ${TARGET_SHA}."
 
       - name: Validate tag format
         if: github.event_name == 'push'
@@ -71,8 +127,9 @@ jobs:
           fi
 
       - name: Verify CI succeeded for this commit
+        if: github.event_name == 'workflow_dispatch'
         env:
-          TARGET_SHA: ${{ steps.target.outputs.target_sha }}
+          TARGET_SHA: ${{ steps.resolve_sha.outputs.target_sha }}
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
@@ -89,7 +146,8 @@ jobs:
               'Docker smoke (app:up)',
               'Coverage gate',
             ];
-            for (let attempt = 1; attempt <= 6; attempt += 1) {
+            const MAX_ATTEMPTS = 20;
+            for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
               const response = await github.rest.checks.listForRef({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -97,8 +155,7 @@ jobs:
                 per_page: 100,
               });
               const checks = (response.data.check_runs || []).filter(
-                (run) =>
-                  run.app && run.app.slug === 'github-actions',
+                (run) => run.app && run.app.slug === 'github-actions',
               );
               const ciChecks = checks.filter((run) =>
                 CI_JOB_NAMES.includes(run.name),
@@ -111,13 +168,12 @@ jobs:
               );
               if (failures.length >= 1) {
                 core.setFailed(
-                  `CI failed for ${sha}: ${failures
-                    .map((run) => run.name)
-                    .join(', ')}; aborting deploy.`,
+                  `CI failed for ${sha}: ${failures.map((run) => run.name).join(', ')}; aborting deploy.`,
                 );
                 return;
               }
-              const allDone = ciChecks.length >= CI_JOB_NAMES.length &&
+              const allDone =
+                ciChecks.length >= CI_JOB_NAMES.length &&
                 ciChecks.every((run) => run.status === 'completed');
               const allSuccess = ciChecks.every(
                 (run) => run.conclusion === 'success',
@@ -126,17 +182,19 @@ jobs:
                 core.info(`CI succeeded for ${sha}.`);
                 return;
               }
-              core.notice(
-                `No completed CI run for ${sha} yet (${attempt}/6); sleeping 15s.`,
-              );
-              await new Promise((resolve) => setTimeout(resolve, 15000));
+              if (attempt < MAX_ATTEMPTS) {
+                core.notice(
+                  `No completed CI run for ${sha} yet (${attempt}/${MAX_ATTEMPTS}); sleeping 15s.`,
+                );
+                await new Promise((resolve) => setTimeout(resolve, 15000));
+              }
             }
             core.setFailed(`No successful CI run found for ${sha}.`);
 
       - name: Deploy exact ref on OCI
         env:
           TARGET_REF: ${{ steps.target.outputs.target_ref }}
-          TARGET_SHA: ${{ steps.target.outputs.target_sha }}
+          TARGET_SHA: ${{ steps.target.outputs.target_sha || steps.resolve_sha.outputs.target_sha }}
           OCI_KNOWN_HOSTS: ${{ secrets.OCI_KNOWN_HOSTS }}
           OCI_SSH_PRIVATE_KEY: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
         run: |
