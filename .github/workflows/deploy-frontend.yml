@@ -17,6 +17,7 @@ env:
   GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
   GCP_REGION: ${{ vars.GCP_REGION }}
   FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+  OCI_HOST: ${{ vars.OCI_HOST }}
   CLOUD_RUN_SERVICE: pto-api
 
 jobs:
@@ -84,10 +85,22 @@ jobs:
           set -euo pipefail
           SITE_URL="https://${FIREBASE_PROJECT_ID}.web.app"
           echo "Fetching SPA root from ${SITE_URL}"
-          curl --fail --silent --show-error --max-time 30 "${SITE_URL}/" -o /tmp/index.html
-          grep -q 'id="root"' /tmp/index.html
-          echo "SPA index served; /auth/* and /health are reachable from the SPA origin:"
-          curl --fail --silent --show-error --max-time 30 "${SITE_URL}/auth/me" -o /dev/null
-          SERVICE_URL="${{ steps.backend.outputs.service_url }}"
-          echo "Cross-origin smoke: SPA -> Cloud Run /health"
-          curl --fail --silent --show-error --max-time 30 -H "Origin: ${SITE_URL}" "${SERVICE_URL}/health"
+          RESPONSE="$(curl --silent --show-error --max-time 30 --output /tmp/firebase-root --write-out '%{http_code} %{redirect_url}' "${SITE_URL}/")"
+          HTTP_CODE="${RESPONSE%% *}"
+          REDIRECT_URL="${RESPONSE#* }"
+          if [[ "${HTTP_CODE}" =~ ^30[1278]$ ]]; then
+            EXPECTED_REDIRECT="https://${OCI_HOST}"
+            if [[ "${REDIRECT_URL}" != "${EXPECTED_REDIRECT}" && "${REDIRECT_URL}" != "${EXPECTED_REDIRECT}/" ]]; then
+              echo "::error::Firebase redirected to unexpected destination: ${REDIRECT_URL}"
+              exit 1
+            fi
+            echo "Temporary Firebase redirect verified: ${REDIRECT_URL}"
+          else
+            [[ "${HTTP_CODE}" == "200" ]]
+            grep -q 'id="root"' /tmp/firebase-root
+            echo "SPA index served; /auth/* and /health are reachable from the SPA origin:"
+            curl --fail --silent --show-error --max-time 30 "${SITE_URL}/auth/me" -o /dev/null
+            SERVICE_URL="${{ steps.backend.outputs.service_url }}"
+            echo "Cross-origin smoke: SPA -> Cloud Run /health"
+            curl --fail --silent --show-error --max-time 30 -H "Origin: ${SITE_URL}" "${SERVICE_URL}/health"
+          fi
