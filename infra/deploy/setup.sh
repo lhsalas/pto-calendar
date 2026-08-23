@@ -179,6 +179,27 @@ require_tool git
 require_tool docker
 docker compose version >/dev/null 2>&1 || fail "Docker Compose plugin is unavailable"
 
+# --- Harden sshd ----------------------------------------------------------
+# Port 22 is open to the world because the operator's public IP is dynamic.
+# Disable password authentication and root login, and limit which accounts
+# may sign in so an internet-wide sshd remains safe in practice.
+SSHD_DROP_IN=/etc/ssh/sshd_config.d/99-pto-calendar.conf
+install -d -m 0755 /etc/ssh/sshd_config.d
+cat > "${SSHD_DROP_IN}" <<'EOF'
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+PubkeyAuthentication yes
+AllowUsers deploy ubuntu
+EOF
+chmod 0644 "${SSHD_DROP_IN}"
+if command -v sshd >/dev/null 2>&1; then
+  if ! sshd -t -f /etc/ssh/sshd_config >/dev/null 2>&1; then
+    fail "sshd config validation failed; check ${SSHD_DROP_IN}"
+  fi
+  systemctl reload ssh || systemctl reload sshd || true
+fi
+
 # --- Create deploy user ----------------------------------------------------
 if ! id -u deploy >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash deploy

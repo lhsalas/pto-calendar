@@ -23,6 +23,7 @@ concurrency:
 
 env:
   OCI_HOST: ${{ vars.OCI_HOST }}
+  OCI_SSH_HOST: ${{ secrets.OCI_SSH_HOST }}
   OCI_DEPLOY_USER: ${{ vars.OCI_DEPLOY_USER || 'deploy' }}
 
 jobs:
@@ -88,6 +89,10 @@ jobs:
             fi
             if [[ -z "${OCI_HOST}" || ! "${OCI_HOST}" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
               echo "::error::OCI_HOST must be a bare hostname repository variable."
+              exit 1
+            fi
+            if [[ -z "${OCI_SSH_HOST}" ]]; then
+              echo "::error::OCI_SSH_HOST (secret) must be the OCI reserved public IP."
               exit 1
             fi
             if [[ -z "${OCI_DEPLOY_USER}" || ! "${OCI_DEPLOY_USER}" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]; then
@@ -219,7 +224,7 @@ jobs:
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="${HOME}/.ssh/known_hosts" \
-            "${OCI_DEPLOY_USER}@${OCI_HOST}" \
+            "${OCI_DEPLOY_USER}@${OCI_SSH_HOST}" \
             "${REMOTE_COMMAND}"
 
       - name: Smoke-test OCI deployment

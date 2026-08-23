@@ -148,13 +148,19 @@ event.
 
 Configure these production repository values:
 
-| Variable or secret | Purpose |
-|---|---|
-| `OCI_PRODUCTION_DEPLOY_ENABLED` | Explicit OCI deployment switch |
-| `OCI_HOST` | OCI public hostname |
-| `OCI_DEPLOY_USER` | Usually `deploy` |
-| `OCI_KNOWN_HOSTS` | Pinned SSH host key entry |
-| `OCI_SSH_PRIVATE_KEY` | Dedicated deploy key |
+| Variable or secret | Type | Purpose |
+|---|---|---|
+| `OCI_PRODUCTION_DEPLOY_ENABLED` | variable | Explicit OCI deployment switch |
+| `OCI_HOST` | variable | OCI public hostname (used by HTTP smoke tests and Caddy/CORS) |
+| `OCI_DEPLOY_USER` | variable | Usually `deploy`; set to `ubuntu` for the first-time setup.sh run |
+| `OCI_KNOWN_HOSTS` | secret | Pinned SSH host key entry |
+| `OCI_SSH_HOST` | secret | OCI reserved public IP used to open the SSH connection |
+| `OCI_SSH_PRIVATE_KEY` | secret | Dedicated deploy key (private) |
+
+`OCI_HOST` and `OCI_SSH_HOST` are intentionally separate: the production
+hostname points at the reserved IP via DNS and is reachable on ports 80 and
+443 only, while the deploy workflow SSHes directly to the IP. This keeps the
+TLS termination path simple and avoids depending on DNS for the deploy.
 
 The three GCP workflows remain manual-only and are gated by
 `GCP_FALLBACK_DEPLOY_ENABLED`. This prevents a release tag from deploying to
@@ -163,7 +169,7 @@ both platforms.
 Deploy a release manually on the VM:
 
 ```bash
-ssh deploy@pto.example.com
+ssh deploy@<reserved-public-ip>
 cd /opt/pto-calendar
 ./infra/deploy/deploy.sh v1.1.0
 ```

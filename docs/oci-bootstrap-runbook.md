@@ -115,9 +115,13 @@ ssh deploy@pto-calendar.lhsalas.com
 sudo apt-get update -qq
 sudo apt-get install -y --no-install-recommends ca-certificates curl git gnupg openssl ufw
 
-# Optional hardening before deploy
+# Optional hardening before deploy.
+# Port 22 stays open to the world because the operator's public IP is dynamic.
+# The OCI reserved public IP and a key-only sshd config keep it safe in
+# practice (PasswordAuthentication no, KbdInteractiveAuthentication no,
+# PermitRootLogin no, AllowUsers deploy ubuntu).
 sudo ufw default deny incoming
-sudo ufw allow from <admin-ip> to any port 22 proto tcp
+sudo ufw allow 22/tcp
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 sudo ufw enable
