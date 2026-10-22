@@ -20,7 +20,7 @@
     "lucide-react": "^1.22.0",
     "motion": "^12.42.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
@@ -32,7 +32,7 @@
     "@testing-library/user-event": "^14.5.2",
     "@types/node": "^24.13.3",
     "@types/react": "^18.3.17",
-    "@types/react-dom": "^18.3.5",
+    "@types/react-dom": "^19.3.0",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
     "@vitejs/plugin-react": "^6.1.2",
