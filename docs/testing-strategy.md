@@ -217,9 +217,10 @@ Jobs (run in order, with `needs:` dependencies):
 | 5 | `test-frontend` | ubuntu-latest | — | vitest run frontend, coverage |
 | 6 | `build` | ubuntu-latest | lint, typecheck | build backend + frontend |
 | 7 | `deployment-config` | ubuntu-latest | lint, typecheck | validate Firebase/GCP fallback configuration, OCI Compose/Caddy headers, deployment scripts, workflow guards, supply-chain pins, and the Node.js runtime baseline |
-| 8 | `e2e` | ubuntu-latest + postgres service | build | playwright install, playwright test, upload trace/video on failure |
-| 9 | `docker-smoke` | ubuntu-latest | build | start the all-in-one compose stack, poll `/health`, assert the images run the supported Node.js baseline, login + validate auto-seeded holidays + validate the seed endpoint, tear down with `-v` |
-| 10 | `coverage-gate` | ubuntu-latest | 4, 5 | enforce thresholds; post coverage diff as PR comment |
+| 8 | `security` | ubuntu-latest | — | audit the locked npm graphs, scan the pinned production base images for OS and runtime vulnerabilities |
+| 9 | `e2e` | ubuntu-latest + postgres service | build | playwright install, playwright test, upload trace/video on failure |
+| 10 | `docker-smoke` | ubuntu-latest | build | start the all-in-one compose stack, poll `/health`, assert the images run the supported Node.js baseline, login + validate auto-seeded holidays + validate the seed endpoint, tear down with `-v` |
+| 11 | `coverage-gate` | ubuntu-latest | 4, 5 | enforce thresholds; post coverage diff as PR comment |
 
 ### 10.1a Node.js runtime baseline
 
@@ -247,6 +248,8 @@ newer 24.x security release ships.
 - `pull_request`: full pipeline.
 - `push` to `master`: full pipeline.
 - `push` of a semver `v*.*.*` tag: full pipeline for release gating.
+- `schedule` (Mondays, 06:30 UTC): full pipeline, so a newly disclosed advisory
+  in the unchanged lockfile or in a pinned image is noticed without a commit.
 - Supabase backups run in the separate `database-backup.yml` workflow.
 
 ### 10.3 Caching
@@ -254,8 +257,10 @@ newer 24.x security release ships.
 
 ### 10.4 Required status checks
 `lint`, `typecheck`, `test-backend-unit`, `test-backend-integration`,
-`test-frontend`, `deployment-config`, `e2e`, `docker-smoke`, and
-`coverage-gate` must all pass before merge to `master`.
+`test-frontend`, `deployment-config`, `security`, `e2e`, `docker-smoke`, and
+`coverage-gate` must all pass before merge to `master`. The OCI deployment
+workflow lists the same job names, so a release cannot be tagged around a
+failing check.
 
 ### 10.5 Secrets
 - `DATABASE_URL` for the Postgres service container (set per job, never from repo secrets).
@@ -263,6 +268,40 @@ newer 24.x security release ships.
   `OCI_DEPLOY_USER`, `OCI_KNOWN_HOSTS`, and `OCI_SSH_PRIVATE_KEY`; the OCI
   workflow has no OIDC permission.
 - No real user data in CI; seed only.
+
+### 10.6 Vulnerability scanning
+
+The `security` job runs two read-only checks. Neither needs a secret, so it is
+safe on a pull request from a fork.
+
+1. **npm dependency audit** — `node infra/security/audit.mjs` audits the
+   production graph (`--omit=dev`) and the development graph separately from
+   the lockfile. A high or critical finding fails the job in either graph;
+   lower severities are printed. A scanner failure (registry unreachable,
+   unreadable lockfile, malformed report) fails the job rather than passing
+   silently, because a scan that did not run is not a clean result.
+2. **Container image scan** — Trivy scans each pinned production base image
+   (`node infra/security/production-images.mjs` reads the digests out of the
+   Dockerfiles and the production compose file, so the list cannot drift from
+   what is deployed). The scan targets `linux/arm64`, which is the production
+   platform. Findings that are high or critical and have a published fix fail
+   the job; unfixed findings are reported but do not block, because there is
+   nothing to upgrade to.
+
+The scheduled run repeats both checks against the unchanged lockfile and the
+unchanged digests, which is what catches an advisory that is published after a
+release.
+
+`.github/dependabot.yml` opens reviewed pull requests for npm, Docker and
+GitHub Actions updates. Dependabot never publishes a release and never edits a
+digest or an action pin on its own: the pipeline still requires images to be
+pinned by digest and release actions to be pinned to a commit SHA.
+
+Repository vulnerability alerts are enabled, so the advisory database is
+watched in the GitHub UI as well.
+
+Any exception to the policy names the advisory or image, the actual exposure
+assessment, an owner and an expiry date.
 
 ## 11. Pre-commit & Local Hooks
 

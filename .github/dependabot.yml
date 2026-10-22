@@ -1,0 +1,77 @@
+# Reviewed dependency update notifications.
+#
+# The pipeline still enforces the immutability rules: the container images
+# stay pinned by digest and the release actions stay pinned to a commit SHA.
+# Dependabot only opens a pull request for a review; it never publishes a
+# release or changes a pin on its own.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - area:chore
+    groups:
+      # Runtime and test tooling move together; the lockfile is shared.
+      npm-dependencies:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directory: '/backend'
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - area:infra
+    groups:
+      backend-base-image:
+        patterns:
+          - '*'
+
+  - package-ecosystem: docker
+    directory: '/frontend'
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - area:infra
+    groups:
+      frontend-base-image:
+        patterns:
+          - '*'
+
+  - package-ecosystem: docker
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - area:infra
+    groups:
+      compose-base-images:
+        patterns:
+          - '*'
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - area:chore
+    groups:
+      github-actions:
+        patterns:
+          - '*'

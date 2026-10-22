@@ -16,6 +16,11 @@ const files = {
   schemaSanitizer: resolve(root, 'infra/deploy/sql-sanitize-schema.sed'),
   dataSanitizer: resolve(root, 'infra/deploy/sql-sanitize-data.sed'),
   genericRestore: resolve(root, 'bin/restore-backup.mjs'),
+  auditScript: resolve(root, 'infra/security/audit.mjs'),
+  productionImagesScript: resolve(root, 'infra/security/production-images.mjs'),
+  ciWorkflow: resolve(root, '.github/workflows/ci.yml'),
+  deployWorkflow: resolve(root, '.github/workflows/deploy-oci.yml'),
+  dependabotConfig: resolve(root, '.github/dependabot.yml'),
   service: resolve(root, 'infra/db/pto-calendar-backup.service'),
   timer: resolve(root, 'infra/db/pto-calendar-backup.timer'),
   compose: resolve(root, 'docker-compose.prod.yml'),
@@ -116,6 +121,23 @@ check('setup exposes a home-installed OCI CLI to deploy',
   /setfacl/.test(setup) && /usr\/local\/bin\/oci/.test(setup));
 check('setup never enables insecure production cookies', /COOKIE_SECURE=true/.test(setup) && !/INSECURE_COOKIES_ALLOWED=true/.test(setup));
 check('runtime scripts do not sudo back into deploy', !/sudo -u deploy/.test(`${deploy}\n${backup}`));
+
+console.log('\nVulnerability scan contract:');
+check('npm audit script exists', existsSync(files.auditScript));
+check('production image script exists', existsSync(files.productionImagesScript));
+if (existsSync(files.ciWorkflow)) {
+  const ci = readFileSync(files.ciWorkflow, 'utf8');
+  check('CI runs a security job', /^ {2}security:$/m.test(ci));
+  check('CI security job audits the npm graphs', /infra\/security\/audit\.mjs/.test(ci));
+  check('CI security job scans the production images', /infra\/security\/production-images\.mjs/.test(ci));
+  check('CI security job targets the production platform', /--platform linux\/arm64/.test(ci));
+  check('CI is scheduled so advisories are noticed without a commit', /^ {2}schedule:$/m.test(ci));
+}
+if (existsSync(files.deployWorkflow)) {
+  const deployWorkflow = readFileSync(files.deployWorkflow, 'utf8');
+  check('the OCI deployment waits for the security job', /'Security scan'/.test(deployWorkflow));
+}
+check('Dependabot configuration exists', existsSync(files.dependabotConfig));
 
 console.log('\nSystemd units:');
 for (const [name, file] of [['service', files.service], ['timer', files.timer]]) {
