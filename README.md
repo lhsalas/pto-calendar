@@ -259,3 +259,5 @@ requests.
 - Postman / Insomnia collection (the OpenAPI contract at `docs/openapi.yaml` is the source of truth; importable into either tool)
 - Seed data script (already shipped as `npm run db:seed -w backend`; idempotent and re-runnable)
 - Storybook for the frontend component library
+
+## Test CI
