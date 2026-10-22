@@ -23,8 +23,8 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
           cache: npm
@@ -36,8 +36,8 @@ jobs:
     name: Typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
           cache: npm
@@ -51,8 +51,8 @@ jobs:
       DATABASE_URL: postgresql://placeholder@localhost:5432/placeholder?schema=public
       SESSION_SECRET: ci-session-secret-that-is-long-enough-for-tests
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
           cache: npm
@@ -81,8 +81,8 @@ jobs:
       DATABASE_URL: postgresql://pto:pto@localhost:5432/pto_test?schema=public
       SESSION_SECRET: ci-session-secret-that-is-long-enough-for-tests
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
           cache: npm
@@ -94,7 +94,7 @@ jobs:
       - run: npm run test:integration:coverage -w backend
       - name: Upload coverage
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-coverage
           path: backend/coverage
@@ -103,8 +103,8 @@ jobs:
     name: Frontend tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
           cache: npm
@@ -112,7 +112,7 @@ jobs:
       - run: npm run test:coverage -w frontend
       - name: Upload coverage
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-coverage
           path: frontend/coverage
@@ -122,8 +122,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint, typecheck]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
           cache: npm
@@ -136,8 +136,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint, typecheck]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
           cache: npm
@@ -295,6 +295,7 @@ jobs:
       - name: Validate privileged OpenCode workflow
         run: |
           python3 - <<'PY'
+          import re
           from pathlib import Path
 
           workflow = Path('.github/workflows/opencode.yml').read_text()
@@ -303,13 +304,17 @@ jobs:
               "github.event.comment.author_association == 'MEMBER'",
               'environment: opencode',
               'id-token: none',
-              'actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803',
-              'anomalyco/opencode/github@a3b97d9090ccf4aa9ac32268486283e3131e36b4',
               'github.event.repository.default_branch',
           ]
           missing = [item for item in required if item not in workflow]
           if missing:
               raise SystemExit(f'Missing OpenCode security control: {missing}')
+          # The third-party actions must be pinned to an immutable commit. The
+          # specific commit is not fixed here, so a reviewed pin bump does not
+          # break the build.
+          for action in ('actions/checkout', 'anomalyco/opencode/github'):
+              if not re.search(re.escape(action) + r'@[0-9a-f]{40}', workflow):
+                  raise SystemExit(f'OpenCode workflow must pin {action} to a commit SHA')
           if '@latest' in workflow or 'id-token: write' in workflow:
               raise SystemExit('OpenCode workflow contains a mutable or excessive privilege')
           PY
@@ -320,13 +325,13 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
       - name: Audit the locked npm dependency graphs
         run: node infra/security/audit.mjs
-      - uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
+      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
       - name: Scan the pinned production base images
         run: |
           set -euo pipefail
@@ -370,8 +375,8 @@ jobs:
       RATE_LIMIT_MAX: '10000'
       AUTH_RATE_LIMIT_MAX: '1000'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: '.nvmrc'
           cache: npm
@@ -401,13 +406,13 @@ jobs:
         run: tail -n 100 /tmp/e2e-logs/backend.log
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: frontend/playwright-report
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-test-results
           path: frontend/test-results
@@ -417,7 +422,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build and start all-in-one compose
         run: |
           docker compose -f docker-compose.app.yml up --build -d
@@ -477,14 +482,14 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test-backend-unit, test-backend-integration, test-frontend]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Download backend coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: backend-coverage
           path: backend/coverage
       - name: Download frontend coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: frontend-coverage
           path: frontend/coverage

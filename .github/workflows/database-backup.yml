@@ -39,7 +39,7 @@ jobs:
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
 
       - name: Set up Supabase CLI
-        uses: supabase/setup-cli@aa3515eac405eac768fa4a72147c22d88a283c7b # main
+        uses: supabase/setup-cli@bea637206310b05056109c4ffab256b2c3c522af # main
         with:
           version: latest
 
