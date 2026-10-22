@@ -164,6 +164,24 @@ ENCRYPTION_KEY='<passphrase>' \
     --allow-disposable-target
 ```
 
+### Target-incompatible SQL
+
+A dump taken from one database can reference roles and settings that the
+restore target does not have. The rules that remove them live in two shared
+files, `infra/deploy/sql-sanitize-schema.sed` and
+`infra/deploy/sql-sanitize-data.sed`, and are applied by the production OCI
+restore (`infra/deploy/restore-oci.sh`), the generic disposable restore
+(`bin/restore-backup.mjs`), and the backup roundtrip integration test, so the
+three cannot drift apart.
+
+They remove source-role metadata (`SET ROLE`, `ALTER ... OWNER TO`,
+`ALTER DEFAULT PRIVILEGES`, `GRANT`/`REVOKE`) and the `transaction_timeout`
+setting. The last one matters because `transaction_timeout` is a PostgreSQL 17
+setting: a `pg_dump` client that is newer than the server emits it even when
+the server is PostgreSQL 16, and the target then fails with `unrecognized
+configuration parameter "transaction_timeout"`. Keep the client and server
+versions in mind when a restore fails to apply.
+
 The manual equivalent:
 
 ```bash
@@ -180,8 +198,13 @@ tar -xzf pto-<timestamp>.tar.gz
 
 # Drop the public schema so the dump's CREATE SCHEMA public can run.
 psql "$TARGET_DATABASE_URL" -c 'DROP SCHEMA public CASCADE;'
-psql "$TARGET_DATABASE_URL" --variable=ON_ERROR_STOP=1 --file schema.sql
-psql "$TARGET_DATABASE_URL" --variable=ON_ERROR_STOP=1 --file data.sql
+
+# Strip statements the target cannot parse or does not have roles for.
+sed -E -f infra/deploy/sql-sanitize-schema.sed schema.sql > schema-target.sql
+sed -E -f infra/deploy/sql-sanitize-data.sed data.sql > data-target.sql
+
+psql "$TARGET_DATABASE_URL" --variable=ON_ERROR_STOP=1 --file schema-target.sql
+psql "$TARGET_DATABASE_URL" --variable=ON_ERROR_STOP=1 --file data-target.sql
 ```
 
 The drop step is required because the pg_dump output includes

@@ -13,6 +13,9 @@ const files = {
   deploy: resolve(root, 'infra/deploy/deploy.sh'),
   backup: resolve(root, 'infra/deploy/backup.sh'),
   restore: resolve(root, 'infra/deploy/restore-oci.sh'),
+  schemaSanitizer: resolve(root, 'infra/deploy/sql-sanitize-schema.sed'),
+  dataSanitizer: resolve(root, 'infra/deploy/sql-sanitize-data.sed'),
+  genericRestore: resolve(root, 'bin/restore-backup.mjs'),
   service: resolve(root, 'infra/db/pto-calendar-backup.service'),
   timer: resolve(root, 'infra/db/pto-calendar-backup.timer'),
   compose: resolve(root, 'docker-compose.prod.yml'),
@@ -79,9 +82,27 @@ check('OCI restore validates archive basename', /basename.*ARCHIVE|ARCHIVE.*base
 check('OCI restore verifies a strict checksum', /sha256sum --check --strict/.test(restore));
 check('OCI restore limits archive members', /archive must contain exactly schema\.sql and data\.sql/.test(restore));
 check('OCI restore strips source-role ownership and ACL metadata',
-  /TARGET_SCHEMA/.test(restore) && /ALTER .* OWNER TO/.test(restore) && /GRANT\|REVOKE/.test(restore));
+  /TARGET_SCHEMA/.test(restore) && /sql-sanitize-schema\.sed/.test(restore));
 check('OCI restore strips unsupported source session metadata',
-  /TARGET_DATA/.test(restore) && /transaction_timeout/.test(restore));
+  /TARGET_DATA/.test(restore) && /sql-sanitize-data\.sed/.test(restore));
+
+console.log('\nShared SQL sanitizer contract:');
+for (const [name, file] of [['schema', files.schemaSanitizer], ['data', files.dataSanitizer]]) {
+  check(`${name} sanitizer file exists`, existsSync(file));
+  if (!existsSync(file)) continue;
+  const rules = readFileSync(file, 'utf8');
+  check(`${name} sanitizer removes transaction_timeout`, /SET transaction_timeout\[\[:space:\]\]\*=/.test(rules));
+}
+if (existsSync(files.schemaSanitizer)) {
+  const rules = readFileSync(files.schemaSanitizer, 'utf8');
+  check('schema sanitizer removes SET ROLE', /SET ROLE /.test(rules));
+  check('schema sanitizer removes ALTER ... OWNER TO', /ALTER \.\* OWNER TO/.test(rules));
+  check('schema sanitizer removes ALTER DEFAULT PRIVILEGES', /ALTER DEFAULT PRIVILEGES/.test(rules));
+  check('schema sanitizer removes GRANT/REVOKE', /\(GRANT\|REVOKE\)/.test(rules));
+}
+const genericRestore = readFileSync(files.genericRestore, 'utf8');
+check('generic disposable restore uses the shared sanitizers',
+  /sql-sanitize-schema\.sed/.test(genericRestore) && /sql-sanitize-data\.sed/.test(genericRestore));
 check('OCI restore recovers a missing target public schema before backup',
   /CREATE SCHEMA IF NOT EXISTS public/.test(restore));
 check('OCI restore cleans a temporary working directory', /trap cleanup EXIT INT TERM/.test(restore));

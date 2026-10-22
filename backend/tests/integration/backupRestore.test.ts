@@ -5,6 +5,10 @@ import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 
+const repoRoot = join(import.meta.dirname, '..', '..', '..');
+const SCHEMA_SANITIZER = join(repoRoot, 'infra/deploy/sql-sanitize-schema.sed');
+const DATA_SANITIZER = join(repoRoot, 'infra/deploy/sql-sanitize-data.sed');
+
 const SOURCE_URL =
   process.env.BACKUP_TEST_SOURCE_URL ??
   'postgresql://pto:pto@localhost:5432/pto_test?schema=public';
@@ -95,6 +99,24 @@ function runSql(sql: string): void {
     ],
     sql,
   );
+}
+
+// A dump taken from another database can reference roles and settings the
+// target does not have. The rules are shared with the production OCI restore
+// (infra/deploy/restore-oci.sh) so the two cannot drift apart.
+function sanitizeSql(sourcePath: string, sanitizerPath: string): string {
+  expect(existsSync(sanitizerPath)).toBe(true);
+  const result = spawnSync('sed', ['-E', '-f', sanitizerPath, sourcePath], {
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `sed -E -f ${sanitizerPath} failed (status=${result.status}): ${result.stderr}`,
+    );
+  }
+  expect(result.stdout.length).toBeGreaterThan(0);
+  return result.stdout;
 }
 
 function resetTarget(): void {
@@ -367,9 +389,12 @@ describe('database backup → restore roundtrip', () => {
 
       // Drop schema before applying; pg_dump's schema dump includes
       // CREATE SCHEMA public, which fails when public already exists.
+      // The dumps are sanitized with the same rules the production OCI
+      // restore uses, so a dump taken by a newer pg_dump client (which emits
+      // PostgreSQL 17-only settings) still applies to a PostgreSQL 16 target.
       resetTarget();
-      runSql(readFileSync(restoredSchema, 'utf8'));
-      runSql(readFileSync(restoredData, 'utf8'));
+      runSql(sanitizeSql(restoredSchema, SCHEMA_SANITIZER));
+      runSql(sanitizeSql(restoredData, DATA_SANITIZER));
 
       const tables = ['users', 'pto_requests', 'audit_logs'];
       for (const table of tables) {
@@ -384,4 +409,38 @@ describe('database backup → restore roundtrip', () => {
     },
     120_000,
   );
+
+  it('strips target-incompatible statements from a dump taken by a newer client', () => {
+    const source = [
+      'SET transaction_timeout = 0;',
+      'SET ROLE source_admin;',
+      'ALTER TABLE public.users OWNER TO source_admin;',
+      'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO source_admin;',
+      'GRANT ALL ON TABLE public.users TO source_admin;',
+      'REVOKE ALL ON TABLE public.users FROM source_admin;',
+      'CREATE TABLE public.sanitizer_probe (id integer);',
+    ].join('\n');
+
+    const schemaPath = join(tmpdir(), `pto-sanitize-schema-${process.pid}.sql`);
+    writeFileSync(schemaPath, source);
+    const sanitized = sanitizeSql(schemaPath, SCHEMA_SANITIZER);
+    rmSync(schemaPath, { force: true });
+
+    expect(sanitized).not.toContain('transaction_timeout');
+    expect(sanitized).not.toContain('SET ROLE');
+    expect(sanitized).not.toContain('OWNER TO');
+    expect(sanitized).not.toContain('ALTER DEFAULT PRIVILEGES');
+    expect(sanitized).not.toContain('GRANT');
+    expect(sanitized).not.toContain('REVOKE');
+    expect(sanitized).toContain('CREATE TABLE public.sanitizer_probe');
+
+    const dataSource = ['SET transaction_timeout = 0;', 'SELECT 1;'].join('\n');
+    const dataPath = join(tmpdir(), `pto-sanitize-data-${process.pid}.sql`);
+    writeFileSync(dataPath, dataSource);
+    const sanitizedData = sanitizeSql(dataPath, DATA_SANITIZER);
+    rmSync(dataPath, { force: true });
+
+    expect(sanitizedData).not.toContain('transaction_timeout');
+    expect(sanitizedData).toContain('SELECT 1;');
+  });
 });
