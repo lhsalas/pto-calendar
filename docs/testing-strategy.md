@@ -197,10 +197,32 @@ Jobs (run in order, with `needs:` dependencies):
 | 4 | `test-backend-integration` | ubuntu-latest + postgres service | — | vitest run backend integration suite, coverage |
 | 5 | `test-frontend` | ubuntu-latest | — | vitest run frontend, coverage |
 | 6 | `build` | ubuntu-latest | lint, typecheck | build backend + frontend |
-| 7 | `deployment-config` | ubuntu-latest | lint, typecheck | validate Firebase/GCP fallback configuration, OCI Compose/Caddy headers, deployment scripts, workflow guards, and supply-chain pins |
+| 7 | `deployment-config` | ubuntu-latest | lint, typecheck | validate Firebase/GCP fallback configuration, OCI Compose/Caddy headers, deployment scripts, workflow guards, supply-chain pins, and the Node.js runtime baseline |
 | 8 | `e2e` | ubuntu-latest + postgres service | build | playwright install, playwright test, upload trace/video on failure |
-| 9 | `docker-smoke` | ubuntu-latest | build | start the all-in-one compose stack, poll `/health`, login + validate auto-seeded holidays + validate the seed endpoint, tear down with `-v` |
+| 9 | `docker-smoke` | ubuntu-latest | build | start the all-in-one compose stack, poll `/health`, assert the images run the supported Node.js baseline, login + validate auto-seeded holidays + validate the seed endpoint, tear down with `-v` |
 | 10 | `coverage-gate` | ubuntu-latest | 4, 5 | enforce thresholds; post coverage diff as PR comment |
+
+### 10.1a Node.js runtime baseline
+
+`.nvmrc` is the single source of truth for the supported Node.js runtime. It
+pins one 24.x patch level, and the same value is used by:
+
+- `actions/setup-node` in every workflow, via `node-version-file: '.nvmrc'`, so
+  a cached runner can never silently fall back to an older 24.x patch level;
+- the container base image tag (`node:<version>-alpine`) in
+  `backend/Dockerfile` and `frontend/Dockerfile`, still pinned by digest;
+- the `engines.node` floor in the root `package.json`.
+
+`npm run node:baseline:check` (`infra/tests/node-baseline.test.mjs`) asserts
+these stay in sync and that the pinned version is at least the minimum
+supported release. The Docker smoke job additionally runs
+`infra/tests/node-runtime-check.mjs` against the running backend and migration
+images, so the assertion covers the runtime that is actually built rather than
+only the Dockerfile text.
+
+Bump `.nvmrc`, the `MINIMUM_SUPPORTED_VERSION` constant in
+`infra/tests/node-version.mjs`, and the container digests together whenever a
+newer 24.x security release ships.
 
 ### 10.2 Triggers
 - `pull_request`: full pipeline.
