@@ -153,6 +153,7 @@ jobs:
               'Frontend tests',
               'Build',
               'Deployment config (static checks)',
+              'Security scan',
               'E2E (Playwright)',
               'Docker smoke (app:up)',
               'Coverage gate',

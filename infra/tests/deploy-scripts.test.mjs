@@ -16,6 +16,12 @@ const files = {
   schemaSanitizer: resolve(root, 'infra/deploy/sql-sanitize-schema.sed'),
   dataSanitizer: resolve(root, 'infra/deploy/sql-sanitize-data.sed'),
   genericRestore: resolve(root, 'bin/restore-backup.mjs'),
+  auditScript: resolve(root, 'infra/security/audit.mjs'),
+  productionImagesScript: resolve(root, 'infra/security/production-images.mjs'),
+  ciWorkflow: resolve(root, '.github/workflows/ci.yml'),
+  deployWorkflow: resolve(root, '.github/workflows/deploy-oci.yml'),
+  dependabotConfig: resolve(root, '.github/dependabot.yml'),
+  trivyIgnore: resolve(root, '.trivyignore.yaml'),
   service: resolve(root, 'infra/db/pto-calendar-backup.service'),
   timer: resolve(root, 'infra/db/pto-calendar-backup.timer'),
   compose: resolve(root, 'docker-compose.prod.yml'),
@@ -116,6 +122,39 @@ check('setup exposes a home-installed OCI CLI to deploy',
   /setfacl/.test(setup) && /usr\/local\/bin\/oci/.test(setup));
 check('setup never enables insecure production cookies', /COOKIE_SECURE=true/.test(setup) && !/INSECURE_COOKIES_ALLOWED=true/.test(setup));
 check('runtime scripts do not sudo back into deploy', !/sudo -u deploy/.test(`${deploy}\n${backup}`));
+
+console.log('\nVulnerability scan contract:');
+check('npm audit script exists', existsSync(files.auditScript));
+check('production image script exists', existsSync(files.productionImagesScript));
+if (existsSync(files.ciWorkflow)) {
+  const ci = readFileSync(files.ciWorkflow, 'utf8');
+  check('CI runs a security job', /^ {2}security:$/m.test(ci));
+  check('CI security job audits the npm graphs', /infra\/security\/audit\.mjs/.test(ci));
+  check('CI security job scans the production images', /infra\/security\/production-images\.mjs/.test(ci));
+  check('CI security job targets the production platform', /--platform linux\/arm64/.test(ci));
+  check('CI is scheduled so advisories are noticed without a commit', /^ {2}schedule:$/m.test(ci));
+}
+if (existsSync(files.deployWorkflow)) {
+  const deployWorkflow = readFileSync(files.deployWorkflow, 'utf8');
+  check('the OCI deployment waits for the security job', /'Security scan'/.test(deployWorkflow));
+}
+check('Dependabot configuration exists', existsSync(files.dependabotConfig));
+
+console.log('\nTrivy exception contract:');
+check('the Trivy exception list exists', existsSync(files.trivyIgnore));
+if (existsSync(files.trivyIgnore)) {
+  const exceptions = readFileSync(files.trivyIgnore, 'utf8');
+  const entries = exceptions.split(/\n {2}- id: /).slice(1);
+  check('every exception names an advisory', entries.length > 0 && entries.every((e) => /^CVE-\d{4}-\d+/.test(e.trim())));
+  check('every exception has an expiry date', entries.every((e) => /expired_at: \d{4}-\d{2}-\d{2}/.test(e)));
+  check('every exception has a statement', entries.every((e) => /statement: >-/.test(e)));
+  check('every exception is scoped to a path', entries.every((e) => /paths:\n {6}- ['"]/.test(e)));
+  const today = new Date().toISOString().slice(0, 10);
+  const expired = entries
+    .map((e) => /expired_at: (\d{4}-\d{2}-\d{2})/.exec(e)?.[1])
+    .filter((date) => date !== undefined && date < today);
+  check(`no exception has expired (checked against ${today})`, expired.length === 0);
+}
 
 console.log('\nSystemd units:');
 for (const [name, file] of [['service', files.service], ['timer', files.timer]]) {

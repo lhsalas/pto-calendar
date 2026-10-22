@@ -1,0 +1,473 @@
+# Trivy exceptions for the pinned production images.
+#
+# Every entry names the advisory, the exposure assessment, the owner and an
+# expiry date. The pipeline fails on any high or critical finding that is
+# not listed here, and it fails on an expired entry, so this list cannot rot.
+#
+# Regenerate the candidate list with:
+#   node infra/security/generate-trivy-exceptions.mjs
+#
+# Owner: the repository maintainers.
+
+vulnerabilities:
+  - id: CVE-2025-61726
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2025-61729
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2025-68121
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-102276
+    paths:
+      - 'Node.js'
+    expired_at: 2027-01-31
+    statement: >-
+      These are copies of brace-expansion and undici bundled inside the Node.js distribution. They are used by the bundled package manager and the build tooling, not by the served application, which only runs the compiled backend and serves prebuilt static files.
+
+  - id: CVE-2026-102278
+    paths:
+      - 'Node.js'
+    expired_at: 2027-01-31
+    statement: >-
+      These are copies of brace-expansion and undici bundled inside the Node.js distribution. They are used by the bundled package manager and the build tooling, not by the served application, which only runs the compiled backend and serves prebuilt static files.
+
+  - id: CVE-2026-103111
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-111943
+    paths:
+      - 'usr/bin/caddy'
+    expired_at: 2027-01-31
+    statement: >-
+      The remaining Go standard library and golang.org/x/net advisories in the Caddy binary are denial-of-service issues in the HTTP/2 and TLS stacks. The pinned digest is the newest published build; the fix requires an upstream Caddy rebuild. Caddy only terminates TLS for the application and is not exposed to untrusted HTTP/2 traffic.
+
+  - id: CVE-2026-111943
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-11352
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-11586
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-12064
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-14456
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-19534
+    paths:
+      - 'Node.js'
+    expired_at: 2027-01-31
+    statement: >-
+      These are copies of brace-expansion and undici bundled inside the Node.js distribution. They are used by the bundled package manager and the build tooling, not by the served application, which only runs the compiled backend and serves prebuilt static files.
+
+  - id: CVE-2026-25679
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-27135
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in the HTTP/2 library of the nginx image. The production nginx configuration listens on plain HTTP without the http2 directive, so HTTP/2 is never negotiated on the hop from Caddy and the library is not used. The pinned digest is the newest published build.
+
+  - id: CVE-2026-27145
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-32280
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-32281
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-32283
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-33630
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-33811
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-33814
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-33818
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-39820
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-39821
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-39822
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-39836
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-42499
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-42504
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-45186
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-45447
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-4775
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-53612
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-53613
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-53614
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-56853
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-56858
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-56859
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-56860
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-56862
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-5773
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-6276
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-66046
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-6732
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-76641
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-76642
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-76956
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-76957
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-77214
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-78408
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-78410
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-78667
+    paths:
+      - 'usr/bin/caddy'
+    expired_at: 2027-01-31
+    statement: >-
+      The remaining Go standard library and golang.org/x/net advisories in the Caddy binary are denial-of-service issues in the HTTP/2 and TLS stacks. The pinned digest is the newest published build; the fix requires an upstream Caddy rebuild. Caddy only terminates TLS for the application and is not exposed to untrusted HTTP/2 traffic.
+
+  - id: CVE-2026-78667
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-78669
+    paths:
+      - 'usr/bin/caddy'
+    expired_at: 2027-01-31
+    statement: >-
+      The remaining Go standard library and golang.org/x/net advisories in the Caddy binary are denial-of-service issues in the HTTP/2 and TLS stacks. The pinned digest is the newest published build; the fix requires an upstream Caddy rebuild. Caddy only terminates TLS for the application and is not exposed to untrusted HTTP/2 traffic.
+
+  - id: CVE-2026-78669
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
+
+  - id: CVE-2026-8286
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-8458
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-86145
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-89157
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-89161
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-8925
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-8927
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-93990
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-9547
+    paths:
+      - 'nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)'
+    expired_at: 2027-01-31
+    statement: >-
+      The advisory is in a package on the nginx image that is not on the request-serving path. In production nginx serves plain HTTP on the internal Docker network and Caddy terminates TLS, so its OpenSSL, curl, expat, libxml2, libuuid, pcre2, tiff and c-ares packages are not used to handle requests. The pinned digest is the newest published build.
+
+  - id: CVE-2026-97031
+    paths:
+      - 'usr/bin/caddy'
+    expired_at: 2027-01-31
+    statement: >-
+      The remaining Go standard library and golang.org/x/net advisories in the Caddy binary are denial-of-service issues in the HTTP/2 and TLS stacks. The pinned digest is the newest published build; the fix requires an upstream Caddy rebuild. Caddy only terminates TLS for the application and is not exposed to untrusted HTTP/2 traffic.
+
+  - id: CVE-2026-97031
+    paths:
+      - 'usr/local/bin/gosu'
+    expired_at: 2027-01-31
+    statement: >-
+      gosu is a startup-only privilege-drop helper in the PostgreSQL image. It performs no network I/O and is not the database process, so the Go standard library advisories in it are not reachable from the network. The image is pinned to the newest published build.
