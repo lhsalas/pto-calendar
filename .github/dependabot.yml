@@ -40,6 +40,22 @@ updates:
       - dependency-name: typescript
         update-types:
           - version-update:semver-major
+      # Express 5 changes the route parameter types, so the request handlers
+      # need source changes. Remove this rule when the Express 5 migration is
+      # planned.
+      - dependency-name: express
+        update-types:
+          - version-update:semver-major
+      # Prisma 7 moves the connection URL out of the schema into
+      # prisma.config.ts, so the schema, the client and the migration
+      # scripts all change. Remove this rule when the Prisma 7 migration is
+      # planned.
+      - dependency-name: prisma
+        update-types:
+          - version-update:semver-major
+      - dependency-name: '@prisma/client'
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: docker
     directory: '/backend'
