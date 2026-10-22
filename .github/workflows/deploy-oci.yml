@@ -117,7 +117,7 @@ jobs:
 
       - name: Check out the target ref
         if: github.event_name != 'workflow_run' && steps.target.outputs.should_deploy == 'true'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.target.outputs.target_ref }}
           persist-credentials: false
@@ -145,7 +145,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && steps.target.outputs.should_deploy == 'true'
         env:
           TARGET_SHA: ${{ steps.resolve_sha.outputs.target_sha }}
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const sha = process.env.TARGET_SHA;
