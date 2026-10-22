@@ -41,6 +41,25 @@ This document defines the testing and automation strategy for the PTO calendar M
 
 Coverage is enforced on PRs via CI. Thresholds are set in `vitest.config.ts`.
 
+The test toolchain is pinned to a supported, patched line: `vitest` and
+`@vitest/coverage-v8` are on the 4.1.x line, `vite` is on the patched 7.3.x
+line, and `concurrently`, `lint-staged` and `js-yaml` are on patched releases.
+`npm audit` reports `0 vulnerabilities` for the whole graph.
+
+Vitest 4 removed `poolOptions`, so the integration suite uses the top-level
+`fileParallelism: false` and `isolate: true` instead of the old
+`poolOptions.forks.singleFork`. The specs share one database, so they must run
+sequentially, and each file needs its own module registry so a file that
+disconnects the shared Prisma client does not break the next one. The
+integration config also sorts the spec files by path, because Vitest otherwise
+orders them by cached duration, which differs between a workstation and CI.
+
+Vitest 4's V8 coverage provider counts defensive fallback branches that an
+earlier version did not. Those branches are covered by tests rather than by
+relaxing a threshold: `usePtoList` has a dedicated spec that exercises the
+non-`Error` fallback by mocking the API boundary, and the `AuthContext` and
+`PTOViewModal` specs cover the remaining conditional paths.
+
 | Path | Lines | Branches | Functions | Statements | Notes |
 |---|---|---|---|---|---|
 | `src/services/authorization/**` | 100% | 100% | 100% | 100% | Highest-risk surface; centralized note-visibility + modification logic |

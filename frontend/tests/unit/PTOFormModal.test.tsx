@@ -5,18 +5,22 @@ import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { PTOFormModal } from '../../src/components/pto/PTOFormModal';
 import { STUB_PTO } from '../mocks/handlers';
+import type { CreatePTORequest } from '../../src/types/api';
+
+type SubmitSpy = (payload: CreatePTORequest) => Promise<void> | void;
+type CloseSpy = () => void;
 
 interface RenderArgs {
-  onSubmit?: ReturnType<typeof vi.fn>;
-  onClose?: ReturnType<typeof vi.fn>;
+  onSubmit?: SubmitSpy;
+  onClose?: CloseSpy;
   open?: boolean;
   initialPto?: typeof STUB_PTO;
   defaultStartDate?: string;
 }
 
 function renderModal({
-  onSubmit = vi.fn(),
-  onClose = vi.fn(),
+  onSubmit = vi.fn<SubmitSpy>(),
+  onClose = vi.fn<CloseSpy>(),
   open = true,
   initialPto,
   defaultStartDate,

@@ -21,11 +21,12 @@ export default defineConfig({
     hookTimeout: 30000,
     setupFiles: ['./tests/setup.ts'],
     pool: 'forks',
-    poolOptions: {
-      forks: {
-        singleFork: true,
-      },
-    },
+    // Vitest 4 removed `poolOptions.forks.singleFork`. The integration suite
+    // shares one database, so the spec files must run sequentially and each
+    // file needs its own module registry: a file that disconnects the shared
+    // Prisma client must not break the file that runs after it.
+    fileParallelism: false,
+    isolate: true,
     sequence: {
       sequencer: AlphabeticalSequencer,
     },

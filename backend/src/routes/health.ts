@@ -11,12 +11,17 @@ healthRouter.get('/health', (_req, res) => {
 
 healthRouter.get('/ready', async (_req, res) => {
   const env = loadEnv();
-  let timer: NodeJS.Timeout | undefined;
+  // The timer is always created, so it is cleared unconditionally below. The
+  // promise is built first so the timeout can reject it later.
+  let rejectTimeout: (reason: Error) => void = () => undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    rejectTimeout = reject;
+  });
+  const timer = setTimeout(() => {
+    rejectTimeout(new Error('Database query timed out'));
+  }, env.READY_TIMEOUT_MS);
+  timer.unref();
   try {
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error('Database query timed out')), env.READY_TIMEOUT_MS);
-      timer.unref();
-    });
     await Promise.race([prisma.$queryRaw`SELECT 1`, timeout]);
     res.json({
       status: 'ready',
@@ -33,6 +38,6 @@ healthRouter.get('/ready', async (_req, res) => {
       },
     });
   } finally {
-    if (timer) clearTimeout(timer);
+    clearTimeout(timer);
   }
 });

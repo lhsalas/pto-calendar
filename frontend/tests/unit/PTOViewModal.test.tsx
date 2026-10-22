@@ -136,4 +136,27 @@ describe('PTOViewModal', () => {
     await user.click(screen.getByRole('button', { name: /close/i }));
     expect(onClose).toHaveBeenCalled();
   });
+
+  it('labels an evening PTO and an all-day PTO', () => {
+    const { unmount } = renderModal({ pto: { ...STUB_PTO, dayPart: 'evening' } });
+    expect(screen.getByText(/evening \(pm\)/i)).toBeInTheDocument();
+    unmount();
+
+    renderModal({ pto: { ...STUB_PTO, dayPart: 'all_day' } });
+    expect(screen.getByText(/all day/i)).toBeInTheDocument();
+  });
+
+  it('calls onClose when the backdrop is clicked but not when the card is clicked', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    renderModal({ onClose });
+
+    const backdrop = screen.getByRole('dialog');
+    await user.click(backdrop);
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    // A click inside the card must not bubble into the backdrop handler.
+    await user.click(screen.getByText(/PTO details/i));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

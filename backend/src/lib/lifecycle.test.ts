@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import type { Server } from 'node:http';
 import type { PrismaClient } from '@prisma/client';
 import { installShutdown, shutdown } from './lifecycle.js';
@@ -61,10 +61,8 @@ function restoreListeners(snapshot: ReturnType<typeof snapshotListeners>): void 
   snapshot.unhandledRejection.forEach((l) => process.on('unhandledRejection', l));
 }
 
-function setupExitSpy(): ReturnType<typeof vi.spyOn> {
-  return vi.spyOn(process, 'exit' as never).mockImplementation(((..._args: unknown[]) => {
-    return undefined as never;
-  }) as never);
+function setupExitSpy(): MockInstance<(code?: number) => never> {
+  return vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
 }
 
 describe('shutdown', () => {
