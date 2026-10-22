@@ -187,6 +187,9 @@ describe('Auth routes', () => {
       expect(meBefore.status).toBe(200);
       expect(meBefore.body.email).toBe(SEED.dev1.email);
 
+      // The user may still have audit log rows from an earlier test run. The
+      // actor relation does not cascade, so they are removed first.
+      await prisma.auditLog.deleteMany({ where: { actor: { email: SEED.dev1.email } } });
       await prisma.user.delete({ where: { email: SEED.dev1.email } });
 
       const meAfter = await agent.get('/auth/me');
