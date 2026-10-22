@@ -3,6 +3,9 @@ import { test, expect } from '@playwright/test';
 const SEED = {
   lead: { email: 'lead@example.com', password: 'lead-dev-password' },
   dev1: { email: 'dev1@example.com', password: 'dev1-dev-password' },
+  // dev2 is seeded but is not used to create a PTO by any other spec, so a
+  // journey that needs a date no other journey reserves can use it safely.
+  dev2: { email: 'dev2@example.com', password: 'dev2-dev-password' },
 };
 
 function nthWeekdayInCurrentMonth(n: number): { start: string; end: string; iso: string } {
@@ -145,13 +148,13 @@ test.describe('Sprint 4 — auto-sync end date', () => {
     page,
   }) => {
     const { iso: todayIso } = firstWeekdayInCurrentMonth();
-    const laterIso = new Date(todayIso);
-    laterIso.setUTCDate(laterIso.getUTCDate() + 2);
-    const later = laterIso.toISOString().slice(0, 10);
+    // Always a weekday: the backend rejects a weekend start date, so adding
+    // calendar days to the first weekday is not safe.
+    const { iso: later } = nthWeekdayInCurrentMonth(2);
 
     await page.goto('/');
-    await page.getByLabel(/email/i).fill(SEED.dev1.email);
-    await page.getByLabel(/password/i).fill(SEED.dev1.password);
+    await page.getByLabel(/email/i).fill(SEED.dev2.email);
+    await page.getByLabel(/password/i).fill(SEED.dev2.password);
     await page.getByRole('button', { name: /sign in/i }).click();
     await expect(page.getByRole('heading', { name: /calendar/i })).toBeVisible();
 
