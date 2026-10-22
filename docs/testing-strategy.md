@@ -288,6 +288,23 @@ safe on a pull request from a fork.
    the job; unfixed findings are reported but do not block, because there is
    nothing to upgrade to.
 
+`.trivyignore.yaml` holds the exceptions for advisories in the upstream base
+images that the project cannot fix itself, because the fix needs an upstream
+image rebuild. Every entry names the advisory, the path it applies to, the
+exposure assessment, the owner and an expiry date, and the static deployment
+checks fail when an entry has no statement or has expired. The current
+entries are all in packages that are not on the request-serving path: the Go
+standard library copies inside `gosu` in the PostgreSQL image, the Go
+advisories in the Caddy binary, the Node distribution's bundled
+`brace-expansion` and `undici`, and the Alpine packages in the nginx image.
+In production nginx serves plain HTTP behind Caddy, which terminates TLS, so
+its OpenSSL, HTTP/2, curl and XML packages are not used to handle requests.
+
+`infra/security/generate-trivy-exceptions.mjs` regenerates the candidate
+exception list from a local Trivy run. The generated file is reviewed and
+committed by hand; the pipeline only ever reads it, so a finding that is not
+listed fails the security job and the list cannot grow on its own.
+
 The scheduled run repeats both checks against the unchanged lockfile and the
 unchanged digests, which is what catches an advisory that is published after a
 release.
