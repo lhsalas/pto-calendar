@@ -68,5 +68,31 @@ describe('Health routes', () => {
       expect(blob).not.toContain('boom');
       expect(blob).not.toContain('reason');
     });
+
+    it('returns 503 NOT_READY when the database query times out', async () => {
+      const previousTimeout = process.env.READY_TIMEOUT_MS;
+      process.env.READY_TIMEOUT_MS = '25';
+      resetEnvForTests();
+      // A query that never settles: the readiness timer has to fire.
+      vi.spyOn(appPrisma, '$queryRaw').mockReturnValue(new Promise(() => {}) as never);
+
+      const res = await request(app).get('/ready');
+
+      expect(res.status).toBe(503);
+      expect(res.body).toEqual({
+        error: {
+          code: 'NOT_READY',
+          message: 'Database unavailable',
+          details: { db: 'unreachable' },
+        },
+      });
+
+      if (previousTimeout === undefined) {
+        delete process.env.READY_TIMEOUT_MS;
+      } else {
+        process.env.READY_TIMEOUT_MS = previousTimeout;
+      }
+      resetEnvForTests();
+    });
   });
 });

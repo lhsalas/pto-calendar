@@ -34,10 +34,11 @@
     "prepare": "husky || true"
   },
   "devDependencies": {
-    "concurrently": "^10.0.4",
+    "@vitest/coverage-v8": "^4.1.12",
+    "concurrently": "^10.0.6",
     "husky": "^9.1.7",
-    "js-yaml": "^4.3.1",
-    "lint-staged": "^15.2.10",
+    "js-yaml": "^4.3.2",
+    "lint-staged": "^17.6.0",
     "prettier": "^3.4.2"
   },
   "lint-staged": {

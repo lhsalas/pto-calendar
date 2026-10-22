@@ -157,6 +157,120 @@ describe('AuthContext', () => {
     expect(screen.getByTestId('thrown').textContent).toBe('Invalid email or password.');
   });
 
+  it('ignores the /auth/me response when the provider unmounts first', async () => {
+    let signalEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      signalEntered = resolve;
+    });
+    let releaseMe!: () => void;
+    const released = new Promise<void>((resolve) => {
+      releaseMe = resolve;
+    });
+    server.use(
+      http.get('/auth/me', async () => {
+        signalEntered();
+        await released;
+        return HttpResponse.json(STUB_USER);
+      }),
+    );
+
+    const states: ProbeState[] = [];
+    const { unmount } = render(
+      <AuthProvider>
+        <Probe onChange={(s) => states.push({ ...s })} />
+      </AuthProvider>,
+    );
+
+    // Wait until the request is in flight, then unmount before it resolves.
+    await entered;
+    unmount();
+    releaseMe();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(states.some((s) => s.status === 'authenticated')).toBe(false);
+  });
+
+  it('ignores a failed /auth/me response when the provider unmounts first', async () => {
+    let signalEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      signalEntered = resolve;
+    });
+    let releaseMe!: () => void;
+    const released = new Promise<void>((resolve) => {
+      releaseMe = resolve;
+    });
+    server.use(
+      http.get('/auth/me', async () => {
+        signalEntered();
+        await released;
+        return HttpResponse.json({ message: 'down' }, { status: 500 });
+      }),
+    );
+
+    const states: ProbeState[] = [];
+    const { unmount } = render(
+      <AuthProvider>
+        <Probe onChange={(s) => states.push({ ...s })} />
+      </AuthProvider>,
+    );
+
+    await entered;
+    unmount();
+    releaseMe();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(states.some((s) => s.status === 'unauthenticated')).toBe(false);
+  });
+
+  it('setupAccount() surfaces the API error message and rethrows on failure', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post('/auth/setup-account', () =>
+        HttpResponse.json(
+          { error: { code: 'VALIDATION_ERROR', message: 'Token is invalid.' } },
+          { status: 400 },
+        ),
+      ),
+    );
+
+    const SetupCatcher = (): JSX.Element => {
+      const { setupAccount, error } = useAuth();
+      const [thrown, setThrown] = useState<string | null>(null);
+      return (
+        <div>
+          <span data-testid="error">{error ?? 'none'}</span>
+          <span data-testid="thrown">{thrown ?? 'none'}</span>
+          <button
+            type="button"
+            onClick={() => {
+              setupAccount({
+                token: 'a'.repeat(64),
+                password: 'new-password',
+              }).catch((e: Error) => setThrown(e.message));
+            }}
+          >
+            try
+          </button>
+        </div>
+      );
+    };
+
+    render(
+      <AuthProvider>
+        <SetupCatcher />
+      </AuthProvider>,
+    );
+
+    await act(async () => {
+      await user.click(screen.getByRole('button', { name: /try/ }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('error').textContent).toBe('Token is invalid.');
+    });
+    expect(screen.getByTestId('thrown').textContent).toBe('Token is invalid.');
+  });
+
   it('logout() clears the user and returns to unauthenticated', async () => {
     server.use(authenticated);
     const user = userEvent.setup();

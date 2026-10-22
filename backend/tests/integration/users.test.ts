@@ -36,19 +36,29 @@ describe('Users routes', () => {
   });
 
   afterAll(async () => {
-    await prisma.user.deleteMany({ where: { email: { notIn: SEED_EMAILS } } });
+    await deleteNonSeedUsers();
     await prisma.$disconnect();
     await appPrisma.$disconnect();
   });
 
   beforeEach(async () => {
-    await prisma.user.deleteMany({ where: { email: { notIn: SEED_EMAILS } } });
+    await deleteNonSeedUsers();
     __resetAuthUserCacheForTests();
   });
 
   afterEach(async () => {
-    await prisma.user.deleteMany({ where: { email: { notIn: SEED_EMAILS } } });
+    await deleteNonSeedUsers();
   });
+
+  // A password reset writes an audit log whose actor is the user that made
+  // the request, and that relation does not cascade. The audit rows are
+  // removed first so the users can be deleted.
+  async function deleteNonSeedUsers(): Promise<void> {
+    await prisma.auditLog.deleteMany({
+      where: { actor: { is: { email: { notIn: SEED_EMAILS } } } },
+    });
+    await prisma.user.deleteMany({ where: { email: { notIn: SEED_EMAILS } } });
+  }
 
   async function loginAs(email: string, password: string): Promise<string> {
     const res = await request(app).post('/auth/login').send({ email, password });
@@ -259,6 +269,57 @@ describe('Users routes', () => {
         .set('Cookie', leadCookie);
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('blocks resetting the only team_lead even when the actor is an admin', async () => {
+      await prisma.user.create({
+        data: {
+          email: 'admin-reset@example.com',
+          name: 'Admin Reset',
+          role: 'admin',
+          colorCode: '#000000',
+          passwordHash: await bcrypt.hash('admin-password', 4),
+        },
+      });
+      const adminCookie = await loginAs('admin-reset@example.com', 'admin-password');
+      const onlyLead = await prisma.user.findUnique({ where: { email: SEED.lead.email } });
+
+      const res = await request(app)
+        .post(`/users/${onlyLead!.id}/reset-password`)
+        .set('Cookie', adminCookie);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+      expect(res.body.error.message).toMatch(/only team lead/i);
+    });
+
+    it('allows resetting a team_lead when another team_lead exists', async () => {
+      await prisma.user.create({
+        data: {
+          email: 'admin-reset-two@example.com',
+          name: 'Admin Reset Two',
+          role: 'admin',
+          colorCode: '#000000',
+          passwordHash: await bcrypt.hash('admin-password', 4),
+        },
+      });
+      const otherLead = await prisma.user.create({
+        data: {
+          email: 'second-lead@example.com',
+          name: 'Second Lead',
+          role: 'team_lead',
+          colorCode: '#000000',
+          passwordHash: 'old-lead-password',
+        },
+      });
+      const adminCookie = await loginAs('admin-reset-two@example.com', 'admin-password');
+
+      const res = await request(app)
+        .post(`/users/${otherLead.id}/reset-password`)
+        .set('Cookie', adminCookie);
+
+      expect(res.status).toBe(200);
+      expect(res.body.setupToken).toMatch(/^[a-f0-9]{64}$/);
     });
 
     it('returns 404 for an unknown user', async () => {

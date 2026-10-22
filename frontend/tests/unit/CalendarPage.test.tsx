@@ -575,4 +575,41 @@ describe('CalendarPage', () => {
     const startInput = screen.getByLabelText(/start date/i) as HTMLInputElement;
     expect(startInput.value).toBe(today);
   });
+
+  it('shows the loading state while the current user is still being resolved', async () => {
+    let signalEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      signalEntered = resolve;
+    });
+    let releaseMe!: () => void;
+    const released = new Promise<void>((resolve) => {
+      releaseMe = resolve;
+    });
+    server.use(
+      http.get('/auth/me', async () => {
+        signalEntered();
+        await released;
+        return HttpResponse.json(STUB_USER);
+      }),
+    );
+
+    const { unmount } = render(
+      <MemoryRouter initialEntries={['/calendar']}>
+        <ThemeProvider>
+          <AuthProvider>
+            <ToastProvider>
+              <CalendarPage />
+              <ToastViewport />
+            </ToastProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </MemoryRouter>,
+    );
+
+    await entered;
+    expect(await screen.findByRole('status')).toHaveAttribute('aria-busy', 'true');
+
+    unmount();
+    releaseMe();
+  });
 });
