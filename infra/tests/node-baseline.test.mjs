@@ -8,7 +8,6 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import yaml from 'js-yaml';
 import {
   MINIMUM_SUPPORTED_VERSION,
   SUPPORTED_MAJOR,
@@ -117,18 +116,30 @@ for (const workflow of workflows) {
 }
 
 // An empty `env:` mapping makes GitHub reject the whole workflow file before
-// any job runs, which is reported only as a generic workflow error.
+// any job runs, which is reported only as a generic workflow error. The
+// deployment-config CI job does not install dependencies, so this is detected
+// with a text scan rather than a YAML parser.
+function hasEmptyTopLevelEnv(content) {
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i] !== 'env:') continue;
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const line = lines[j];
+      if (line.trim() === '') continue;
+      // A key at column 0 means the `env:` mapping had no entries.
+      if (!/^\s/.test(line)) return true;
+      break;
+    }
+  }
+  return false;
+}
+
 const workflowDir = resolve(root, '.github/workflows');
 for (const file of readdirSync(workflowDir).filter((name) => name.endsWith('.yml'))) {
   const path = `${workflowDir}/${file}`;
-  const parsed = yaml.load(readFileSync(path, 'utf8'));
-  const env = parsed?.env;
-  const isEmptyMapping =
-    env !== undefined &&
-    (env === null || typeof env !== 'object' || Array.isArray(env) || Object.keys(env).length === 0);
   check(
     `.github/workflows/${file} does not declare an empty env mapping`,
-    !isEmptyMapping,
+    !hasEmptyTopLevelEnv(readFileSync(path, 'utf8')),
   );
 }
 
