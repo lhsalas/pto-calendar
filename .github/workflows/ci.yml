@@ -295,6 +295,7 @@ jobs:
       - name: Validate privileged OpenCode workflow
         run: |
           python3 - <<'PY'
+          import re
           from pathlib import Path
 
           workflow = Path('.github/workflows/opencode.yml').read_text()
@@ -303,13 +304,17 @@ jobs:
               "github.event.comment.author_association == 'MEMBER'",
               'environment: opencode',
               'id-token: none',
-              'actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803',
-              'anomalyco/opencode/github@a3b97d9090ccf4aa9ac32268486283e3131e36b4',
               'github.event.repository.default_branch',
           ]
           missing = [item for item in required if item not in workflow]
           if missing:
               raise SystemExit(f'Missing OpenCode security control: {missing}')
+          # The third-party actions must be pinned to an immutable commit. The
+          # specific commit is not fixed here, so a reviewed pin bump does not
+          # break the build.
+          for action in ('actions/checkout', 'anomalyco/opencode/github'):
+              if not re.search(re.escape(action) + r'@[0-9a-f]{40}', workflow):
+                  raise SystemExit(f'OpenCode workflow must pin {action} to a commit SHA')
           if '@latest' in workflow or 'id-token: write' in workflow:
               raise SystemExit('OpenCode workflow contains a mutable or excessive privilege')
           PY
