@@ -279,6 +279,58 @@ const sourcePrisma = new PrismaClient({ datasources: { db: { url: SOURCE_URL } }
 const runner = detectRunner();
 const testOrSkip = runner === 'none' ? it.skip : it;
 
+// The roundtrip needs rows in every table it compares. It creates its own
+// fixture rather than relying on another spec file having written to the
+// shared source database first: Vitest orders spec files by size, so a
+// dependency on another file's side effect would make this test fail
+// whenever a file grows.
+const FIXTURE_EMAIL = `backup-restore-${process.pid}@example.test`;
+
+async function createSourceFixture(): Promise<void> {
+  const client = new PrismaClient({ datasources: { db: { url: SOURCE_URL } } });
+  try {
+    const user = await client.user.create({
+      data: {
+        name: 'Backup Restore Fixture',
+        email: FIXTURE_EMAIL,
+        role: 'member',
+        colorCode: '#123456',
+        passwordHash: null,
+      },
+    });
+    const pto = await client.pTORequest.create({
+      data: {
+        userId: user.id,
+        startDate: new Date('2024-01-08T00:00:00.000Z'),
+        endDate: new Date('2024-01-08T00:00:00.000Z'),
+        dayPart: 'all_day',
+        note: 'backup restore fixture',
+      },
+    });
+    await client.auditLog.create({
+      data: {
+        actorUserId: user.id,
+        action: 'create_pto',
+        entityType: 'pto_request',
+        entityId: pto.id,
+        details: { fixture: true },
+      },
+    });
+  } finally {
+    await client.$disconnect();
+  }
+}
+
+async function removeSourceFixture(): Promise<void> {
+  const client = new PrismaClient({ datasources: { db: { url: SOURCE_URL } } });
+  try {
+    await client.auditLog.deleteMany({ where: { actor: { email: FIXTURE_EMAIL } } });
+    await client.user.deleteMany({ where: { email: FIXTURE_EMAIL } });
+  } finally {
+    await client.$disconnect();
+  }
+}
+
 describe('database backup → restore roundtrip', () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pto-backup-restore-'));
 
@@ -287,12 +339,14 @@ describe('database backup → restore roundtrip', () => {
     ensureTargetDatabase();
     resetTarget();
     expect(existsSync(workdir)).toBe(true);
+    await createSourceFixture();
     const userCount = await selectCount(SOURCE_URL, 'users');
     expect(userCount).toBeGreaterThan(0);
   });
 
   afterAll(async () => {
     rmSync(workdir, { recursive: true, force: true });
+    await removeSourceFixture();
     await sourcePrisma.$disconnect();
   });
 

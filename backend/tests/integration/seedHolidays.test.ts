@@ -24,19 +24,48 @@ function runSeedHolidays(
   }
 }
 
+// The script records the holidays against a team_lead actor. The test creates
+// its own lead and passes the address explicitly, so it does not depend on
+// another spec file having left a team_lead in the shared database first:
+// Vitest orders spec files by cached duration, so that order is not stable
+// between a developer machine and CI.
+const LEAD_EMAIL = `seed-holidays-${process.pid}@example.test`;
+
 const REQUIRED_DB = {
   DATABASE_URL:
     process.env.DATABASE_URL ?? 'postgresql://pto:pto@localhost:5432/pto_test?schema=public',
+  LEAD_EMAIL,
 };
 
 const prisma = new PrismaClient();
 
+async function createLead(): Promise<void> {
+  await prisma.user.create({
+    data: {
+      name: 'Seed Holidays Lead',
+      email: LEAD_EMAIL,
+      role: 'team_lead',
+      colorCode: '#123456',
+      passwordHash: null,
+    },
+  });
+}
+
+async function removeLead(): Promise<void> {
+  // Seeding holidays also writes audit logs that reference the lead, and the
+  // actor relation has no cascade, so they are removed first.
+  await prisma.auditLog.deleteMany({ where: { actor: { email: LEAD_EMAIL } } });
+  await prisma.user.deleteMany({ where: { email: LEAD_EMAIL } });
+}
+
 describe('db:seed-holidays script', () => {
   beforeEach(async () => {
     await prisma.holiday.deleteMany({});
+    await createLead();
   });
   afterEach(async () => {
     await prisma.holiday.deleteMany({});
+    await removeLead();
     await prisma.$disconnect();
   });
 
