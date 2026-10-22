@@ -36,10 +36,16 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, basename } from 'node:path';
+import { dirname, join, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { assertStrongEncryptionKey } from './backupSecurity.mjs';
 
 process.umask(0o077);
+
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const SANITIZE_DIR = join(scriptDir, '..', 'infra', 'deploy');
+const SCHEMA_SANITIZER = join(SANITIZE_DIR, 'sql-sanitize-schema.sed');
+const DATA_SANITIZER = join(SANITIZE_DIR, 'sql-sanitize-data.sed');
 
 class ScriptError extends Error {
   constructor(message, code = 1) {
@@ -189,6 +195,30 @@ function applySqlFile(sqlPath, targetUrl) {
   );
 }
 
+// A dump taken from another database can reference roles and settings the
+// target does not have. The rules are shared with the production OCI restore
+// so the two cannot drift apart.
+function sanitizeSql(sourcePath, sanitizerPath, targetPath) {
+  if (!existsSync(sanitizerPath)) {
+    fail(`SQL sanitizer file is missing: ${sanitizerPath}`, 1);
+  }
+  const result = spawnSync('sed', ['-E', '-f', sanitizerPath, sourcePath], {
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  if (result.error || result.status !== 0) {
+    fail(
+      `sanitizing ${basename(sourcePath)} failed (status=${result.status}): ${result.stderr ?? result.error?.message ?? ''}`,
+      2,
+    );
+  }
+  if (result.stdout.length === 0) {
+    fail(`sanitizing ${basename(sourcePath)} produced an empty file`, 2);
+  }
+  writeFileSync(targetPath, result.stdout, { mode: 0o600 });
+  return targetPath;
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const bucket = args.bucket ?? requireEnv('BACKUP_BUCKET');
@@ -284,6 +314,13 @@ function main() {
     assertRegularFile(schemaPath, 'schema.sql');
     assertRegularFile(dataPath, 'data.sql');
 
+    const targetSchemaPath = sanitizeSql(
+      schemaPath,
+      SCHEMA_SANITIZER,
+      join(workdir, 'schema-target.sql'),
+    );
+    const targetDataPath = sanitizeSql(dataPath, DATA_SANITIZER, join(workdir, 'data-target.sql'));
+
     if (args.keepLocal) {
       const cwd = process.cwd();
       copyFileSync(schemaPath, join(cwd, 'schema.sql'));
@@ -294,8 +331,8 @@ function main() {
       console.log(`local copies: ${cwd}/schema.sql and ${cwd}/data.sql`);
     }
 
-    applySqlFile(schemaPath, targetUrl);
-    applySqlFile(dataPath, targetUrl);
+    applySqlFile(targetSchemaPath, targetUrl);
+    applySqlFile(targetDataPath, targetUrl);
 
     console.log(`Restore complete: applied schema.sql and data.sql to target.`);
   } finally {
