@@ -1,4 +1,15 @@
 import { defineConfig } from 'vitest/config';
+import { BaseSequencer } from 'vitest/node';
+
+// Vitest's default sequencer orders spec files by cached duration, and by
+// file size when nothing is cached yet. The order therefore differs between a
+// developer machine and CI. The integration suite shares one database, so a
+// stable order keeps a failure reproducible instead of intermittent.
+class AlphabeticalSequencer extends BaseSequencer {
+  override async sort(files: Parameters<BaseSequencer['sort']>[0]) {
+    return [...files].sort((a, b) => a.moduleId.localeCompare(b.moduleId));
+  }
+}
 
 export default defineConfig({
   test: {
@@ -14,6 +25,9 @@ export default defineConfig({
       forks: {
         singleFork: true,
       },
+    },
+    sequence: {
+      sequencer: AlphabeticalSequencer,
     },
     coverage: {
       provider: 'v8',

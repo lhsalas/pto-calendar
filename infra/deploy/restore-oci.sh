@@ -107,20 +107,18 @@ rm -f "${DECRYPTED}"
 
 # Supabase dumps can contain ownership and ACL statements for roles that exist
 # only in Supabase. The OCI database intentionally creates only DB_USER, so
-# omit source-role metadata while retaining the actual schema DDL.
+# omit source-role metadata while retaining the actual schema DDL. The rules
+# live in shared sed files so the production restore, the generic disposable
+# restore, and the integration test cannot drift apart.
+readonly SCHEMA_SANITIZER="${INSTALL_DIR}/infra/deploy/sql-sanitize-schema.sed"
+readonly DATA_SANITIZER="${INSTALL_DIR}/infra/deploy/sql-sanitize-data.sed"
+[[ -f "${SCHEMA_SANITIZER}" && -f "${DATA_SANITIZER}" ]] ||
+  fail "SQL sanitizer files are missing from ${INSTALL_DIR}/infra/deploy" 1
 TARGET_SCHEMA="${WORKDIR}/schema-target.sql"
-sed -E \
-  -e '/^[[:space:]]*SET ROLE /d' \
-  -e '/^[[:space:]]*ALTER .* OWNER TO /d' \
-  -e '/^[[:space:]]*ALTER DEFAULT PRIVILEGES /d' \
-  -e '/^[[:space:]]*(GRANT|REVOKE) /d' \
-  -e '/^[[:space:]]*SET transaction_timeout[[:space:]]*=/d' \
-  "${WORKDIR}/schema.sql" > "${TARGET_SCHEMA}"
+sed -E -f "${SCHEMA_SANITIZER}" "${WORKDIR}/schema.sql" > "${TARGET_SCHEMA}"
 [[ -s "${TARGET_SCHEMA}" ]] || fail "target schema is empty after removing source-role metadata" 2
 TARGET_DATA="${WORKDIR}/data-target.sql"
-sed -E \
-  -e '/^[[:space:]]*SET transaction_timeout[[:space:]]*=/d' \
-  "${WORKDIR}/data.sql" > "${TARGET_DATA}"
+sed -E -f "${DATA_SANITIZER}" "${WORKDIR}/data.sql" > "${TARGET_DATA}"
 [[ -s "${TARGET_DATA}" ]] || fail "target data is empty after removing unsupported session metadata" 2
 
 log "stopping application containers before destructive restore"
