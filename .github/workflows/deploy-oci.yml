@@ -56,13 +56,17 @@ jobs:
               SHOULD_DEPLOY="true"
               ;;
             workflow_run)
-              if [[ "${WORKFLOW_RUN_CONCLUSION}" != "success" ]]; then
-                echo "::error::CI conclusion for upstream run is '${WORKFLOW_RUN_CONCLUSION}'; aborting deploy."
-                exit 1
-              fi
+              # Only a push (a release tag or a master push) can deploy. Every
+              # other upstream event is skipped before the conclusion is
+              # inspected, so a failed pull-request run cannot report a failed
+              # deployment that was never attempted.
               if [[ "${WORKFLOW_RUN_EVENT}" != "push" ]]; then
                 echo "::notice::Upstream CI ran for event '${WORKFLOW_RUN_EVENT}'; skipping deploy (only push events are deployable)."
                 exit 0
+              fi
+              if [[ "${WORKFLOW_RUN_CONCLUSION}" != "success" ]]; then
+                echo "::error::CI conclusion for upstream run is '${WORKFLOW_RUN_CONCLUSION}'; aborting deploy."
+                exit 1
               fi
               if [[ "${WORKFLOW_RUN_HEAD_BRANCH}" != refs/tags/v* && ! "${WORKFLOW_RUN_HEAD_BRANCH}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
                 echo "::notice::Upstream CI ran for branch '${WORKFLOW_RUN_HEAD_BRANCH}'; skipping deploy (only tag pushes are deployable)."

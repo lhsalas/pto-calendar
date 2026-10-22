@@ -137,6 +137,14 @@ if (existsSync(files.ciWorkflow)) {
 if (existsSync(files.deployWorkflow)) {
   const deployWorkflow = readFileSync(files.deployWorkflow, 'utf8');
   check('the OCI deployment waits for the security job', /'Security scan'/.test(deployWorkflow));
+  // A non-push upstream event must be skipped before the CI conclusion is
+  // inspected, so a failed pull-request run cannot report a failed deployment.
+  const eventSkip = deployWorkflow.indexOf('WORKFLOW_RUN_EVENT}" != "push"');
+  const conclusionCheck = deployWorkflow.indexOf('WORKFLOW_RUN_CONCLUSION}" != "success"');
+  check(
+    'the OCI deployment skips a non-push upstream event before checking its conclusion',
+    eventSkip > -1 && conclusionCheck > -1 && eventSkip < conclusionCheck,
+  );
 }
 check('Dependabot configuration exists', existsSync(files.dependabotConfig));
 

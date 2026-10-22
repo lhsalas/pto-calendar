@@ -36,6 +36,13 @@ updates:
       backend-base-image:
         patterns:
           - '*'
+    ignore:
+      # The Node.js runtime is pinned to a supported 24.x patch level in
+      # `.nvmrc` and the base image tag has to match it. A major bump is a
+      # deliberate change, not an update.
+      - dependency-name: node
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: docker
     directory: '/frontend'
@@ -49,6 +56,13 @@ updates:
       frontend-base-image:
         patterns:
           - '*'
+    ignore:
+      # The Node.js runtime is pinned to a supported 24.x patch level in
+      # `.nvmrc` and the base image tag has to match it. A major bump is a
+      # deliberate change, not an update.
+      - dependency-name: node
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: docker
     directory: '/'
@@ -62,6 +76,22 @@ updates:
       compose-base-images:
         patterns:
           - '*'
+    ignore:
+      # The production base images are pinned by digest and a major version
+      # bump changes the runtime contract of the stack, so it is reviewed and
+      # merged on purpose rather than proposed automatically.
+      - dependency-name: caddy
+        update-types:
+          - version-update:semver-major
+      - dependency-name: nginx
+        update-types:
+          - version-update:semver-major
+      - dependency-name: postgres
+        update-types:
+          - version-update:semver-major
+      - dependency-name: node
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: '/'
