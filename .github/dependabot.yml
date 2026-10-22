@@ -23,6 +23,23 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # React 19 is a migration, not an update. The React 19 types and the
+      # runtime behaviour need source changes, so it is done deliberately.
+      # Remove this rule when the migration is planned.
+      - dependency-name: react
+        update-types:
+          - version-update:semver-major
+      - dependency-name: react-dom
+        update-types:
+          - version-update:semver-major
+      # typescript-eslint declares a peer range of ">=4.8.4 <6.1.0", so
+      # TypeScript 7 is outside the supported range and the type-aware lint
+      # rules would run against an unsupported compiler. Remove this rule
+      # when typescript-eslint supports TypeScript 7.
+      - dependency-name: typescript
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: docker
     directory: '/backend'
