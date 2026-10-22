@@ -30,6 +30,7 @@
     "prisma:generate": "npm run prisma:generate -w backend",
     "prod:config:check": "node infra/tests/prod-headers.test.mjs",
     "deploy:scripts:check": "node infra/tests/deploy-scripts.test.mjs",
+    "node:baseline:check": "node infra/tests/node-baseline.test.mjs",
     "prepare": "husky || true"
   },
   "devDependencies": {
@@ -45,7 +46,7 @@
     ]
   },
   "engines": {
-    "node": ">=24.0.0",
+    "node": ">=24.22.1",
     "npm": ">=10.0.0"
   },
   "allowScripts": {

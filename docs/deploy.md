@@ -19,6 +19,23 @@ option is documented in
 
 ## 1. Provision the OCI VM
 
+### Node.js runtime baseline
+
+The supported Node.js patch level is pinned in `.nvmrc` and is the single
+source of truth for the container base image, the CI runtime, and the
+`engines.node` floor. `backend/Dockerfile` and `frontend/Dockerfile` reference
+`node:<version>-alpine` by digest.
+
+When a new Node.js 24.x security release ships, update together:
+
+1. `.nvmrc`.
+2. `MINIMUM_SUPPORTED_VERSION` in `infra/tests/node-version.mjs`.
+3. The `FROM` digest in `backend/Dockerfile` and `frontend/Dockerfile`.
+4. The `engines.node` floor in the root `package.json`.
+
+`npm run node:baseline:check` fails when these drift, and the Docker smoke
+job asserts the built images report at least the pinned runtime.
+
 ### Compute and storage
 
 - Shape: `VM.Standard.A1.Flex`, preferably 2 OCPUs and 12 GB RAM.
