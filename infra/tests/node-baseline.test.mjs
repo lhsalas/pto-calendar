@@ -5,9 +5,10 @@
 // to an unpatched 24.x patch level. They complement the executable runtime
 // assertion in `node-runtime-check.mjs`, which runs against the real image.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import yaml from 'js-yaml';
 import {
   MINIMUM_SUPPORTED_VERSION,
   SUPPORTED_MAJOR,
@@ -112,6 +113,22 @@ for (const workflow of workflows) {
   check(
     `${workflow} does not declare an unused NODE_VERSION variable`,
     !/^\s*NODE_VERSION:\s*'24'\s*$/m.test(content),
+  );
+}
+
+// An empty `env:` mapping makes GitHub reject the whole workflow file before
+// any job runs, which is reported only as a generic workflow error.
+const workflowDir = resolve(root, '.github/workflows');
+for (const file of readdirSync(workflowDir).filter((name) => name.endsWith('.yml'))) {
+  const path = `${workflowDir}/${file}`;
+  const parsed = yaml.load(readFileSync(path, 'utf8'));
+  const env = parsed?.env;
+  const isEmptyMapping =
+    env !== undefined &&
+    (env === null || typeof env !== 'object' || Array.isArray(env) || Object.keys(env).length === 0);
+  check(
+    `.github/workflows/${file} does not declare an empty env mapping`,
+    !isEmptyMapping,
   );
 }
 
