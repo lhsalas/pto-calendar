@@ -56,6 +56,24 @@ updates:
       - dependency-name: '@prisma/client'
         update-types:
           - version-update:semver-major
+      # Express 4 requires body-parser 1.x, so the 2.x line belongs to
+      # Express 5. The application does not import body-parser itself, it
+      # uses express.json(). Remove this rule when Express 5 is planned.
+      - dependency-name: body-parser
+        update-types:
+          - version-update:semver-major
+      # ESLint 10 needs eslint-plugin-react-hooks 7, whose recommended
+      # config adds the React Compiler rules and the current code does not
+      # satisfy them yet. Remove this rule when the React Hooks rules are
+      # adopted.
+      - dependency-name: eslint
+        update-types:
+          - version-update:semver-major
+      # js-yaml is not imported anywhere in the repository. The version in
+      # the tree comes from ESLint's own legacy configuration support.
+      - dependency-name: js-yaml
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: docker
     directory: '/backend'
