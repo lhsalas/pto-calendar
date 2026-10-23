@@ -5,8 +5,9 @@
 > Every command in this file substitutes this value as `$HOST`. Replace it
 > with your own hostname in a new release if you fork the deployment.
 
-These steps provision the OCI Always Free VM and complete the Supabase-to-OCI
-cutover. The repository ships the application code, Docker Compose, Caddy
+These steps provision an OCI Always Free VM for first-time setup or recovery.
+The original database migration is complete. The repository ships the
+application code, Docker Compose, Caddy
 config, deployment scripts, systemd timer, and the OCI tag-triggered
 deploy workflow; the operator is responsible for the OCI-side resources that
 require a console or VM.
@@ -94,17 +95,21 @@ Lower TTL after cutover if the old value was higher.
 | `OCI_PRODUCTION_DEPLOY_ENABLED` | `true` |
 | `OCI_HOST` | `pto-calendar.lhsalas.com` |
 | `OCI_DEPLOY_USER` | the SSH user, e.g. `deploy` |
-| `GCP_FALLBACK_DEPLOY_ENABLED` | `false` |
 
 ### Secrets (Settings -> Secrets and variables -> Actions -> Secrets)
 
 | Secret | Source |
 |---|---|
-| `OCI_KNOWN_HOSTS` | output of `ssh-keyscan -H pto-calendar.lhsalas.com` on the VM |
+| `OCI_KNOWN_HOSTS` | pinned key for the reserved IP, collected with `ssh-keyscan -H <reserved-public-ip>` and independently verified |
+| `OCI_SSH_HOST` | reserved public IP used for the SSH connection |
 | `OCI_SSH_PRIVATE_KEY` | the deploy key's private key (no passphrase) |
 
-`PRODUCTION_DEPLOY_ENABLED` (the old GCP variable) must be removed or set to
-`false` so a stray Cloud Run deploy cannot fire.
+Verify the SSH host key fingerprint through a trusted console before pinning
+`OCI_KNOWN_HOSTS`. SSH connects to `OCI_SSH_HOST`, not the public HTTPS hostname.
+The workflow reads only these three secrets and three variables. Keep
+`OCI_DB_PASSWORD`, `OCI_SESSION_SECRET`, `OCI_RATE_LIMIT_REDIS_URL`, and
+`OCI_BACKUP_ENCRYPTION_KEY` as recovery copies, with matching values in an
+external password vault; the application reads its VM-local protected `.env`.
 
 ## 5. Run setup.sh on the VM
 
@@ -129,7 +134,7 @@ sudo ufw enable
 # Copy infra/deploy/setup.sh from the repo, then run.
 # All four secrets below are GitHub repository secrets (Settings -> Secrets
 # and variables -> Actions -> Repository secrets):
-#   OCI_SESSION_SECRET          Same value as the legacy Cloud Run pto-session-secret
+#   OCI_SESSION_SECRET          Existing session signing key from recovery vault
 #   OCI_BACKUP_ENCRYPTION_KEY   Strong key for gpg --symmetric on daily archives
 #   OCI_RATE_LIMIT_REDIS_URL    Upstash rediss:// connection URL
 #   OCI_DB_PASSWORD             PostgreSQL role password; generate fresh or reuse
@@ -137,10 +142,10 @@ export HOST=pto-calendar.lhsalas.com
 export CORS_ORIGIN=https://pto-calendar.lhsalas.com
 export ACME_EMAIL=ops@example.com
 export RELEASE_REF=v1.1.0
-export OCI_SESSION_SECRET='<value of the OCI_SESSION_SECRET GitHub secret>'
-export OCI_RATE_LIMIT_REDIS_URL='<value of the OCI_RATE_LIMIT_REDIS_URL GitHub secret>'
-export OCI_BACKUP_ENCRYPTION_KEY='<value of the OCI_BACKUP_ENCRYPTION_KEY GitHub secret>'
-export OCI_DB_PASSWORD='<value of the OCI_DB_PASSWORD GitHub secret (16-128 URL-safe chars)>'
+export OCI_SESSION_SECRET='<session signing key from recovery vault>'
+export OCI_RATE_LIMIT_REDIS_URL='<Upstash TLS URL from recovery vault>'
+export OCI_BACKUP_ENCRYPTION_KEY='<archive encryption key from recovery vault>'
+export OCI_DB_PASSWORD='<database password from recovery vault (16-128 URL-safe chars)>'
 export OCI_BACKUP_BUCKET=pto-calendar-backups
 export OCI_OBJECT_STORAGE_NAMESPACE=$(oci os ns get --auth instance_principal | jq -r .data)
 export OCI_REGION=$(oci iam region-subscription list --auth instance_principal | jq -r '.data[0].region-name')
@@ -158,50 +163,52 @@ prints a warning explaining how to fix it (switch the `A` record, then
 `sudo docker compose -f /opt/pto-calendar/docker-compose.prod.yml
 restart caddy`) but exits 0 because the stack itself is functional.
 
-## 6. Restore the Supabase database into the OCI container
+## 6. Restore an OCI backup into the replacement VM
+
+For a recovery, download the encrypted OCI Object Storage archive and matching
+checksum with an authorized operator account. Verify a disposable restore first
+using `docs/database-backups.md`. Copy only the encrypted files to the
+replacement VM; never run the production command on the healthy live VM as a
+routine drill.
 
 ```bash
-# From the trusted workstation, copy the latest archive
-ARCHIVE=$(gh workflow run database-backup.yml --ref v1.1.0 >/dev/null && \
-  gh run list --workflow database-backup.yml --limit 1 --json databaseId \
-    --jq '.[0].databaseId' | xargs -I{} gh run view {} --json jobs \
-    --jq '.jobs[0].outputs.archive_name')
-scp ${ARCHIVE} ${ARCHIVE}.sha256 deploy@pto-calendar.lhsalas.com:/home/deploy/
+# From the trusted workstation's download directory
+ARCHIVE=pto-<timestamp>.tar.gz.gpg
+scp "${ARCHIVE}" "${ARCHIVE}.sha256" deploy@<replacement-vm-ip>:/home/deploy/
 
 # Restore into the OCI PostgreSQL container
-ssh deploy@pto-calendar.lhsalas.com
+ssh deploy@<replacement-vm-ip>
+cd /home/deploy
 /opt/pto-calendar/infra/deploy/restore-oci.sh \
-  --archive /home/deploy/${ARCHIVE} \
+  --archive pto-<timestamp>.tar.gz.gpg \
   --confirm-production-target
 ```
 
-## 7. Verify and cut over
+## 7. Verify and accept recovery
 
 ```bash
 ssh deploy@pto-calendar.lhsalas.com
-curl -kfsS --max-time 10 https://pto-calendar.lhsalas.com/health
-curl -kfsS --max-time 10 https://pto-calendar.lhsalas.com/ready
+curl -fsS --max-time 10 https://pto-calendar.lhsalas.com/health
+curl -fsS --max-time 10 https://pto-calendar.lhsalas.com/ready
 
 # Login and test PTO CRUD in the browser through the OCI host
 ```
 
-When the smoke tests pass, switch the DNS A record to the OCI reserved IP.
-Confirm the first scheduled `pto-calendar-backup.timer` run completes and
-that `oci os object list --bucket-name pto-calendar-backups` shows the new
-archive.
+For an actual VM replacement, switch the reserved IP or DNS only after the
+recovered app passes validation. Confirm the next scheduled backup timer run
+and matching off-VM archive/checksum. Record evidence in `docs/cutover-drill.md`.
 
 ## 8. Rollback (if needed)
 
-If OCI has accepted no writes, revert DNS to the previous Firebase/Cloud
-Run endpoint and disable the OCI workflow with
-`OCI_PRODUCTION_DEPLOY_ENABLED=false`.
+Deploy a known-good OCI release compatible with the current database schema,
+or recover onto a replacement OCI VM. Migrations are forward-only. Back up
+current data and freeze writes before destructive restores. Do not route users
+back to a stale legacy database.
 
-If OCI has accepted writes, freeze writes, create an encrypted OCI backup
-with `infra/deploy/backup.sh`, restore it into Supabase after a disposable
-validation, and only then revert DNS.
+## 9. Retired deployment configuration
 
-## 9. Tear down the GCP fallback
-
-After at least one successful OCI restore drill and one successful scheduled
-backup, the Cloud Run/Firebase/Supabase deployment may be torn down. Until
-then, keep it intact as the rollback window.
+The old deployment workflows and docs are retired in #223. After recording a
+successful scheduled OCI backup and the prior successful OCI restore, follow the exact
+GitHub configuration allowlist in `docs/deploy.md` section 9 / issue #222.
+Cloud resources, archived backups/keys, DNS, and the existing Firebase redirect
+are not changed by this sunset. Any cloud teardown needs separate approval.

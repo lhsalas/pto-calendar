@@ -12,10 +12,10 @@ Browser -> Caddy (TLS + HSTS) -> nginx (SPA + API proxy)
                               -> Upstash Redis/Valkey (TLS)
 ```
 
-The Cloud Run/Firebase/Supabase path is preserved as a manual fallback in
-[`gcp-firebase-deploy.md`](gcp-firebase-deploy.md). The deferred custom-domain
-option is documented in
-[`gcp-firebase-custom-domain.md`](gcp-firebase-custom-domain.md).
+OCI is the only supported production deployment. The former GCP/Firebase/
+Supabase workflows and runbooks are retired; historical instructions remain in
+Git history. This repository cleanup does not delete cloud resources or change
+the existing Firebase-to-OCI redirect.
 
 ## 1. Provision the OCI VM
 
@@ -92,7 +92,7 @@ commit, issue, tag, or workflow log:
 | `ACME_EMAIL` | Certificate notification address |
 | `RELEASE_REF` | An exact release tag, for example `v1.1.0` |
 | `OCI_DB_PASSWORD` | URL-safe password for the local PostgreSQL role (16-128 chars) |
-| `OCI_SESSION_SECRET` | GitHub repository secret; same value as the legacy Cloud Run `pto-session-secret` |
+| `OCI_SESSION_SECRET` | Existing session signing key from the protected recovery vault |
 | `OCI_RATE_LIMIT_REDIS_URL` | GitHub repository secret; Upstash `rediss://` connection URL |
 | `OCI_BACKUP_ENCRYPTION_KEY` | GitHub repository secret; strong key for `gpg --symmetric` on daily archives |
 | `OCI_BACKUP_BUCKET` | Private OCI Object Storage bucket name |
@@ -101,29 +101,25 @@ commit, issue, tag, or workflow log:
 
 `OCI_DB_PASSWORD`, `OCI_SESSION_SECRET`, `OCI_RATE_LIMIT_REDIS_URL`, and
 `OCI_BACKUP_ENCRYPTION_KEY` are GitHub Actions repository secrets (Settings
-→ Secrets and variables → Actions → Repository secrets). They replace the
-legacy GCP Secret Manager entries; the GCP secrets can be deleted once the
-OCI deploy is healthy. The Supabase backup workflow still reads from GCP
-Secret Manager for `pto-backup-db-url` and `pto-backup-encryption-key`.
+→ Secrets and variables → Actions → Repository secrets). They are retained
+**recovery copies**, not inputs to the deployment workflow. The live application
+and backup service read `/opt/pto-calendar/.env`. Keep matching recoverable
+copies in a separate password vault: GitHub does not reveal stored secret
+values through its UI or API. Do not rotate or delete these values as part of
+the deployment sunset.
 
-The existing `SESSION_SECRET` can be reused. It preserves cryptographic
-compatibility for any cookie that is presented to the new service, although a
-host-only cookie created for the Cloud Run hostname will not be sent to the OCI
-hostname. Users should therefore expect to log in again after the hostname
-changes. Their database accounts and password hashes are preserved.
-
-For the Supabase-to-OCI migration, skip bootstrap so no temporary user is
-created:
+For a replacement VM that will restore an existing OCI backup, skip bootstrap
+so no temporary user is created:
 
 ```bash
 export HOST=pto.example.com
 export CORS_ORIGIN=https://pto.example.com
 export ACME_EMAIL=ops@example.com
 export RELEASE_REF=v1.1.0
-export OCI_SESSION_SECRET='<value of OCI_SESSION_SECRET GitHub secret>'
-export OCI_RATE_LIMIT_REDIS_URL='<value of OCI_RATE_LIMIT_REDIS_URL GitHub secret>'
-export OCI_BACKUP_ENCRYPTION_KEY='<value of OCI_BACKUP_ENCRYPTION_KEY GitHub secret>'
-export OCI_DB_PASSWORD='<value of OCI_DB_PASSWORD GitHub secret>'
+export OCI_SESSION_SECRET='<session signing key from recovery vault>'
+export OCI_RATE_LIMIT_REDIS_URL='<Upstash TLS URL from recovery vault>'
+export OCI_BACKUP_ENCRYPTION_KEY='<archive encryption key from recovery vault>'
+export OCI_DB_PASSWORD='<database password from recovery vault>'
 export OCI_BACKUP_BUCKET=pto-calendar-backups
 export OCI_OBJECT_STORAGE_NAMESPACE=<object-storage-namespace>
 export OCI_REGION=<oci-region>
@@ -142,7 +138,7 @@ The normal production runtime is the slim image. The Compose `bootstrap`
 profile intentionally uses the build stage because the runtime image does not
 contain `tsx` or the TypeScript source used by `db:bootstrap`.
 
-For a brand-new database instead of a migration, set `SKIP_BOOTSTRAP=false`
+For a brand-new database, set `SKIP_BOOTSTRAP=false` and provide `LEAD_EMAIL`
 
 ```bash
 sudo -E bash /tmp/setup.sh
@@ -153,11 +149,9 @@ Do not run the development seed in production.
 ## 3. Deploying releases
 
 The OCI deployment workflow is `.github/workflows/deploy-oci.yml`. It is
-gated by `OCI_PRODUCTION_DEPLOY_ENABLED=true` and triggers from three
+gated by `OCI_PRODUCTION_DEPLOY_ENABLED=true` and triggers from two
 sources:
 
-- `push: tags: ['v*.*.*']` — fires when a release tag is pushed. Runs the
-  resolve, checkout, and tag-format steps, then attempts to deploy.
 - `workflow_run: workflows: [CI], types: [completed]` — fires when the CI
   workflow finishes for any push event. The job filters to tag pushes
   (`refs/tags/v*` or bare `v*.*.*`) and `conclusion=success`; if the filter
@@ -167,7 +161,7 @@ sources:
   runs API for up to 5 minutes (20 × 15 s) before failing.
 
 Because `workflow_run` runs only after CI completes, the deploy never races
-the CI gate. The CI itself triggers on the same tag push, runs all ten
+the CI gate. The CI itself triggers on the same tag push, runs all eleven
 checks, and on success hands off to the OCI deploy via the `workflow_run`
 event.
 
@@ -187,9 +181,9 @@ hostname points at the reserved IP via DNS and is reachable on ports 80 and
 443 only, while the deploy workflow SSHes directly to the IP. This keeps the
 TLS termination path simple and avoids depending on DNS for the deploy.
 
-The three GCP workflows remain manual-only and are gated by
-`GCP_FALLBACK_DEPLOY_ENABLED`. This prevents a release tag from deploying to
-both platforms.
+There is no direct tag-push trigger in `deploy-oci.yml`: only successful tag
+CI or a manually requested, CI-verified ref can deploy. Ordinary master/PR
+CI completion does not deploy production.
 
 Deploy a release manually on the VM:
 
@@ -201,103 +195,22 @@ cd /opt/pto-calendar
 
 `deploy.sh` fetches tags, validates the ref and optional expected commit,
 checks for a clean tree, builds the current ARM64 images, runs migrations,
-pull or deploy a moving branch.
+restarts the application, and verifies health/readiness. Prefer an immutable
+release tag or commit for repeatable recovery.
 
-## 4. Supabase to OCI database migration
+## 4. Production acceptance
 
-Perform this once during a scheduled maintenance window.
+OCI is the source of truth; the one-time database migration is complete.
+For every release or recovery, record the exact commit and migration version,
+then verify `/health`, `/ready`, login/session persistence, PTO CRUD, team-lead
+authorization, CSRF rejection, and the secure host-only SameSite=Lax cookie.
 
-### 4.1 Verify the source
-
-Before the final export, record the following from Supabase:
-
-```sql
-SELECT MAX(migration_name) FROM _prisma_migrations;
-SELECT COUNT(*) FROM users;
-SELECT COUNT(*) FROM pto_requests;
-SELECT COUNT(*) FROM holidays;
-SELECT COUNT(*) FROM audit_logs;
-```
-
-Confirm that the source migration list is not ahead of the release being
-deployed to OCI. The current release includes the `session_version` migration.
-
-### 4.2 Create and validate the encrypted backup
-
-The existing Supabase backup workflow uses the GCS bucket and encryption flow.
-Before relying on it, repair the database URL secret so it contains the
-IPv4-compatible Supabase pooler URL. The current direct endpoint fails on
-GitHub-hosted runners without IPv6. Then run the workflow manually and verify
-that it completes.
-
-The trusted-workstation equivalent is:
-
-```bash
-DATABASE_URL='<supabase-direct-or-ipv4-pooler-url>' \
-BACKUP_BUCKET='<gcs-backup-bucket>' \
-ENCRYPTION_KEY='<backup-key>' \
-  node bin/backup-db.mjs --label supabase-oci-cutover
-```
-
-The generated archive contains `schema.sql` and `data.sql`, is encrypted with
-AES-256, and has a `.sha256` checksum. Restore it into disposable PostgreSQL
-using `bin/restore-backup.mjs` before using it for the production target.
-Download the archive and its adjacent checksum first and run the helper from
-that directory; it restores local files and does not need cloud credentials.
-Compare all four row counts and the migration table after the disposable
-restore.
-
-Keep the final encrypted archive and checksum outside the VM until the OCI
-deployment has been accepted.
-
-### 4.3 Freeze writes and prepare OCI
-
-Freeze the Cloud Run application before the final export. The repository does
-not provide a read-only application mode, so use a controlled platform-level
-maintenance step that blocks Cloud Run invocation, and record how to reverse
-it. Keep Cloud Run, Firebase, and Supabase intact for rollback.
-
-On OCI, start PostgreSQL and verify its health. Do not run `db:seed` or
-`db:bootstrap`. The restore target is the PostgreSQL container from
-`docker-compose.prod.yml`, database `pto`.
-
-Copy only the encrypted archive and checksum to the VM:
-
-```bash
-scp pto-<timestamp>.tar.gz.gpg pto-<timestamp>.tar.gz.gpg.sha256 \
-  deploy@pto.example.com:/home/deploy/
-```
-
-### 4.4 Restore into the PostgreSQL container
-
-Run the dedicated production restore command as `deploy`:
-
-```bash
-ssh deploy@pto.example.com
-cd /home/deploy
-/opt/pto-calendar/infra/deploy/restore-oci.sh \
-  --archive pto-<timestamp>.tar.gz.gpg \
-  --confirm-production-target
-```
-
-The command verifies the checksum, decrypts into a restricted temporary
-directory, rejects archive paths other than `schema.sql` and `data.sql`, stops
-the application, creates an encrypted pre-restore backup, drops the target
-`public` schema, and applies both files through:
-
-```bash
-docker compose -f /opt/pto-calendar/docker-compose.prod.yml exec -T db psql ...
-```
-
-It then runs `prisma migrate deploy`, starts the application, and checks
-`/health` and `/ready`. It leaves the application stopped if any destructive
-step fails. Do not pass `--allow-disposable-target`; that flag is reserved for
-the generic disposable restore tool.
-
-After restore, compare the source and target row counts, verify
-`_prisma_migrations`, log in with a restored account, and test PTO create,
-edit, delete, team-lead authorization, CSRF rejection, and session-version
-revocation.
+Verify the daily backup timer and an encrypted off-VM archive, and perform a
+disposable restore before relying on the recovery path. Use
+[`cutover-drill.md`](cutover-drill.md) to record evidence and
+[`database-backups.md`](database-backups.md) for the separate disposable and
+explicitly confirmed production restore procedures. Do not run development
+seed data or bootstrap existing users during recovery.
 
 ## 5. Backups and restore
 
@@ -345,14 +258,6 @@ container with a fresh password.
 
 ### Application rollback
 
-Before OCI accepts writes, point DNS back to the previous Firebase/Cloud Run
-path or send users to its preserved URL. Re-enable the old Cloud Run service if
-the maintenance freeze was implemented through IAM.
-
-After OCI accepts writes, do not switch back to Cloud Run while Supabase is
-stale. Freeze writes, create an encrypted OCI backup, restore or synchronize it
-into Supabase after a disposable validation, and only then route traffic back.
-
 For a code-only problem, deploy a known-good OCI release tag if its Prisma
 schema is compatible with the current database. Migrations are forward-only;
 do not deploy `v1.0.0` against the current schema because it predates
@@ -367,9 +272,8 @@ do not deploy `v1.0.0` against the current schema because it predates
 5. Verify `/health`, `/ready`, login, authorization, and PTO CRUD.
 6. Repoint the reserved IP or DNS record if the original VM cannot be reused.
 
-Keep the current Cloud Run/Firebase/Supabase deployment available for the
-rollback window. Retire it only after OCI backups and at least one restore drill
-have passed.
+Recovery stays on OCI. Legacy services are not a supported rollback target:
+their database may be stale. Do not route production traffic back to them.
 
 ## 7. Release and recovery tags
 
@@ -377,14 +281,14 @@ have passed.
 Run migration and security/runtime fixes. The current pre-OCI GCP/Firebase
 state is preserved as the non-release tag `pre-oci-master-20260822`.
 
-After the OCI implementation is merged, tested, and deployed, create an
-annotated release tag such as:
+After a change is merged and tested, create a new annotated release tag
+(choose the next unused version; never move an existing tag):
 
 ```bash
 git checkout master
 git pull --ff-only
-git tag -a v1.1.0 -m "OCI production deployment and recovery flow"
-git push origin v1.1.0
+git tag -a vX.Y.Z -m "Describe the tested release"
+git push origin vX.Y.Z
 ```
 
 Protect release tags in GitHub. The OCI workflow deploys the exact tag after
@@ -401,3 +305,34 @@ the matching CI run succeeds.
   passwords.
 - Run a disposable restore drill at least quarterly and after backup-script
   changes.
+
+## 9. GitHub configuration retirement
+
+The repository retirement is tracked in #223, following the local-archive
+restore helper in #224. Operational GitHub cleanup is tracked separately in
+#222. Before deleting configuration, record successful scheduled OCI backups
+and the operator's prior successful OCI restore, merge the workflow retirement,
+and confirm no legacy
+jobs are queued or running. Verify the OCI deploy path and public probes.
+
+Remove only these obsolete **repository secrets**:
+
+- `GCP_BACKUP_SERVICE_ACCOUNT`
+- `GCP_DEPLOY_SERVICE_ACCOUNT`
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`
+
+Remove only these obsolete **repository variables**:
+
+- `BACKUP_BUCKET`, `FIREBASE_PROJECT_ID`, `FIREBASE_SITE_ORIGIN`
+- `GCP_ARTIFACT_REGISTRY_REPOSITORY`, `GCP_BACKUP_DB_URL_SECRET`
+- `GCP_BACKUP_ENCRYPTION_KEY_SECRET`, `GCP_DATABASE_URL_SECRET`
+- `GCP_DIRECT_URL_SECRET`, `GCP_FALLBACK_DEPLOY_ENABLED`, `GCP_PROJECT_ID`
+- `GCP_RATE_LIMIT_REDIS_URL_SECRET`, `GCP_REGION`
+- `GCP_RUNTIME_SERVICE_ACCOUNT`, `GCP_SESSION_SECRET_SECRET`
+
+Retain all six OCI workflow inputs from section 3 and all four recovery secrets
+from section 2. Re-inventory names only: expect seven repository secrets and
+three variables unless unrelated entries were added. Preserve environment
+settings and unrelated configuration. Deleting GitHub entries does not revoke
+Google IAM, delete cloud secrets/archives, or alter the Firebase redirect;
+cloud teardown requires a separate approved task.

@@ -1,41 +1,25 @@
-# Database Backups and Migration
+# OCI Database Backup and Recovery
 
-This document covers the one-time Supabase-to-OCI migration and the ongoing
-OCI PostgreSQL backup flow. The Supabase backup workflow remains available for
-the GCP/Firebase fallback path.
+OCI PostgreSQL is the production source of truth. Backups run on the VM and
+are encrypted before upload to private OCI Object Storage. There is no GitHub
+Actions database backup workflow and no GCP dependency in the restore helper.
 
 ## Backup Decision
 
-Supabase automatically backs up Pro, Team, and Enterprise projects. The
-retention is plan-dependent. Supabase Free projects do not provide downloadable
-managed backups, so this application uses external logical backups.
-
-The repository workflow `.github/workflows/database-backup.yml` is the
-Supabase-source backup flow. It currently runs on the repository's configured
-weekly schedule and can also be started manually. Before the OCI cutover,
-update the `pto-backup-db-url` secret to an IPv4-compatible Supabase pooler URL:
-the direct `db.<project>.supabase.co` endpoint fails on runners without IPv6.
-The workflow:
-
-1. Dumps the `public` schema with the Supabase CLI.
-2. Dumps public data separately using `--data-only --use-copy`.
-3. Archives and encrypts both files with AES-256.
-4. Uploads the encrypted archive and checksum to a private Google Cloud
-   Storage bucket.
-
-The bucket lifecycle file in `infra/gcp/backup-lifecycle.json` deletes objects
-after 30 days. Change the retention only after confirming the storage cost and
-recovery requirement.
+`infra/deploy/backup.sh` dumps `public` schema and data separately, archives
+them as `schema.sql` and `data.sql`, encrypts with AES-256, and uploads the
+encrypted archive and checksum off-VM. The daily systemd timer replaces the
+retired Supabase/GCS schedule. Keep at least 30 daily archives and verify the
+bucket's actual lifecycle policy; repository cleanup does not change it.
 
 ## Operator Scripts
 
-The same flow is available locally through two helper scripts so operators do
-not have to remember the exact invocation:
+The supported operator scripts are:
 
-- `bin/backup-db.mjs` — dump, encrypt, upload. Mirrors the GitHub Actions
-  workflow. Requires `DATABASE_URL`, `BACKUP_BUCKET`, `ENCRYPTION_KEY` env vars
-  plus `supabase` (preferred) or `pg_dump`, `gpg`, `tar`, `sha256sum`, and
-  `gcloud` on `PATH`.
+- `infra/deploy/backup.sh` — dump, encrypt, and upload from the OCI VM using
+  instance-principal authorization. Reads the VM's protected `.env` file.
+- `infra/deploy/restore-oci.sh` — production restore, requiring the separate
+  `--confirm-production-target` flag and a pre-restore backup.
 - `bin/restore-backup.mjs` — verify, decrypt, and apply a **locally downloaded**
   encrypted archive and its adjacent `.sha256` file. Requires
   `TARGET_DATABASE_URL`, `ENCRYPTION_KEY`, and `gpg`, `tar`, `sha256sum`, and
@@ -43,53 +27,16 @@ not have to remember the exact invocation:
   `--allow-disposable-target` and resets the disposable target's `public`
   schema in the same transaction as the schema/data restore.
 
-Both scripts mask secrets where GitHub Actions does, set `umask 077` on the
-working directory, and never echo secret values back to the terminal.
+The scripts set `umask 077` on the working directory and never echo secret
+values back to the terminal.
 They reject encryption keys shorter than 32 characters, low-diversity keys, and
 common placeholder prefixes. Failed child processes throw through the top-level
 cleanup path so temporary plaintext, decrypted archives, and passphrases are
 removed before exit.
 
-## One-Time GCP Setup for the Supabase Source
-
-Create a private bucket in the same region as the Cloud Run service:
-
-```bash
-gcloud storage buckets create gs://<backup-bucket> \
-  --project=<gcp-project-id> \
-  --location=<gcp-region> \
-  --uniform-bucket-level-access
-
-gcloud storage buckets update gs://<backup-bucket> \
-  --lifecycle-file=infra/gcp/backup-lifecycle.json
-```
-
-Enable public access prevention and grant the backup service account only:
-
-- Object Creator for scheduled uploads.
-- Object Viewer for restore operations.
-
-Create these Secret Manager entries:
-
-- `pto-backup-db-url`: direct Supabase URL when the runner supports IPv6, or
-  the shared pooler session URL otherwise.
-- `pto-backup-encryption-key`: a high-entropy passphrase stored only in Secret
-  Manager.
-
-Generate a key from random bytes rather than a human phrase:
-
-```bash
-openssl rand -base64 32
-```
-
-The backup service account needs Secret Manager access to those two secrets
-and object-create access to the bucket. GitHub Actions authenticates through
-Workload Identity Federation.
-
 ## OCI Object Storage Backups
 
-After the cutover, OCI is the source of truth. The VM's
-`infra/deploy/backup.sh` script dumps the public schema and data from the
+The VM's `infra/deploy/backup.sh` script dumps the public schema and data from the
 PostgreSQL container, encrypts the archive with AES-256, and uploads the
 archive and checksum to a private OCI Object Storage bucket using instance
 principal authentication.
@@ -101,8 +48,11 @@ The required runtime values are stored in the VM's mode `0600` `.env` file:
 - `OCI_OBJECT_STORAGE_NAMESPACE`
 - `OCI_REGION`
 
-The encryption key must also be stored in an external password vault. A VM
-local copy alone is not a recovery plan. The Object Storage bucket should have
+The encryption key must also be stored in an external password vault. Keep
+`OCI_BACKUP_ENCRYPTION_KEY` in GitHub as a recovery copy, but do not rely on
+GitHub to reveal its stored value. A VM-local copy alone is not a recovery
+plan. Retain the key for every archive still in retention, including historical
+archives encrypted with a different key. The Object Storage bucket should have
 private access, a retention policy of at least 30 days, and no public
 pre-authenticated URL.
 
@@ -116,36 +66,15 @@ sudo journalctl -u pto-calendar-backup.service --since today
 
 ## Manual Backup
 
-Install the Supabase CLI, then run the helper script:
+Run the supported backup script on the OCI VM:
 
 ```bash
-DATABASE_URL='<supabase-direct-or-session-url>' \
-BACKUP_BUCKET='<backup-bucket>' \
-ENCRYPTION_KEY='<passphrase>' \
-  node bin/backup-db.mjs [--label <suffix>] [--keep-local]
+ssh deploy@<oci-host>
+/opt/pto-calendar/infra/deploy/backup.sh
 ```
 
-Or invoke `supabase db dump` and the GPG flow manually:
-
-```bash
-supabase db dump \
-  --db-url "$SUPABASE_DB_URL" \
-  --schema public \
-  --file schema.sql
-
-supabase db dump \
-  --db-url "$SUPABASE_DB_URL" \
-  --schema public \
-  --data-only \
-  --use-copy \
-  --file data.sql
-
-tar -czf pto-$(date -u +%Y%m%dT%H%M%SZ).tar.gz schema.sql data.sql
-```
-
-The default Supabase CLI dump is schema-only. The second command is required
-to include application data. The current application stores its data in the
-`public` schema and does not use Supabase Storage objects.
+Verify the completion log and the matching archive/checksum in Object Storage.
+The application stores its data in PostgreSQL's `public` schema.
 
 Protect local dump files because they contain names, email addresses, PTO
 notes, audit data, and password hashes. Delete plaintext files after creating
@@ -166,9 +95,8 @@ ENCRYPTION_KEY='<passphrase>' \
     --allow-disposable-target
 ```
 
-For a retained legacy GCS archive, download the same two files before running
-the helper. Downloading is separate from restoring; the helper never contacts
-GCS or OCI. It verifies the checksum before decrypting, validates archive
+Downloading is separate from restoring; the helper never contacts cloud
+storage. It verifies the checksum before decrypting, validates archive
 members, sanitizes SQL, and restores schema and data in one transaction. A SQL
 failure rolls back the target schema reset. Source encrypted files are kept;
 temporary plaintext and passphrases are removed on success and failure.
@@ -191,45 +119,21 @@ the server is PostgreSQL 16, and the target then fails with `unrecognized
 configuration parameter "transaction_timeout"`. Keep the client and server
 versions in mind when a restore fails to apply.
 
-The manual equivalent:
-
-```bash
-gcloud storage cp \
-  gs://<backup-bucket>/pto/pto-<timestamp>.tar.gz.gpg \
-  gs://<backup-bucket>/pto/pto-<timestamp>.tar.gz.gpg.sha256 \
-  .
-
-sha256sum --check pto-<timestamp>.tar.gz.gpg.sha256
-gpg --decrypt \
-  --output pto-<timestamp>.tar.gz \
-  pto-<timestamp>.tar.gz.gpg
-tar -xzf pto-<timestamp>.tar.gz
-
-# Drop the public schema so the dump's CREATE SCHEMA public can run.
-psql "$TARGET_DATABASE_URL" -c 'DROP SCHEMA public CASCADE;'
-
-# Strip statements the target cannot parse or does not have roles for.
-sed -E -f infra/deploy/sql-sanitize-schema.sed schema.sql > schema-target.sql
-sed -E -f infra/deploy/sql-sanitize-data.sed data.sql > data-target.sql
-
-psql "$TARGET_DATABASE_URL" --variable=ON_ERROR_STOP=1 --file schema-target.sql
-psql "$TARGET_DATABASE_URL" --variable=ON_ERROR_STOP=1 --file data-target.sql
-```
-
-The drop step is required because the pg_dump output includes
-`CREATE SCHEMA public;`. `psql` is required (not `prisma db execute`) because
-the dump uses psql meta-commands like `\restrict`.
+Use the helper rather than manually extracting or applying SQL. The target
+schema reset is required because the dump includes `CREATE SCHEMA public;`.
+The helper invokes `psql` because the dump uses psql meta-commands like
+`\restrict`; it must not be applied with a generic SQL client.
 
 ### Restore drill log
 
-Fill in and attach to the OCI migration/recovery ticket (`#166`):
+Fill in and attach to the recovery ticket (or sunset verification in #222):
 
 | Field | Value |
 | --- | --- |
 | Date | |
 | Operator | |
 | Archive timestamp (UTC) | |
-| Source archive path | `gs://<bucket>/pto/pto-<timestamp>.tar.gz.gpg` |
+| Source archive path | `oci://<namespace>/<bucket>/pto/pto-<timestamp>.tar.gz.gpg` |
 | Target database | |
 | Schema version (`SELECT MAX(migration_name) FROM _prisma_migrations;`) | |
 | User count (`SELECT COUNT(*) FROM users;`) | |
@@ -255,11 +159,13 @@ Do not run `prisma migrate reset` against a restored production database.
 Pending migrations can be applied with `prisma migrate deploy` after verifying
 that the restored schema is the expected version.
 
-## Supabase-to-OCI Production Restore
+## OCI Production Restore
 
-The generic `bin/restore-backup.mjs` command intentionally refuses production
-targets and must remain disposable-target-only. For the OCI production target,
-copy the encrypted Supabase archive and checksum to the VM and run:
+The generic `bin/restore-backup.mjs` command requires explicit disposable-target
+confirmation; it cannot determine whether a supplied URL points at production.
+The operator must select an isolated disposable database. For the OCI production target,
+copy the downloaded encrypted OCI archive and checksum to the VM and run from
+their directory, using only the archive basename:
 
 ```bash
 ssh deploy@<oci-host>
@@ -283,7 +189,6 @@ This gives an expected maximum backup age of approximately 24 hours, excluding
 workflow or VM failures. Review the systemd journal and Object Storage object
 timestamps after every scheduled run and investigate any missed backup.
 
-If the database is business-critical, upgrade Supabase to a paid plan for
-managed daily backups. Point-in-time recovery is a separate paid capability.
-Supabase Free projects may also be paused after prolonged low activity, so
-availability requirements should be reviewed separately from backup retention.
+This logical-backup flow does not provide point-in-time recovery or database
+high availability. Review those requirements separately. Do not delete legacy
+cloud archives or their decryption keys as part of the repository/GitHub sunset.

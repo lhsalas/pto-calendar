@@ -203,8 +203,9 @@ The test gate is `.github/workflows/ci.yml`. Production deployment is kept in
 separate workflows so the CI gate never receives production credentials. The
 OCI tag workflow (`deploy-oci.yml`) is gated by CI through the
 `workflow_run` trigger (it fires when the CI workflow completes for a tag
-push); the `push: tags` and `workflow_dispatch` triggers are retained as
-fallbacks. The GCP/Firebase workflows are manual-only fallbacks.
+push), or a manual `workflow_dispatch` that verifies the exact target commit's
+CI checks. There is no direct tag-push trigger in the deploy workflow and no
+legacy deployment or backup workflow.
 
 Jobs (run in order, with `needs:` dependencies):
 
@@ -216,7 +217,7 @@ Jobs (run in order, with `needs:` dependencies):
 | 4 | `test-backend-integration` | ubuntu-latest + postgres service | — | vitest run backend integration suite, coverage |
 | 5 | `test-frontend` | ubuntu-latest | — | vitest run frontend, coverage |
 | 6 | `build` | ubuntu-latest | lint, typecheck | build backend + frontend |
-| 7 | `deployment-config` | ubuntu-latest | lint, typecheck | validate Firebase/GCP fallback configuration, OCI Compose/Caddy headers, deployment scripts, workflow guards, supply-chain pins, and the Node.js runtime baseline |
+| 7 | `deployment-config` | ubuntu-latest | lint, typecheck | validate OCI Compose/Caddy headers, deployment scripts, workflow guards, retirement isolation, supply-chain pins, and the Node.js runtime baseline |
 | 8 | `security` | ubuntu-latest | — | audit the locked npm graphs, scan the pinned production base images for OS and runtime vulnerabilities |
 | 9 | `e2e` | ubuntu-latest + postgres service | build | playwright install, playwright test, upload trace/video on failure |
 | 10 | `docker-smoke` | ubuntu-latest | build | start the all-in-one compose stack, poll `/health`, assert the images run the supported Node.js baseline, login + validate auto-seeded holidays + validate the seed endpoint, tear down with `-v` |
@@ -250,7 +251,8 @@ newer 24.x security release ships.
 - `push` of a semver `v*.*.*` tag: full pipeline for release gating.
 - `schedule` (Mondays, 06:30 UTC): full pipeline, so a newly disclosed advisory
   in the unchanged lockfile or in a pinned image is noticed without a commit.
-- Supabase backups run in the separate `database-backup.yml` workflow.
+- Production database backups run daily at 03:00 UTC on the OCI VM via
+  `pto-calendar-backup.timer`, not GitHub Actions.
 
 The disposable restore helper is tested with real encrypted local archives and
 a recording `psql` executable: checksum tampering, missing/symlink inputs,
@@ -270,9 +272,17 @@ failing check.
 
 ### 10.5 Secrets
 - `DATABASE_URL` for the Postgres service container (set per job, never from repo secrets).
-- OCI deployment uses protected-environment values `OCI_HOST`,
-  `OCI_DEPLOY_USER`, `OCI_KNOWN_HOSTS`, and `OCI_SSH_PRIVATE_KEY`; the OCI
-  workflow has no OIDC permission.
+- OCI deployment uses `OCI_HOST`,
+  `OCI_DEPLOY_USER`, `OCI_PRODUCTION_DEPLOY_ENABLED`, `OCI_KNOWN_HOSTS`,
+  `OCI_SSH_HOST`, and `OCI_SSH_PRIVATE_KEY` from repository configuration. The
+  job uses the `production` environment and has no OIDC permission.
+- `OCI_DB_PASSWORD`, `OCI_SESSION_SECRET`, `OCI_RATE_LIMIT_REDIS_URL`, and
+  `OCI_BACKUP_ENCRYPTION_KEY` remain recovery copies in GitHub, not workflow
+  inputs. The application and daily backup timer read the VM's protected `.env`.
+- `npm run deployment:sunset:check` rejects retired files and legacy
+  deployment credential/tool references in active workflows while requiring
+  OCI recovery assets to remain. Local encrypted-archive restore tests and the
+  real PostgreSQL backup roundtrip remain mandatory.
 - No real user data in CI; seed only.
 
 ### 10.6 Vulnerability scanning

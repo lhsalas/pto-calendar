@@ -8,7 +8,7 @@
 # the dynamic group `pto-calendar-vm` matches the instance and the IAM
 # policy can grant Object Storage access via the instance principal.
 #
-# Required environment variables (sourced from GitHub Secrets):
+# Required environment variables (from the recovery vault; GitHub retains copies):
 #   HOST                      Bare public hostname (e.g. pto-calendar.example.com)
 #   CORS_ORIGIN               https://${HOST}
 #   ACME_EMAIL                Email for Let's Encrypt registration

@@ -1,31 +1,31 @@
-# OCI Production Cutover and Recovery Drill
+# OCI Release Acceptance and Recovery Drill
 
-Use this checklist for the Supabase-to-OCI migration and for later recovery
-drills. The procedure keeps the current Cloud Run/Firebase/Supabase deployment
-available until the OCI path is verified.
+Use this checklist for OCI releases and recurring recovery drills. The original
+database migration is complete. Recovery uses OCI backups and known-good OCI
+releases, not the retired deployment path.
 
 ## Preconditions
 
-- [ ] The OCI VM is ARM64 Ubuntu 22.04 with a reserved public IP.
-- [ ] DNS for the production hostname can be pointed to the OCI IP.
+- [ ] The OCI VM is ARM64 Ubuntu 22.04/24.04 with a reserved public IP.
+- [ ] The production hostname resolves to OCI and has a valid TLS certificate.
 - [ ] OCI Object Storage bucket, instance-principal policy, and lifecycle are
       configured.
 - [ ] Upstash `rediss://` connectivity has been tested from the VM.
 - [ ] The exact release tag and commit SHA are recorded.
-- [ ] The current Cloud Run, Firebase, and Supabase deployment is healthy.
-- [ ] The Cloud Run backup URL uses an IPv4-compatible Supabase pooler endpoint.
-- [ ] A successful encrypted Supabase backup and disposable restore are
-      available.
+- [ ] The daily OCI backup timer has a successful scheduled run.
+- [ ] A downloaded encrypted OCI archive and checksum are available.
+- [ ] Backup decryption keys and runtime recovery values are recoverable
+      outside the VM; the four GitHub OCI recovery copies are retained.
 
-## Source Database Record
+## Backup Source Record
 
-Record these values before the final backup:
+Record these values for the backup used in the drill:
 
 | Field | Value |
 |---|---|
 | Date/time UTC | |
 | Operator | |
-| Supabase project reference | |
+| OCI bucket and object path | |
 | Source migration version | |
 | Users | |
 | PTO requests | |
@@ -34,61 +34,45 @@ Record these values before the final backup:
 | Backup archive | |
 | Backup checksum verified | yes / no |
 
-## Cutover
+## Release and Restore Acceptance
 
-1. [ ] Announce the maintenance window and stop new application writes.
-2. [ ] Confirm the old Cloud Run API is blocked or in the documented
-       maintenance state.
-3. [ ] Run the final Supabase logical backup and record its archive name.
-4. [ ] Verify its checksum and encryption without leaving plaintext outside a
-       restricted temporary directory.
-5. [ ] Confirm the final source counts and migration version.
-6. [ ] Provision the OCI VM using the exact release ref and `SKIP_BOOTSTRAP=true`.
-7. [ ] Start only the OCI PostgreSQL and supporting services needed for restore.
-8. [ ] Copy the encrypted archive and checksum to the VM.
-9. [ ] Run `restore-oci.sh --confirm-production-target` as `deploy`.
-10. [ ] Confirm the restore-created pre-restore backup exists in OCI Object
-        Storage.
-11. [ ] Confirm target counts and migration version match the source.
-12. [ ] Confirm `/health` and `/ready` return `200`.
-13. [ ] Confirm the session cookie is secure, HTTP-only, SameSite=Lax, and
-        host-only.
-14. [ ] Confirm login works with a restored user.
-15. [ ] Confirm session persistence after a browser reload.
-16. [ ] Confirm PTO create, edit, and delete operations.
-17. [ ] Confirm team-lead authorization and member restrictions.
-18. [ ] Confirm a state-changing request from an untrusted origin returns
-        `403 CSRF_REJECTED`.
-19. [ ] Confirm Upstash-backed login and global rate limiting respond as
-        expected.
-20. [ ] Confirm Caddy TLS, HSTS, CSP, and response security headers.
-21. [ ] Point the production DNS record to the OCI reserved IP.
-22. [ ] Repeat the browser smoke test through the public hostname.
-23. [ ] Re-enable normal traffic only after the public smoke test passes.
+1. [ ] Deploy an exact CI-tested release ref; record its commit SHA.
+2. [ ] Restore a downloaded archive into an isolated disposable PostgreSQL
+       target using `bin/restore-backup.mjs --allow-disposable-target` as
+       described in `database-backups.md`. Never point this at production.
+3. [ ] Confirm checksum verification, decryption, source migration version,
+       and all four table counts; compare to the recorded backup snapshot,
+       not a production database that has accepted newer writes.
+4. [ ] For an actual VM recovery, provision the replacement with
+       `SKIP_BOOTSTRAP=true`, then use only the separate production restore
+       confirmation on that explicitly selected replacement VM. Confirm its
+       pre-restore backup exists in Object Storage.
+5. [ ] Confirm `/health` and `/ready` return `200`.
+6. [ ] Confirm the session cookie is secure, HTTP-only, SameSite=Lax, and host-only.
+7. [ ] Confirm login and session persistence after a browser reload.
+8. [ ] Confirm PTO CRUD, team-lead authorization, and member restrictions.
+9. [ ] Confirm an untrusted origin returns `403 CSRF_REJECTED`.
+10. [ ] Confirm Upstash-backed rate limiting and Caddy TLS/security headers.
+11. [ ] Record restore duration, backup age, scheduled backup timestamp, and
+        any failure/remediation without putting credentials in the log.
 
-## Post-Cutover Observation
-
-Keep the old Cloud Run/Firebase/Supabase deployment intact during the selected
-rollback window. Observe:
+## Operational Observation
 
 - [ ] Caddy certificate renewal and error logs.
 - [ ] Application request logs and request IDs.
 - [ ] PostgreSQL volume growth and container restarts.
 - [ ] Upstash quota and connection errors.
-- [ ] The first scheduled OCI backup.
+- [ ] The latest scheduled OCI backup and off-VM object timestamps.
 - [ ] A successful backup download, checksum verification, and disposable
       restore.
 
 ## Rollback
 
-- [ ] If OCI has accepted no writes, freeze traffic and point DNS back to the
-      previous production endpoint.
-- [ ] If OCI has accepted writes, freeze traffic and back up OCI first. Do not
-      route the old application to stale Supabase data.
-- [ ] Restore or synchronize the OCI backup into Supabase after disposable
-      validation before routing traffic back.
-- [ ] Re-enable the old Cloud Run invocation path only after the database source
-      is current.
+- [ ] For a code-only failure, deploy a known-good OCI release compatible with
+      the current schema; migrations are forward-only.
+- [ ] For VM/data loss, recover onto OCI from a verified encrypted backup.
+- [ ] Freeze writes and back up current OCI data before any destructive restore.
+- [ ] Never route users to a stale legacy database or run development seed data.
 - [ ] Record the rollback reason, data state, archive, and follow-up issue.
 
 ## Drill Log
@@ -106,7 +90,7 @@ rollback window. Observe:
 | Target audit logs | |
 | Restore archive | |
 | Restore duration | |
-| First OCI backup | |
+| Latest scheduled OCI backup | |
 | Rollback tested | yes / no |
 | Failures and remediation | |
 | Follow-up issue | |

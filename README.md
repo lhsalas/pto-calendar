@@ -48,15 +48,12 @@ All project documentation lives under [`docs/`](docs/).
 ### 7. Deployment and Backup Runbooks
 
 - **Files:** `docs/deploy.md` and `docs/database-backups.md`
-- **Purpose:** OCI VM deployment, Supabase-to-OCI migration, OCI Object Storage
+- **Purpose:** OCI VM deployment and recovery, OCI Object Storage
   backups, and encrypted backup/restore procedures.
 
-The previous GCP Cloud Run/Firebase Hosting deployment remains documented in
-[`docs/gcp-firebase-deploy.md`](docs/gcp-firebase-deploy.md) as a manual
-fallback. Its cutover checklist is
-[`docs/gcp-firebase-cutover-drill.md`](docs/gcp-firebase-cutover-drill.md).
-The deferred shared-parent custom-domain plan is in
-[`docs/gcp-firebase-custom-domain.md`](docs/gcp-firebase-custom-domain.md).
+OCI is the only supported production target. The previous deployment workflows
+and runbooks are retired; Git history retains them. This repository cleanup
+does not delete old cloud resources or change the existing Firebase-to-OCI redirect.
 
 The comment-triggered `.github/workflows/opencode.yml` workflow requires a
 trusted repository owner/member comment and the protected `opencode` GitHub
@@ -208,22 +205,23 @@ store for shared login and global rate-limit counters.
 
 The complete operator runbook is [`docs/deploy.md`](docs/deploy.md). Database
 backup and restore procedures are in [`docs/database-backups.md`](docs/database-backups.md).
-The OCI cutover and recovery checklist is in
+The OCI release acceptance and recovery checklist is in
 [`docs/cutover-drill.md`](docs/cutover-drill.md).
 
-The tag-triggered `.github/workflows/deploy-oci.yml` workflow verifies that CI
-passed for the exact commit, then SSHes to the VM and runs the ref-aware
-deployment script. The existing GCP workflows are manual-only and gated by
-`GCP_FALLBACK_DEPLOY_ENABLED`, so a release tag cannot deploy to both
-platforms.
+The `.github/workflows/deploy-oci.yml` workflow deploys after successful CI for
+a release-tag push, or after a manual dispatch verifies CI for the exact target
+commit. It then SSHes to the VM and runs the ref-aware deployment script. It
+does not deploy ordinary master/PR CI runs or listen directly for tag pushes.
 
 The OCI runtime uses `COOKIE_SECURE=true`, `COOKIE_SAME_SITE=lax`, an empty
 `COOKIE_DOMAIN`, exact `CORS_ORIGIN=https://<oci-host>`, and
 `TRUST_PROXY_HOPS=2` for the Caddy -> nginx -> backend chain. The backend
 requires `RATE_LIMIT_REDIS_URL` and uses the existing Upstash `rediss://` URL.
 
-The current GCP/Firebase/Supabase path remains available as a deliberate
-fallback; see [`docs/gcp-firebase-deploy.md`](docs/gcp-firebase-deploy.md).
+Backups run daily on the VM via systemd, not GitHub Actions. Keep the four OCI
+runtime/backup recovery secrets in GitHub and an external password vault; the
+deployment workflow uses only the SSH secrets. See `docs/deploy.md` section 9
+for the allowlisted legacy GitHub configuration cleanup tracked in #222.
 
 The local Docker path remains separate and unchanged: `docker-compose.app.yml`
 continues to use `frontend/nginx.conf` to serve the SPA and proxy local API
