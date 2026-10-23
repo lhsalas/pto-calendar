@@ -21,6 +21,7 @@ const files = {
   ciWorkflow: resolve(root, '.github/workflows/ci.yml'),
   deployWorkflow: resolve(root, '.github/workflows/deploy-oci.yml'),
   dependabotConfig: resolve(root, '.github/dependabot.yml'),
+  nodeVersionFile: resolve(root, '.nvmrc'),
   trivyIgnore: resolve(root, '.trivyignore.yaml'),
   service: resolve(root, 'infra/db/pto-calendar-backup.service'),
   timer: resolve(root, 'infra/db/pto-calendar-backup.timer'),
@@ -162,6 +163,37 @@ if (existsSync(files.trivyIgnore)) {
     .map((e) => /expired_at: (\d{4}-\d{2}-\d{2})/.exec(e)?.[1])
     .filter((date) => date !== undefined && date < today);
   check(`no exception has expired (checked against ${today})`, expired.length === 0);
+}
+
+console.log('\nNode.js LTS update policy:');
+if (existsSync(files.dependabotConfig) && existsSync(files.nodeVersionFile)) {
+  const dependabot = readFileSync(files.dependabotConfig, 'utf8');
+  const runtimeMajor = readFileSync(files.nodeVersionFile, 'utf8').trim().split('.')[0];
+  const nextMajor = String(Number(runtimeMajor) + 1);
+
+  // The Node.js type definitions have to match the runtime major, and the
+  // runtime stays on the latest LTS line. Anything from the next major upwards
+  // is ignored, so Dependabot only proposes updates inside the LTS line.
+  const typesRule = /- dependency-name: '@types\/node'\n\s+versions:\n\s+- '>=(\d+)'/.exec(
+    dependabot,
+  );
+  check('the @types/node update rule exists', typesRule !== null);
+  if (typesRule) {
+    check(
+      `the @types/node update rule ignores the next major (>=${nextMajor})`,
+      typesRule[1] === nextMajor,
+    );
+  }
+
+  // The container base image has to match the pinned runtime major, so a
+  // major bump of the image is never an automatic update.
+  const dockerNodeRules = dependabot.match(
+    /- dependency-name: node\n\s+update-types:\n\s+- version-update:semver-major/g,
+  );
+  check(
+    'every Docker ecosystem ignores a major bump of the Node.js base image',
+    dockerNodeRules !== null && dockerNodeRules.length === 3,
+  );
 }
 
 console.log('\nSystemd units:');
