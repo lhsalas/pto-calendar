@@ -36,10 +36,12 @@ not have to remember the exact invocation:
   workflow. Requires `DATABASE_URL`, `BACKUP_BUCKET`, `ENCRYPTION_KEY` env vars
   plus `supabase` (preferred) or `pg_dump`, `gpg`, `tar`, `sha256sum`, and
   `gcloud` on `PATH`.
-- `bin/restore-backup.mjs` — download, verify, decrypt, apply. Requires
-  `BACKUP_BUCKET`, `TARGET_DATABASE_URL`, `ENCRYPTION_KEY` env vars plus
-  `gpg`, `tar`, `sha256sum`, `gcloud`, and `psql` on `PATH`. It also requires
-  the explicit `--allow-disposable-target` confirmation flag.
+- `bin/restore-backup.mjs` — verify, decrypt, and apply a **locally downloaded**
+  encrypted archive and its adjacent `.sha256` file. Requires
+  `TARGET_DATABASE_URL`, `ENCRYPTION_KEY`, and `gpg`, `tar`, `sha256sum`, and
+  `psql` on `PATH`, but no cloud credentials or bucket variable. It requires
+  `--allow-disposable-target` and resets the disposable target's `public`
+  schema in the same transaction as the schema/data restore.
 
 Both scripts mask secrets where GitHub Actions does, set `umask 077` on the
 working directory, and never echo secret values back to the terminal.
@@ -151,18 +153,25 @@ an encrypted archive.
 
 ## Restore Drill
 
-Restore into a new Supabase project or a disposable local PostgreSQL instance,
-not directly over production. The helper script downloads, verifies, decrypts,
-and applies the archive:
+Restore into an isolated disposable PostgreSQL instance, never production.
+Download an encrypted archive and its matching `.sha256` file from OCI Object
+Storage using the console or an authorized operator account. Change into the
+download directory, then run the helper with the archive's basename:
 
 ```bash
-BACKUP_BUCKET='<backup-bucket>' \
 TARGET_DATABASE_URL='<disposable-target-url>' \
 ENCRYPTION_KEY='<passphrase>' \
-  node bin/restore-backup.mjs \
+  node /path/to/pto-calendar/bin/restore-backup.mjs \
     --archive pto-20260810T030000Z.tar.gz.gpg \
     --allow-disposable-target
 ```
+
+For a retained legacy GCS archive, download the same two files before running
+the helper. Downloading is separate from restoring; the helper never contacts
+GCS or OCI. It verifies the checksum before decrypting, validates archive
+members, sanitizes SQL, and restores schema and data in one transaction. A SQL
+failure rolls back the target schema reset. Source encrypted files are kept;
+temporary plaintext and passphrases are removed on success and failure.
 
 ### Target-incompatible SQL
 

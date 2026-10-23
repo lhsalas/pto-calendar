@@ -182,13 +182,14 @@ production data.
 
 Pick the most recent backup that the daily workflow produced (the
 filename contains the UTC timestamp). Restore it into a disposable
-Supabase project (or local Postgres) — never into production:
+Supabase project (or local Postgres) — never into production. Download the
+encrypted archive and adjacent `.sha256` file first, then change into their
+directory; the restore helper no longer downloads from GCS:
 
 ```bash
-BACKUP_BUCKET='<backup-bucket>' \
 TARGET_DATABASE_URL='<disposable-target-url>' \
 ENCRYPTION_KEY='<passphrase>' \
-  node bin/restore-backup.mjs \
+  node /path/to/pto-calendar/bin/restore-backup.mjs \
     --archive pto-<timestamp>.tar.gz.gpg \
     --allow-disposable-target
 ```

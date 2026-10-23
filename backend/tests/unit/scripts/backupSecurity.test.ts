@@ -36,7 +36,6 @@ describe('backup security helpers', () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          BACKUP_BUCKET: 'backup-bucket',
           TARGET_DATABASE_URL: 'postgresql://target.example.test/target',
           ENCRYPTION_KEY: 'aB1!cD2@eF3#gH4$iJ5%kL6&mN7*oP8+nN9?xY0z',
         },
@@ -55,7 +54,6 @@ describe('backup security helpers', () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          BACKUP_BUCKET: 'backup-bucket',
           TARGET_DATABASE_URL: 'postgresql://target.example.test/target',
           ENCRYPTION_KEY: 'aB1!cD2@eF3#gH4$iJ5%kL6&mN7*oP8+nN9?xY0z',
         },
