@@ -219,7 +219,7 @@ if (existsSync(files.deployDocs)) {
     /^## 1\. Provision the OCI VM/m,
     /^## 2\. First-time setup/m,
     /^## 3\. Deploying releases/m,
-    /^## 4\. Supabase to OCI database migration/m,
+    /^## 4\. Production acceptance/m,
     /^## 5\. Backups and restore/m,
     /^## 6\. Disaster recovery and rollback/m,
   ]) {

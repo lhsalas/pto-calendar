@@ -30,6 +30,7 @@
     "prisma:generate": "npm run prisma:generate -w backend",
     "prod:config:check": "node infra/tests/prod-headers.test.mjs",
     "deploy:scripts:check": "node infra/tests/deploy-scripts.test.mjs",
+    "deployment:sunset:check": "node infra/tests/deployment-sunset.test.mjs",
     "node:baseline:check": "node infra/tests/node-baseline.test.mjs",
     "prepare": "husky || true"
   },

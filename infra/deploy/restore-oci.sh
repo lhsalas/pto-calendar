@@ -105,8 +105,8 @@ tar -xzf "${DECRYPTED}" -C "${WORKDIR}" \
 rm -f "${DECRYPTED}"
 [[ -s "${WORKDIR}/schema.sql" && -s "${WORKDIR}/data.sql" ]] || fail "archive files are missing or empty" 2
 
-# Supabase dumps can contain ownership and ACL statements for roles that exist
-# only in Supabase. The OCI database intentionally creates only DB_USER, so
+# PostgreSQL dumps can contain ownership and ACL statements for source roles.
+# The OCI database intentionally creates only DB_USER, so
 # omit source-role metadata while retaining the actual schema DDL. The rules
 # live in shared sed files so the production restore, the generic disposable
 # restore, and the integration test cannot drift apart.

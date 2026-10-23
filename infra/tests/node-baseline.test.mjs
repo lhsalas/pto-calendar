@@ -87,13 +87,10 @@ if (floorMatch) {
   );
 }
 
-const workflows = [
-  '.github/workflows/ci.yml',
-  '.github/workflows/deploy.yml',
-  '.github/workflows/deploy-backend.yml',
-  '.github/workflows/deploy-frontend.yml',
-  '.github/workflows/deploy-secrets.yml',
-];
+const workflowDir = resolve(root, '.github/workflows');
+const workflows = readdirSync(workflowDir)
+  .filter((name) => /\.ya?ml$/.test(name))
+  .map((name) => `.github/workflows/${name}`);
 for (const workflow of workflows) {
   const content = read(workflow);
   // Workflows that provision a Node runtime must resolve it from `.nvmrc`, so
@@ -134,8 +131,7 @@ function hasEmptyTopLevelEnv(content) {
   return false;
 }
 
-const workflowDir = resolve(root, '.github/workflows');
-for (const file of readdirSync(workflowDir).filter((name) => name.endsWith('.yml'))) {
+for (const file of readdirSync(workflowDir).filter((name) => /\.ya?ml$/.test(name))) {
   const path = `${workflowDir}/${file}`;
   check(
     `.github/workflows/${file} does not declare an empty env mapping`,

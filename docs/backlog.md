@@ -415,8 +415,8 @@ A backlog item is done when:
 - Dev-toolchain security patch: `vitest ^3.2.7 → ^4.1.12`, `@vitest/coverage-v8 ^3.2.7 → ^4.1.12`, `vite ^7.3.6 → ^7.3.7`, `concurrently ^10.0.4 → ^10.0.6`, `lint-staged ^15.2.10 → ^17.6.0`, `js-yaml ^4.3.1 → ^4.3.2`, plus the resolved `tinypool` (removed with Vitest 4), `shell-quote 1.12.0`, `braces` (removed with lint-staged 17), `brace-expansion` and `source-map-js` patches. This clears the critical `tinypool` worker-option prototype-pollution RCE (`GHSA-5gmw-xhrv-c9v3`, `GHSA-85c8-ppgw-ccpr`), the `@vitest/mocker` dev-server file-read and code-injection advisories (`GHSA-82fw-gwwq-j7x9`, `GHSA-qxg6-89mg-rqv8`), the `shell-quote` command injection (`GHSA-pqg4-j6r4-53mv`), the Vite dev-server advisories, and the `braces`/`brace-expansion`/`js-yaml`/`source-map-js` denial-of-service findings. `npm audit` reports `0 vulnerabilities` for the whole graph again. Vitest 4 removed `poolOptions`, so the integration config uses the top-level `fileParallelism: false` and `isolate: true` in place of `poolOptions.forks.singleFork`, and the new V8 coverage provider counts defensive fallback branches, which are covered by new specs for `usePtoList`, `AuthContext`, `PTOViewModal` and `CalendarPage` rather than by relaxing a threshold. The readiness route in `backend/src/routes/health.ts` no longer carries an unreachable null check on its timeout handle.
 - Release-pipeline vulnerability scanning: a new `security` CI job audits the locked production and development npm graphs (`infra/security/audit.mjs`) and scans the pinned production base images for OS and runtime vulnerabilities (`infra/security/production-images.mjs` plus Trivy, targeting `linux/arm64` because that is the production platform). High or critical findings with a published fix fail the job; a scanner failure is a failure rather than a clean result. The CI workflow also runs on a weekly schedule so an advisory published after a release is noticed against the unchanged lockfile and digests. `.github/dependabot.yml` opens reviewed pull requests for npm, Docker and GitHub Actions updates without ever editing a digest or an action pin, and repository vulnerability alerts are enabled. The job name is part of the required-check list in both the CI policy and the OCI deployment workflow.
 - Production dependency patch: `express ^4.21.1 → ^4.22.3`, `body-parser ^1.20.6 → ^1.20.9`, plus the resolved `qs 6.16.1`, `proxy-addr 2.0.8` and `fast-copy 4.2.0` in the lockfile. This clears the `proxy-addr` IP-spoofing advisory (`GHSA-jqcg-44mw-7w3h`, critical), the `qs` parsing advisories (`GHSA-4mjr-xmp4-gh2g`, `GHSA-x5fp-wj9c-mxmx`) and the `fast-copy` stack-exhaustion advisory (`GHSA-jggr-w7fw-pc2j`). `npm audit --omit=dev` reports `0 vulnerabilities` for the production graph. `pino-pretty` stays a production dependency because the all-in-one demo compose runs the backend with `NODE_ENV=development` and the `pino-pretty` transport must resolve in the slim image.
-- Trust-proxy + distributed rate limiting: `TRUST_PROXY_HOPS` defaults to `0` in dev/test and `1` for the single Cloud Run ingress hop. The OCI production Compose file explicitly sets it to `2` for Caddy -> nginx -> backend. `createApp()` calls `app.set('trust proxy', N)` when `N > 0`; the limiter key uses Express's trusted `req.ip` rather than a raw forwarding-header value. Production requires `RATE_LIMIT_REDIS_URL` and stores login/global counters in shared Redis prefixes; dev/test use the in-memory store. OCI uses the existing Upstash TLS URL; the global limiter `skip`s `/health` and `/ready` so health probes don't consume the user-facing bucket. `backend/src/config/env.ts` carries the schema; `backend/src/lib/rateLimit.ts` carries the limiters.
-- OCI production topology: Caddy terminates TLS and owns HSTS, nginx serves the static SPA and proxies API routes, and PostgreSQL runs in a persistent internal container. The single custom hostname uses `COOKIE_SAME_SITE=lax`, `COOKIE_SECURE=true`, an empty `COOKIE_DOMAIN`, and exact `CORS_ORIGIN`; `csrfOriginMiddleware` remains enabled. Encrypted PostgreSQL backups are uploaded to private OCI Object Storage. The former Firebase Hosting + Cloud Run topology remains a manual fallback in `docs/gcp-firebase-deploy.md`; the local `frontend/nginx.conf` continues to support `docker-compose.app.yml`.
+- Trust-proxy + distributed rate limiting: `TRUST_PROXY_HOPS` defaults to `0` in dev/test and retains the generic single-hop production default of `1` for compatibility. The OCI production Compose file explicitly sets it to `2` for Caddy -> nginx -> backend. `createApp()` calls `app.set('trust proxy', N)` when `N > 0`; the limiter key uses Express's trusted `req.ip` rather than a raw forwarding-header value. Production requires `RATE_LIMIT_REDIS_URL` and stores login/global counters in shared Redis prefixes; dev/test use the in-memory store. OCI uses the existing Upstash TLS URL; the global limiter `skip`s `/health` and `/ready` so health probes don't consume the user-facing bucket. `backend/src/config/env.ts` carries the schema; `backend/src/lib/rateLimit.ts` carries the limiters.
+- OCI production topology: Caddy terminates TLS and owns HSTS, nginx serves the static SPA and proxies API routes, and PostgreSQL runs in a persistent internal container. The single custom hostname uses `COOKIE_SAME_SITE=lax`, `COOKIE_SECURE=true`, an empty `COOKIE_DOMAIN`, and exact `CORS_ORIGIN`; `csrfOriginMiddleware` remains enabled. Encrypted PostgreSQL backups are uploaded to private OCI Object Storage. Legacy deployment automation/runbooks are retired in #223; the local `frontend/nginx.conf` continues to support `docker-compose.app.yml`.
 - Harden `frontend/src/api/client.ts` `apiRequest`: safe-JSON parse (throws `ApiError(0, { code: 'BAD_RESPONSE' })` on malformed body, no more uncaught `SyntaxError` leaking to callers), default 15s timeout (`VITE_API_TIMEOUT_MS` + per-request `timeoutMs` option) enforced via `Promise.race` with a `clearTimeout` in `finally` (no leaked timers), caller `signal` forwarded to `fetch` and reported as `ApiError(0, { code: 'ABORTED' })` on abort, network failures reported as `ApiError(0, { code: 'NETWORK' })`. `vite-env.d.ts` documents the new `VITE_API_TIMEOUT_MS`; `frontend/.env.example` documents it; unit tests in `tests/unit/apiClient.test.ts` cover the four error paths. The `AuthContext` `/auth/me` effect keeps the `cancelled`-flag cleanup pattern (the AbortController-based pattern runs into a vitest+jsdom+undici `AbortSignal` instanceof mismatch; documented in the file's docblock).
 - Use `apiRequest` consistently + encode URL segments: `PTOViewModal.loadDetail` was the only remaining raw `fetch(` call site; rewrote to `apiRequest<PTO & { user }>` with `encodeURIComponent(pto.id)`. `usePtoList` builds the `/pto?start=…&end=…` query via `URLSearchParams` (not string concatenation) and encodes `id` in the `update` and `remove` paths. `frontend/eslint.config.js` adds a `no-restricted-syntax` rule that bans raw `fetch(` outside `src/api/client.ts` and the `apiClient` test, with a helpful error message pointing to `apiRequest`; the `PTOFormModal` overlap test was using a raw `fetch(` in a mock `onSubmit` and was rewritten to `apiRequest` via dynamic import.
 - Top-level `ErrorBoundary` (`frontend/src/components/ErrorBoundary.tsx`): a React class component (with `getDerivedStateFromError` + `componentDidCatch`) that wraps the route tree in `App.tsx`, so a render-time throw — a malformed server payload cast to the wrong shape, a `new Date(invalidString)`-style NaN, etc. — shows a user-facing fallback with a "Back to calendar" button instead of unmounting the whole app to a blank screen. `componentDidCatch` logs to `console.error` (no raw error body in the fallback — no info leak). Unit tests in `tests/unit/ErrorBoundary.test.tsx` cover the four paths: no-error render, fallback render on child throw, no raw-error echo in the fallback, and the Reload button → `window.location.assign('/calendar')`.
@@ -428,17 +428,17 @@ A backlog item is done when:
 **Summary:** New `Holiday` Prisma model (`id`, `date`, `name`, `countryCode?`, `createdById`, `createdAt`, `updatedAt`; UNIQUE `(date, country_code)` + INDEX `(date)`). `HolidayService` (`listInRange`, `listAll`, `create`, `remove`, `seedDefaults`) with shared Zod schemas in `services/holidays/schemas.ts` and JSON presets under `services/holidays/presets/{US,MX}.json` for federal-holiday seeds. Routes mounted at `/holidays` (`GET ?start=&end=`, `GET /all`, `POST`, `DELETE /:id`, `POST /seed`); all writes gated by `canManageUsers` (team_lead or admin). `AuditLogService.record` is invoked on every write with `action ∈ {create_holiday, delete_holiday, seed_holidays}`. `npm run db:seed-holidays -- --country=US` is a CLI wrapper that calls the same `seedDefaults` with the first team_lead as actor (or `LEAD_EMAIL=...` to pick a specific one). Frontend: `useHolidays(start, end)` parallel-fetches with PTOs; `CalendarPage` threads the result into `MonthGrid` → `DayCell` which renders a `HolidayBadge` (corner ribbon + flag + name on hover) per matching `(date, countryCode)`. New `/admin/holidays` page (team_lead only) lists holidays, has an "Add holiday" form, and a "Seed defaults" dropdown. New `--color-holiday` design tokens (purple) added to the `@theme` block. Audit-log enum widened to include the three new actions. Vitest coverage: `HolidayService` joins the existing critical-path tier at ≥80% lines (achieved 92%); `services/holidays/schemas.ts` hits 100% across all metrics; `routes/holidays.ts` joins the existing routes tier at ≥80% (achieved 90%). Integration suite stays at ≥90% All-files lines (achieved 93.6%). e2e suite adds `frontend/e2e/holidays.spec.ts` (2 specs): a team_lead reaches `/admin/holidays` from the calendar, adds a holiday, and sees it on the calendar; a non-team_lead sees no nav link and gets 403 on direct API call. `frontend/vite.config.ts` and `frontend/nginx.conf` add a `/holidays` proxy pass. The e2e suite is now **40 specs**, all green. Added Colombia (CO, 42 entries) and Chile (CL, 37 entries) preset support in #114 — the `SUPPORTED_COUNTRY_CODES` allowlist in both backend and frontend is now `['US','MX','CO','CL']`, the frontend `COUNTRY_FLAG` map adds 🇨🇴 and 🇨🇱, and the admin page's "Seed defaults" section exposes one button per country. The e2e suite grows to 41 specs.
 ## 7. Epic 7: Cloud Deployment and Operations
 
-The production target is the OCI VM deployment. The GCP Cloud Run/Firebase
-stories remain as a documented manual fallback.
+The only supported production target is the OCI VM deployment. The legacy
+stories below are historical records, not pending work or an operational
+fallback. Their original implementation/runbooks remain in Git history.
 
 ### Story 7.1: Document Cloud Run, Firebase, and Supabase deployment - #128
 
-**Status:** Implemented in this change
+**Status:** Historical; legacy runbooks retired by #223
 
-**Acceptance criteria:** `docs/gcp-firebase-deploy.md` documents the retained
-Cloud Run/Firebase fallback. The primary OCI deployment is documented in
-`docs/deploy.md`; `docs/plan.md`, `README.md`, and `docs/technical-spec.md`
-record the active architecture.
+**Summary:** Original deployment documentation is retained in Git history.
+`docs/deploy.md`, `docs/plan.md`, `README.md`, and `docs/technical-spec.md`
+describe the supported OCI architecture.
 
 ### Story 7.2: Make cookie sessions and Prisma safe for split-origin deployment - #130
 
@@ -450,29 +450,28 @@ and local tests continue to pass.
 
 ### Story 7.3: Deploy the API to Cloud Run - #125
 
-**Status:** Scaffolded in this change; cloud provisioning pending
+**Status:** Historical; deployment workflow retired by #223
 
-**Acceptance criteria:** GitHub Actions builds and pushes the backend image,
+**Historical acceptance criteria:** GitHub Actions builds and pushes the backend image,
 runs migrations once using a direct Supabase URL, deploys with minimum
 instances `0`, caps maximum instances, injects Secret Manager values, and
 smoke-tests `/health` and `/ready`.
 
 ### Story 7.4: Deploy the SPA to Firebase Hosting - #127
 
-**Status:** Scaffolded in this change; Firebase deployment pending
+**Status:** Historical; deployment workflow/config retired by #223
 
-**Acceptance criteria:** `firebase.json` serves `frontend/dist`, preserves SPA
+**Historical acceptance criteria:** Firebase Hosting served `frontend/dist`, preserved SPA
 routing and security headers, builds with `VITE_API_BASE_URL`, and verifies a
 real Firebase-origin login flow against Cloud Run.
 
 ### Story 7.5: Back up and restore Supabase Free PostgreSQL - #124
 
-**Status:** Scaffolded in this change; restore drill pending
+**Status:** Historical; scheduled workflow retired by #223
 
-**Acceptance criteria:** `.github/workflows/database-backup.yml` creates a
-daily encrypted public-schema dump, uploads it to private GCS storage, and
-retains it for 30 days. `docs/database-backups.md` documents manual CLI dumps,
-restore, and a restore drill.
+**Historical acceptance criteria:** An encrypted public-schema dump was uploaded
+to private GCS storage. Ongoing OCI daily backups and disposable/production
+restore procedures are now documented in `docs/database-backups.md`.
 
 ### Story 7.6: Retire Deno and OCI production infrastructure - #129
 
@@ -485,36 +484,33 @@ stack remained supported. OCI is reintroduced in the post-audit flow tracked by
 
 ### Story 7.7: Validate the production cutover and disaster recovery drill - #126
 
-**Status:** Implemented in this change
+**Status:** Historical; legacy drill retired by #223
 
-**Acceptance criteria:** A clean Supabase project is migrated and bootstrapped,
-the Firebase-origin critical journeys pass against Cloud Run, minimum
-instances and connection limits are verified, a Cloud Run rollback is tested,
-and an encrypted database backup is restored into a disposable target.
-
-**Summary:** New `docs/gcp-firebase-cutover-drill.md` runbook preserves the GCP
-fallback production
-cutover checklist and the DR drill into a single operator document.
-Eleven numbered steps cover the clean-schema migration, the
-`db:bootstrap` team lead, Cloud Run deploy + smoke tests (direct
-`/health` + `/ready` + Firebase-origin cross-origin call), every
-Firebase-origin critical journey (login, logout, account setup,
-session persistence, CSRF rejection, PTO CRUD, holidays, role
-enforcement), Cloud Run autoscaling verification, cold-start
-observation, the encrypted backup restore into a disposable target,
-and a Cloud Run revision rollback (forward-only migrations are
-documented as a constraint). Each step is a single observation +
-checkbox; the runbook ends with a log template the cutover ticket can
-drop in. README and `docs/gcp-firebase-deploy.md` link to the fallback runbook.
+**Summary:** The original deployment cutover and rollback drill is retained in
+Git history. `docs/cutover-drill.md` now records OCI release acceptance and
+recurring recovery evidence; it does not route traffic to a stale legacy DB.
 
 ### Story 7.8: Reactivate OCI production deployment - #166
 
-**Status:** In progress
+**Status:** Shipped; OCI deployment accepted
 
 **Acceptance criteria:** The current post-audit application is deployable to
 an ARM64 OCI VM with Caddy, nginx, PostgreSQL, and Upstash Redis. The final
 Supabase database backup restores into the OCI PostgreSQL container without
 development seed data. Encrypted OCI Object Storage backups and a production
 restore drill are documented. The OCI tag workflow deploys only tested exact
-refs, while GCP workflows remain manual-only. A release tag records the
-complete deployment and recovery flow.
+refs. The temporary manual GCP fallback has since been retired in #223. A
+release tag records the complete deployment and recovery flow.
+
+### Story 7.9: Sunset legacy deployment automation and GitHub configuration
+
+**Tracking:** #224 (cloud-independent disposable restore), #223 (repository
+retirement), #222 (operational GitHub cleanup).
+
+**Acceptance criteria:** Legacy deploy/backup workflows and supporting files
+are removed; OCI guards, daily backups, restore safety, local development, and
+all CI checks remain. Runbooks describe only OCI operations and retain the
+four OCI recovery-secret copies. After repository merge and recorded scheduled
+backup/previous-restore evidence, remove only the 3 legacy repository secrets
+and 14 variables listed in `docs/deploy.md` section 9. Cloud resources, the
+Firebase redirect, historical tags, and retained archives/keys are unchanged.

@@ -33,7 +33,6 @@ test-results/
 /frontend/dist/
 /frontend/dist-node/
 /frontend/tsconfig.tsbuildinfo
-firebase.deploy.json
 
 # Local encrypted backup/restore artifacts. The source schema documentation is
 # tracked under docs/schema.sql and is not affected by these root-only rules.

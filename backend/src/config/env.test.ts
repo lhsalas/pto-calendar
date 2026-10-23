@@ -244,7 +244,7 @@ describe('loadEnv — PORT and TRUST_PROXY_HOPS defaults', () => {
     expect(env.PORT).toBe(4000);
   });
 
-  it('defaults TRUST_PROXY_HOPS to 1 in production (Cloud Run has one trusted proxy hop)', () => {
+  it('retains the generic single-hop production default (OCI explicitly sets 2)', () => {
     const env = loadEnv({
       ...BASE_ENV,
       NODE_ENV: 'production',

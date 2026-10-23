@@ -444,10 +444,14 @@ rate limiting. PostgreSQL and Prisma migrations run on the OCI VM.
 - `TRUST_PROXY_HOPS=2` reflects the Caddy -> nginx -> backend chain.
 - The application requires the existing Upstash `rediss://` URL in production;
   the rate-limit middleware fails closed if the store is unavailable.
-- A final encrypted logical backup is taken from Supabase before migration.
-  Ongoing OCI backups are encrypted and stored off-VM in private OCI Object
+- The one-time database migration is complete. Ongoing OCI backups are
+  encrypted and stored off-VM in private OCI Object
   Storage.
-- Cloud Run, Firebase, and Supabase remain documented and manually available as
-  a rollback path. The deferred shared-parent custom-domain option is tracked
-  in `docs/gcp-firebase-custom-domain.md` and issue #163.
+- OCI is the only supported production and recovery target. Legacy workflows,
+  supporting GCP/Firebase files, and fallback/custom-domain runbooks are retired
+  in #223 after the GCP-independent restore helper (#224). Historical material
+  remains in Git; cloud resources and the deployed redirect remain untouched.
+- GitHub configuration cleanup (#222) removes only the reviewed legacy entries
+  after workflow retirement and backup/restore verification. Keep all OCI
+  deployment inputs and the four runtime/backup recovery-secret copies.
 - The local Docker/Podman development stack remains supported.

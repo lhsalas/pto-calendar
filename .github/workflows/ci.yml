@@ -141,21 +141,12 @@ jobs:
         with:
           node-version-file: '.nvmrc'
           cache: npm
-      - name: Validate Firebase Hosting configuration
-        run: |
-          node -e "const c=require('./firebase.json'); if (c.hosting?.public !== 'frontend/dist') process.exit(1); if (!c.hosting?.rewrites?.some((r) => r.destination === '/index.html')) process.exit(1)"
       - name: Validate OCI deployment scripts and production config
         run: |
           npm run prod:config:check
           npm run deploy:scripts:check
-      - name: Validate exact Firebase CSP template
-        run: |
-          CLOUD_RUN_ORIGIN=https://pto-api.example.a.run.app node bin/render-firebase-config.mjs
-          node -e "const c=require('./firebase.deploy.json'); const h=c.hosting.headers.flatMap((x) => x.headers).find((x) => x.key === 'Content-Security-Policy'); if (!h || h.value.includes('__CLOUD_RUN_API_ORIGIN__') || h.value.includes('*.a.run.app') || !h.value.includes('https://pto-api.example.a.run.app')) process.exit(1)"
-          rm -f firebase.deploy.json
-      - name: Validate backup lifecycle configuration
-        run: |
-          node -e "const c=require('./infra/gcp/backup-lifecycle.json'); if (c.rule?.[0]?.condition?.age !== 30) process.exit(1)"
+      - name: Validate retired deployment isolation
+        run: npm run deployment:sunset:check
       - name: Validate Node.js runtime baseline
         run: |
           npm run node:baseline:check
@@ -165,7 +156,7 @@ jobs:
           import re
           from pathlib import Path
 
-          for name in ('.github/workflows/deploy.yml', '.github/workflows/deploy-backend.yml', '.github/workflows/deploy-frontend.yml', '.github/workflows/deploy-secrets.yml', '.github/workflows/deploy-oci.yml', '.github/workflows/database-backup.yml'):
+          for name in ('.github/workflows/deploy-oci.yml',):
               workflow = Path(name).read_text()
               action_refs = re.findall(r'uses:\s+[^\s#]+@([^\s#]+)', workflow)
               if any(not re.fullmatch(r'[0-9a-f]{40}', ref) for ref in action_refs):
@@ -174,31 +165,6 @@ jobs:
               dockerfile = Path(name).read_text()
               if not re.search(r'^FROM\s+[^\n]+@sha256:[0-9a-f]{64}', dockerfile, re.MULTILINE):
                   raise SystemExit(f'Unpinned base image in {name}')
-          deploy = Path('.github/workflows/deploy.yml').read_text()
-          if 'firebase-tools@latest' in deploy or 'firebase-tools@15.26.0' not in deploy:
-              raise SystemExit('Firebase CLI is not pinned')
-          PY
-      - name: Validate production deployment guard
-        run: |
-          python3 - <<'PY'
-          import re
-          from pathlib import Path
-
-          workflow = Path('.github/workflows/deploy.yml').read_text()
-          required = [
-              "actions: read",
-              'GCP_RATE_LIMIT_REDIS_URL_SECRET',
-              'RATE_LIMIT_REDIS_URL=${GCP_RATE_LIMIT_REDIS_URL_SECRET}:latest',
-              'Verify CI succeeded for this commit',
-              'environment: production',
-              'GCP_FALLBACK_DEPLOY_ENABLED',
-              'workflow_dispatch:',
-          ]
-          missing = [item for item in required if item not in workflow]
-          if missing:
-              raise SystemExit(f'Missing production deploy guard: {missing}')
-          if re.search(r'^  push:\s*$', workflow, re.MULTILINE) or re.search(r'^    tags:', workflow, re.MULTILINE):
-              raise SystemExit('GCP fallback deploy.yml must not have a tag trigger')
           PY
       - name: Validate OCI deployment workflow
         run: |
@@ -233,64 +199,6 @@ jobs:
               raise SystemExit(
                   f'deploy-oci.yml must not reference OCI_HOST or push:tags: {unexpected}',
               )
-          PY
-      - name: Validate deploy-secrets workflow
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          workflow = Path('.github/workflows/deploy-secrets.yml').read_text()
-          required = [
-              'workflow_dispatch',
-              'RATE_LIMIT_REDIS_URL=${GCP_RATE_LIMIT_REDIS_URL_SECRET}:latest',
-              "gcloud run services update \"${CLOUD_RUN_SERVICE}\"",
-              'environment: production',
-              'GCP_FALLBACK_DEPLOY_ENABLED',
-              "concurrency:\n  group: production-deploy-secrets",
-          ]
-          missing = [item for item in required if item not in workflow]
-          if missing:
-              raise SystemExit(f'Missing deploy-secrets guard: {missing}')
-          PY
-      - name: Validate deploy-backend workflow
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          workflow = Path('.github/workflows/deploy-backend.yml').read_text()
-          required = [
-              'workflow_dispatch',
-              'image_tag:',
-              'Artifact Registry',
-              "concurrency:\n  group: production-deploy-backend",
-              'environment: production',
-              'GCP_FALLBACK_DEPLOY_ENABLED',
-              'gcloud run deploy',
-              'prisma migrate deploy',
-          ]
-          missing = [item for item in required if item not in workflow]
-          if missing:
-              raise SystemExit(f'Missing deploy-backend guard: {missing}')
-          PY
-      - name: Validate deploy-frontend workflow
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          workflow = Path('.github/workflows/deploy-frontend.yml').read_text()
-          required = [
-              'workflow_dispatch',
-              "concurrency:\n  group: production-deploy-frontend",
-              'environment: production',
-              'GCP_FALLBACK_DEPLOY_ENABLED',
-              'gcloud run services describe',
-              'firebase-tools@15.26.0',
-              'VITE_API_BASE_URL',
-              'CLOUD_RUN_ORIGIN',
-          ]
-          missing = [item for item in required if item not in workflow]
-          if missing:
-              raise SystemExit(f'Missing deploy-frontend guard: {missing}')
           PY
       - name: Validate privileged OpenCode workflow
         run: |

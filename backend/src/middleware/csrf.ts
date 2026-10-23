@@ -15,7 +15,7 @@ function originFromReferer(referer: string | undefined): string | undefined {
 
 /**
  * Cookie sessions need an origin check when production uses SameSite=None for
- * a Firebase Hosting frontend and a separate Cloud Run API origin.
+ * a frontend and API served from separate origins.
  */
 export function csrfOriginMiddleware(): RequestHandler {
   const env = loadEnv();
