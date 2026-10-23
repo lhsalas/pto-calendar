@@ -314,6 +314,15 @@ GitHub Actions updates. Dependabot never publishes a release and never edits a
 digest or an action pin on its own: the pipeline still requires images to be
 pinned by digest and release actions to be pinned to a commit SHA.
 
+The Node.js runtime stays on the latest LTS line, which is 24.x at the moment.
+The patch level is pinned in `.nvmrc`, the container base image tag has to
+match it, and `@types/node` is held to the same major. Dependabot may propose
+a rebuild of the same image tag and a patch or minor update inside the LTS
+line, but not a move to the current release line, because that line is not an
+LTS release. The static deployment checks assert that the update rule still
+ignores exactly the next major, so the rule has to be moved deliberately when
+the runtime moves to the next LTS line.
+
 Repository vulnerability alerts are enabled, so the advisory database is
 watched in the GitHub UI as well.
 

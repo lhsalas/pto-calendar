@@ -4,6 +4,12 @@
 # stay pinned by digest and the release actions stay pinned to a commit SHA.
 # Dependabot only opens a pull request for a review; it never publishes a
 # release or changes a pin on its own.
+#
+# The Node.js runtime stays on the latest LTS line. The patch level is pinned
+# in `.nvmrc`, the container base image tag has to match it, and the type
+# definitions are held to the same major. Dependabot may propose a rebuild of
+# the same tag and a patch or minor update inside the LTS line, but not a
+# move to the current release line, which is not an LTS release.
 version: 2
 
 updates:
@@ -89,6 +95,15 @@ updates:
       - dependency-name: '@vitest/coverage-v8'
         update-types:
           - version-update:semver-major
+      # The Node.js type definitions have to match the runtime major, and the
+      # runtime stays on the latest LTS line (24.x for now). Dependabot
+      # otherwise proposes the current release line, which is not an LTS
+      # release. Anything from 25 upwards is ignored; patch and minor updates
+      # inside 24.x keep flowing. Remove this rule when the runtime moves to
+      # the next LTS line.
+      - dependency-name: '@types/node'
+        versions:
+          - '>=25'
 
   - package-ecosystem: docker
     directory: '/backend'
@@ -103,9 +118,11 @@ updates:
         patterns:
           - '*'
     ignore:
-      # The Node.js runtime is pinned to a supported 24.x patch level in
-      # `.nvmrc` and the base image tag has to match it. A major bump is a
-      # deliberate change, not an update.
+      # The Node.js runtime stays on the latest LTS line, which is 24.x at the
+      # moment. The patch level is pinned in `.nvmrc` and the base image tag
+      # has to match it, so Dependabot may only propose a rebuild of the same
+      # tag. Moving to another major is a deliberate change, not an update,
+      # and it is not an LTS release while the current line is.
       - dependency-name: node
         update-types:
           - version-update:semver-major
@@ -123,9 +140,11 @@ updates:
         patterns:
           - '*'
     ignore:
-      # The Node.js runtime is pinned to a supported 24.x patch level in
-      # `.nvmrc` and the base image tag has to match it. A major bump is a
-      # deliberate change, not an update.
+      # The Node.js runtime stays on the latest LTS line, which is 24.x at the
+      # moment. The patch level is pinned in `.nvmrc` and the base image tag
+      # has to match it, so Dependabot may only propose a rebuild of the same
+      # tag. Moving to another major is a deliberate change, not an update,
+      # and it is not an LTS release while the current line is.
       - dependency-name: node
         update-types:
           - version-update:semver-major
@@ -155,6 +174,11 @@ updates:
       - dependency-name: postgres
         update-types:
           - version-update:semver-major
+      # The Node.js runtime stays on the latest LTS line, which is 24.x at the
+      # moment. The patch level is pinned in `.nvmrc` and the base image tag
+      # has to match it, so Dependabot may only propose a rebuild of the same
+      # tag. Moving to another major is a deliberate change, not an update,
+      # and it is not an LTS release while the current line is.
       - dependency-name: node
         update-types:
           - version-update:semver-major
