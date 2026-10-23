@@ -104,6 +104,22 @@ updates:
       - dependency-name: '@types/node'
         versions:
           - '>=25'
+      # rate-limit-redis 6 requires express-rate-limit 8.6 or newer, so the
+      # two have to move together. Remove this rule when the store and the
+      # limiter are upgraded together.
+      - dependency-name: rate-limit-redis
+        update-types:
+          - version-update:semver-major
+      # @eslint/js has to match the ESLint major, and ESLint majors are
+      # ignored above. Remove this rule when ESLint 10 is adopted.
+      - dependency-name: '@eslint/js'
+        update-types:
+          - version-update:semver-major
+      # MSW 3 removes the onUnhandledRequest setup option the frontend test
+      # setup uses. Remove this rule when the test setup is migrated.
+      - dependency-name: msw
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: docker
     directory: '/backend'
