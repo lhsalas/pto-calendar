@@ -74,6 +74,21 @@ updates:
       - dependency-name: js-yaml
         update-types:
           - version-update:semver-major
+      # eslint-plugin-react-hooks 7 adds the React Compiler rules to its
+      # recommended config, and the current components do not satisfy them
+      # yet. Remove this rule when those rules are adopted.
+      - dependency-name: eslint-plugin-react-hooks
+        update-types:
+          - version-update:semver-major
+      # Vitest 5 needs the matching @vitest/coverage-v8 5.x line and changes
+      # the assertion type the matcher packages augment. Remove this rule
+      # when the test suite is migrated.
+      - dependency-name: vitest
+        update-types:
+          - version-update:semver-major
+      - dependency-name: '@vitest/coverage-v8'
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: docker
     directory: '/backend'
