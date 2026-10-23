@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-// Download an encrypted Supabase backup from Google Cloud Storage, verify
-// its checksum, decrypt it, and apply the schema and data to a target
-// PostgreSQL database. Use this for the restore drill or for restoring
-// into a clean Supabase project.
+// Verify and restore a locally downloaded encrypted PostgreSQL backup into
+// an explicitly confirmed disposable database. Download the archive and its
+// adjacent .sha256 file first; this script does not require cloud credentials.
 //
 // Required environment:
 //   TARGET_DATABASE_URL  connection string of the disposable target DB
@@ -10,18 +9,17 @@
 //
 // Required tools on PATH:
 //   gpg, tar, sha256sum
-//   gcloud               authenticated against the source GCP project
 //   psql                 to apply schema.sql and data.sql (psql handles
 //                        pg_dump's `\restrict` and other meta-commands)
 //
 // Usage:
 //   node bin/restore-backup.mjs --archive pto-20260810T030000Z.tar.gz.gpg \
-//     --allow-disposable-target [--bucket <name>] [--keep-local]
+//     --allow-disposable-target [--keep-local]
 //
 // Exit codes:
 //   0  success
 //   1  user error (missing argument, missing env)
-//   2  tool error (gpg/tar/psql/gcloud exit non-zero)
+//   2  tool error (gpg/tar/psql exit non-zero) or invalid archive
 //   3  checksum mismatch
 
 import { spawnSync } from 'node:child_process';
@@ -32,6 +30,7 @@ import {
   copyFileSync,
   existsSync,
   lstatSync,
+  readFileSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -76,13 +75,11 @@ process.once('SIGTERM', () => {
 });
 
 function parseArgs(argv) {
-  const args = { archive: null, bucket: null, keepLocal: false, allowDisposableTarget: false };
+  const args = { archive: null, keepLocal: false, allowDisposableTarget: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--archive' && i + 1 < argv.length) {
       args.archive = argv[++i];
-    } else if (arg === '--bucket' && i + 1 < argv.length) {
-      args.bucket = argv[++i];
     } else if (arg === '--keep-local') {
       args.keepLocal = true;
     } else if (arg === '--allow-disposable-target') {
@@ -104,8 +101,7 @@ function printHelp() {
   console.log(`Usage: node bin/restore-backup.mjs [options]
 
 Options:
-  --archive <name>    Encrypted archive filename inside the bucket's pto/ prefix
-  --bucket <name>     Override BACKUP_BUCKET env
+  --archive <name>    Local encrypted archive basename (adjacent .sha256 required)
   --keep-local        Keep the decrypted files in CWD after applying them
   --allow-disposable-target  Confirm TARGET_DATABASE_URL is disposable
   -h, --help          Show this help
@@ -176,6 +172,12 @@ function assertRegularFile(path, label) {
 }
 
 function verifyChecksum(workdir, encryptedPath, checksumPath) {
+  const checksum = readFileSync(checksumPath, 'utf8');
+  const expectedName = basename(encryptedPath);
+  const match = /^([0-9a-fA-F]{64}) [ *]([^\r\n]+)\r?\n?$/.exec(checksum);
+  if (!match || match[2] !== expectedName) {
+    fail('checksum must contain exactly the supplied archive basename', 3);
+  }
   const result = spawnSync('sha256sum', ['--check', '--strict', basename(checksumPath)], {
     cwd: workdir,
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -185,12 +187,25 @@ function verifyChecksum(workdir, encryptedPath, checksumPath) {
   }
 }
 
-function applySqlFile(sqlPath, targetUrl) {
-  // psql reads from stdin or --file; --file avoids spawning a shell to pipe.
+function restoreSql(schemaPath, dataPath, targetUrl) {
+  // Reset only the explicitly confirmed disposable target. One transaction
+  // rolls back the drop and both files if any SQL statement fails.
   run(
-    'psql apply',
+    'psql restore',
     'psql',
-    ['--variable=ON_ERROR_STOP=1', '--quiet', '--dbname', targetUrl, '--file', sqlPath],
+    [
+      '--variable=ON_ERROR_STOP=1',
+      '--quiet',
+      '--dbname',
+      targetUrl,
+      '--single-transaction',
+      '--command',
+      'DROP SCHEMA IF EXISTS public CASCADE;',
+      '--file',
+      schemaPath,
+      '--file',
+      dataPath,
+    ],
     { stdio: ['ignore', 'pipe', 'inherit'] },
   );
 }
@@ -221,7 +236,6 @@ function sanitizeSql(sourcePath, sanitizerPath, targetPath) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  const bucket = args.bucket ?? requireEnv('BACKUP_BUCKET');
   const targetUrl = requireEnv('TARGET_DATABASE_URL');
   const encryptionKey = requireEnv('ENCRYPTION_KEY');
   if (!args.allowDisposableTarget) {
@@ -234,10 +248,12 @@ function main() {
     fail(error instanceof Error ? error.message : 'invalid encryption key', 1);
   }
 
+  assertRegularFile(args.archive, 'encrypted archive');
+  assertRegularFile(`${args.archive}.sha256`, 'checksum');
+
   requireTool('gpg', 'Install gnupg.');
   requireTool('tar', 'Install tar.');
   requireTool('sha256sum', 'Install coreutils.');
-  requireTool('gcloud', 'Install the Google Cloud CLI and run `gcloud auth login`.');
   requireTool('psql', 'Install postgresql-client (provides psql).');
 
   const workdir = mkdtempSync(join(tmpdir(), 'pto-restore-'));
@@ -248,27 +264,8 @@ function main() {
   const passphrasePath = join(workdir, 'passphrase');
 
   try {
-    const objectPath = `pto/${args.archive}`;
-    run(
-      'gcloud storage cp (encrypted)',
-      'gcloud',
-      ['storage', 'cp', `gs://${bucket}/${objectPath}`, encryptedPath],
-      { stdio: ['ignore', 'pipe', 'inherit'] },
-    );
-    run(
-      'gcloud storage cp (checksum)',
-      'gcloud',
-      ['storage', 'cp', `gs://${bucket}/${objectPath}.sha256`, checksumPath],
-      { stdio: ['ignore', 'pipe', 'inherit'] },
-    );
-
-    if (
-      !existsSync(encryptedPath) ||
-      !existsSync(checksumPath) ||
-      statSync(encryptedPath).size === 0
-    ) {
-      fail('encrypted archive or checksum missing or empty', 2);
-    }
+    copyFileSync(args.archive, encryptedPath);
+    copyFileSync(`${args.archive}.sha256`, checksumPath);
 
     verifyChecksum(workdir, encryptedPath, checksumPath);
 
@@ -331,8 +328,7 @@ function main() {
       console.log(`local copies: ${cwd}/schema.sql and ${cwd}/data.sql`);
     }
 
-    applySqlFile(targetSchemaPath, targetUrl);
-    applySqlFile(targetDataPath, targetUrl);
+    restoreSql(targetSchemaPath, targetDataPath, targetUrl);
 
     console.log(`Restore complete: applied schema.sql and data.sql to target.`);
   } finally {

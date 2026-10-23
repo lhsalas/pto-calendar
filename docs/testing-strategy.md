@@ -252,6 +252,12 @@ newer 24.x security release ships.
   in the unchanged lockfile or in a pinned image is noticed without a commit.
 - Supabase backups run in the separate `database-backup.yml` workflow.
 
+The disposable restore helper is tested with real encrypted local archives and
+a recording `psql` executable: checksum tampering, missing/symlink inputs,
+unexpected archive members, wrong/weak keys, SQL failure, temporary-file cleanup,
+and explicit plaintext retention are covered without cloud credentials. The
+PostgreSQL backup roundtrip integration test remains the real database check.
+
 ### 10.3 Caching
 - Cache `node_modules` and Playwright browsers keyed on lockfile hashes.
 

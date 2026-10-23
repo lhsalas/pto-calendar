@@ -242,6 +242,8 @@ ENCRYPTION_KEY='<backup-key>' \
 The generated archive contains `schema.sql` and `data.sql`, is encrypted with
 AES-256, and has a `.sha256` checksum. Restore it into disposable PostgreSQL
 using `bin/restore-backup.mjs` before using it for the production target.
+Download the archive and its adjacent checksum first and run the helper from
+that directory; it restores local files and does not need cloud credentials.
 Compare all four row counts and the migration table after the disposable
 restore.
 
