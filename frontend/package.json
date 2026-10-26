@@ -17,8 +17,8 @@
     "test:e2e": "DATABASE_URL=postgresql://pto:pto@localhost:5432/pto_test?schema=public playwright test"
   },
   "dependencies": {
-    "lucide-react": "^1.59.0",
-    "motion": "^14.4.0",
+    "lucide-react": "^1.61.0",
+    "motion": "^14.6.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.18.4"
@@ -48,7 +48,7 @@
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.72.0",
-    "vite": "^8.3.4",
+    "vite": "^8.3.5",
     "vitest": "^4.1.12"
   }
 }
