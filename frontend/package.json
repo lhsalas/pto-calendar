@@ -17,11 +17,11 @@
     "test:e2e": "DATABASE_URL=postgresql://pto:pto@localhost:5432/pto_test?schema=public playwright test"
   },
   "dependencies": {
-    "lucide-react": "^1.59.0",
-    "motion": "^14.4.0",
+    "lucide-react": "^1.64.0",
+    "motion": "^14.8.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^7.18.4"
+    "react-router-dom": "^7.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
@@ -33,7 +33,7 @@
     "@types/node": "^24.19.2",
     "@types/react": "^18.3.17",
     "@types/react-dom": "^18.3.5",
-    "@typescript-eslint/eslint-plugin": "^8.72.0",
+    "@typescript-eslint/eslint-plugin": "^8.72.1",
     "@typescript-eslint/parser": "^8.18.0",
     "@vitejs/plugin-react": "^6.1.2",
     "@vitest/coverage-v8": "^4.1.12",
@@ -47,8 +47,8 @@
     "prettier": "^3.9.10",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2",
-    "typescript-eslint": "^8.72.0",
-    "vite": "^8.3.4",
+    "typescript-eslint": "^8.72.1",
+    "vite": "^8.3.5",
     "vitest": "^4.1.12"
   }
 }
