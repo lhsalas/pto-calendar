@@ -252,15 +252,15 @@ not count as delivered work. No silent exception clears the backlog-first gate.
 **Owner decision — 2026-11-15:** the
 [dated authorization](https://github.com/lhsalas/pto-calendar/issues/246#issuecomment-6901267341)
 supersedes the earlier investigation-only/no-new-exception boundary **only** for
-[#273]'s temporary acceptance of reviewed production-image findings. This records
-authorization, not a merged policy, green CI or fixed vulnerabilities. An
-**accepted-risk** result is not a **raw-clean** scan.
+[#273]'s temporary acceptance of reviewed production-image findings. This dated
+authorization is risk acceptance, not remediation or a **raw-clean** scan;
+delivered status is recorded below.
 
 [#273] is a separate policy-only deliverable: exact current image digest,
 advisory and affected package/path, maintainer ownership and owner-accepted risk,
-with first expiry/review **2026-12-15**, no silent renewal or inherited acceptance
-for a new digest. Retain every linux/arm64 image scan, unfiltered raw reports,
-visible accepted-risk summaries and aggregate results across all images.
+with first expiry/review **2026-12-15 at 00:00 UTC**, no silent renewal or inherited
+acceptance for a new digest. Retain every linux/arm64 image scan, unfiltered raw
+reports, visible accepted-risk summaries and aggregate results across all images.
 Scanner/enumeration errors and unmatched advisories/packages/paths/digests remain
 blocking; no blanket bypass, optional security job or global severity reduction.
 npm audit, coverage, immutable pins and all current 11 CI checks remain unchanged.
@@ -268,9 +268,17 @@ npm audit, coverage, immutable pins and all current 11 CI checks remain unchange
 Keep permanent remediation [#247] **OPEN, priority:high** until compatible fixed
 upstream images are validated and temporary acceptances removed; review maintained
 official candidates at least weekly and after security rebuild announcements.
-Merging #273 closes only that policy deliverable, **not #247**. Once #273 is
-validated/merged and all current CI passes under the accepted policy, #247's open
-status no longer independently blocks unrelated merges.
+#247's open status does not independently block unrelated merges when all current
+CI passes under the accepted policy.
+
+**Delivered baseline checkpoint — 2026-11-15:** [#273] landed via
+[PR #276](https://github.com/lhsalas/pto-calendar/pull/276) at master
+[`ada8e0b`](https://github.com/lhsalas/pto-calendar/commit/ada8e0ba61d20bdc4a27cb6d06c314b3bd71b15e).
+The coordinator verified all 11 policy-PR and master CI checks green; this is not
+validation of the refreshed #246 candidate. The
+[landed runbook](image-risk-acceptance.md) records **40 temporary + 79 legacy
+matches**: accepted risk, not clean images.
+#248, #227 and #235 remain pending; token/API/CLI/MCP features remain proposals.
 
 The current baseline lane is **#273 -> #248**. #248 aligns Node 24
 runtime/image/engine pins; each new digest needs a fresh raw scan and explicit

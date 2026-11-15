@@ -323,30 +323,50 @@ safe on a pull request from a fork.
    lower severities are printed. A scanner failure (registry unreachable,
    unreadable lockfile, malformed report) fails the job rather than passing
    silently, because a scan that did not run is not a clean result.
-2. **Container image scan** — Trivy scans each pinned production base image
+2. **Container image scan** — `node infra/security/scan-production-images.mjs`
+   runs Trivy 0.76.2 against each pinned production base image
    (`node infra/security/production-images.mjs` reads the digests out of the
    Dockerfiles and the production compose file, so the list cannot drift from
    what is deployed). The scan targets `linux/arm64`, which is the production
    platform. Findings that are high or critical and have a published fix fail
    the job; unfixed findings are reported but do not block, because there is
-   nothing to upgrade to.
+   nothing to upgrade to. The runner retains unfiltered JSON before applying
+   reviewed policy, attempts later images after individual failures and blocks
+   scanner, conversion, enumeration and malformed-report errors.
 
 `.trivyignore.yaml` holds the exceptions for advisories in the upstream base
 images that the project cannot fix itself, because the fix needs an upstream
 image rebuild. Every entry names the advisory, the path it applies to, the
 exposure assessment, the owner and an expiry date, and the static deployment
-checks fail when an entry has no statement or has expired. The current
-entries are all in packages that are not on the request-serving path: the Go
-standard library copies inside `gosu` in the PostgreSQL image, the Go
-advisories in the Caddy binary, the Node distribution's bundled
-`brace-expansion` and `undici`, and the Alpine packages in the nginx image.
-In production nginx serves plain HTTP behind Caddy, which terminates TLS, so
-its OpenSSL, HTTP/2, curl and XML packages are not used to handle requests.
+checks fail when an entry has no statement or has expired. #273 preserves
+that file byte-for-byte and hash-binds it against silent scope/expiry changes;
+it does not revalidate its historical reachability statements. Caddy is the
+public TLS endpoint, and package presence or an internal plain-HTTP hop alone
+does not establish that an advisory is unreachable.
+
+**Temporary accepted risk, NOT remediated (#273):** owner-approved 2026-11-15,
+owned by Repository maintainers, expiring **2026-12-15 at 00:00 UTC**. The
+separate `infra/security/image-risk-acceptances.json` binds the 40 newly
+accepted current matches to exact image digests/advisories/packages/paths,
+installed versions and severities. The 79 existing legacy matches remain
+separate. New findings, unknown images (even clean ones) and expiry remain
+blocking; no future Node digest is pre-authorized. All eleven CI jobs, npm
+audit and coverage gates remain required.
+
+The `production-image-security` artifact and job summary retain raw reports,
+legacy-filtered reports with suppressed rows, logs, `summary.json` and
+`accepted-risk.md`, including on failure. `npm run deploy:scripts:check` also
+runs daemon-free exact-match, expiry, scan-aggregation and failure regressions.
+[#247](https://github.com/lhsalas/pto-calendar/issues/247) remains **OPEN,
+priority:high**. See [the acceptance/removal runbook](image-risk-acceptance.md)
+for the exact inventory, evidence, weekly official-candidate review, #248
+new-digest review and prompt removal procedure. No silent renewal.
 
 `infra/security/generate-trivy-exceptions.mjs` regenerates the candidate
 exception list from a local Trivy run. The generated file is reviewed and
-committed by hand; the pipeline only ever reads it, so a finding that is not
-listed fails the security job and the list cannot grow on its own.
+committed by hand; the pipeline only ever reads it. It must not be used to
+expand the legacy list or automatically populate the #273 manifest. Unaccepted
+findings at the blocking threshold fail; neither list grows on its own.
 
 The scheduled run repeats both checks against the unchanged lockfile and the
 unchanged digests, which is what catches an advisory that is published after a
@@ -452,11 +472,14 @@ assessment, an owner and an expiry date.
 
 ## 17. Planned agent-access acceptance (#246)
 
-**#246 execution update (2026-11-15):** see the
+**#246 integration checkpoint (2026-11-15):** #273 landed via
+[PR #276](https://github.com/lhsalas/pto-calendar/pull/276) at master `ada8e0b`;
+the [landed policy/runbook](image-risk-acceptance.md) is retained unchanged. See the
 [dated owner decision and baseline sequence](agent-access-delivery-plan.md#baseline-repair-and-every-pre-existing-issue)
-for #273's image-only temporary risk acceptance while #247 stays open/high priority.
+for orchestration while #247 stays open/high priority.
 Accepted risk is not a raw-clean scan; all current CI, npm audit and coverage
-requirements still apply. #273 owns policy implementation/runbook details.
+requirements still apply. The integrated #246 candidate needs fresh validation;
+policy delivery did not ship token/API/CLI/MCP features.
 
 The [delivery contract and release gates](agent-access-delivery-plan.md) are
 approved requirements, **not tests implemented or passed by this documentation**.

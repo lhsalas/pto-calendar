@@ -43,3 +43,5 @@ test-results/
 /data.sql
 
 *.tsbuildinfo
+
+/security-reports/
