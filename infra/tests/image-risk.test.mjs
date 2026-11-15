@@ -206,6 +206,147 @@ test('known, covered image can genuinely have zero blocking findings', () => {
   assert.equal(evaluate(raw).accepted.length, 0);
 });
 
+for (const side of ['raw', 'converted']) {
+  for (const key of ['UnrecognizedFindings', 'Vulnerabilities', 'FutureFindings', 'BOM']) {
+    test(`envelope: ${side} cannot move unreviewed CRITICAL findings into ${key}`, () => {
+      const raw = clone(report);
+      const converted = clone(report);
+      for (const candidate of [raw, converted]) delete candidate.Results[0].Vulnerabilities;
+      (side === 'raw' ? raw : converted)[key] = [
+        { ...finding, VulnerabilityID: 'CVE-2026-999999', Severity: 'CRITICAL' },
+      ];
+      assert.throws(() => evaluate(raw, converted));
+    });
+  }
+  for (const [label, change] of [
+    [
+      'ReportID number',
+      (r) => {
+        r.ReportID = 42;
+      },
+    ],
+    [
+      'ReportID null',
+      (r) => {
+        r.ReportID = null;
+      },
+    ],
+    [
+      'ArtifactID object',
+      (r) => {
+        r.ArtifactID = {};
+      },
+    ],
+    [
+      'ArtifactID null',
+      (r) => {
+        r.ArtifactID = null;
+      },
+    ],
+    [
+      'CreatedAt array',
+      (r) => {
+        r.CreatedAt = [];
+      },
+    ],
+    [
+      'CreatedAt invalid timestamp',
+      (r) => {
+        r.CreatedAt = 'not-a-timestamp';
+      },
+    ],
+    [
+      'Trivy array',
+      (r) => {
+        r.Trivy = [];
+      },
+    ],
+    [
+      'Trivy null',
+      (r) => {
+        r.Trivy = null;
+      },
+    ],
+    [
+      'Trivy string',
+      (r) => {
+        r.Trivy = '0.76.2';
+      },
+    ],
+    [
+      'Trivy.Version number',
+      (r) => {
+        r.Trivy = { Version: 42 };
+      },
+    ],
+    [
+      'Trivy unknown field',
+      (r) => {
+        r.Trivy = { UnrecognizedFindings: [] };
+      },
+    ],
+    [
+      'Trivy.Server string',
+      (r) => {
+        r.Trivy = { Server: 'not-an-object' };
+      },
+    ],
+    [
+      'Metadata array',
+      (r) => {
+        r.Metadata = [];
+      },
+    ],
+    [
+      'Results object',
+      (r) => {
+        r.Results = {};
+      },
+    ],
+    [
+      'SchemaVersion string',
+      (r) => {
+        r.SchemaVersion = '2';
+      },
+    ],
+    [
+      'ArtifactName array',
+      (r) => {
+        r.ArtifactName = [];
+      },
+    ],
+    [
+      'ArtifactType object',
+      (r) => {
+        r.ArtifactType = {};
+      },
+    ],
+  ]) {
+    test(`envelope: malformed ${side} ${label} blocks`, () => {
+      const raw = clone(report);
+      const converted = clone(report);
+      change(side === 'raw' ? raw : converted);
+      assert.throws(() => evaluate(raw, converted));
+    });
+  }
+}
+
+test('envelope: genuine optional metadata types preserve clean omitempty results', () => {
+  const raw = clone(report);
+  // Report/TrivyInfo values serialized by the pinned standalone scanner.
+  raw.Trivy = { Version: '0.76.2' };
+  raw.ReportID = '01a1e128-a6c0-710e-83a4-2d70cb46332b';
+  raw.CreatedAt = '2026-11-15T16:41:40.160069868-05:00';
+  raw.ArtifactID = 'sha256:abc';
+  delete raw.Results[0].Vulnerabilities;
+  assert.equal(evaluate(raw).rawBlocking, 0);
+  assert.deepEqual(evaluate(raw).rejected, []);
+  for (const key of ['Trivy', 'ReportID', 'CreatedAt', 'ArtifactID']) delete raw[key];
+  assert.equal(evaluate(raw).rawBlocking, 0);
+  raw.Results.push(clone(secretResult));
+  assert.equal(evaluate(raw).rejected[0].kind, 'secret');
+});
+
 for (const [label, change] of [
   [
     'missing RepoDigests',

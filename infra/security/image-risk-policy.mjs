@@ -234,7 +234,53 @@ export function validatePolicy(policy, today = new Date().toISOString().slice(0,
   }
 }
 
+function validateReportEnvelope(report) {
+  // Exact exported JSON fields in Trivy v0.76.2 pkg/types/report.go Report.
+  // BOM is json:"-" (internal only); optional diagnostics may be omitted,
+  // but an unknown envelope field must never hide relocated findings.
+  knownFields(
+    report,
+    [
+      'SchemaVersion',
+      'Trivy',
+      'ReportID',
+      'CreatedAt',
+      'ArtifactID',
+      'ArtifactName',
+      'ArtifactType',
+      'Metadata',
+      'Results',
+    ],
+    'report envelope',
+  );
+  stringFields(report, ['ReportID', 'CreatedAt', 'ArtifactID', 'ArtifactName', 'ArtifactType']);
+  if (Object.hasOwn(report, 'CreatedAt')) {
+    assert.ok(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
+        report.CreatedAt,
+      ) && Number.isFinite(Date.parse(report.CreatedAt)),
+      'malformed CreatedAt',
+    );
+  }
+  if (Object.hasOwn(report, 'Trivy')) {
+    knownFields(report.Trivy, ['Version', 'Server'], 'TrivyInfo');
+    stringFields(report.Trivy, ['Version']);
+    if (Object.hasOwn(report.Trivy, 'Server')) {
+      // VersionInfo in pkg/types/version.go; absent in standalone reports.
+      const server = report.Trivy.Server;
+      knownFields(server, ['Version', 'VulnerabilityDB', 'JavaDB', 'CheckBundle'], 'VersionInfo');
+      stringFields(server, ['Version']);
+      for (const key of ['VulnerabilityDB', 'JavaDB', 'CheckBundle']) {
+        if (Object.hasOwn(server, key)) object(server[key], `VersionInfo.${key}`);
+      }
+    }
+  }
+  object(report.Metadata, 'report Metadata');
+  assert.ok(Array.isArray(report.Results), 'malformed report Results');
+}
+
 function validateReport(image, report, entry) {
+  validateReportEnvelope(report);
   assert.equal(report.SchemaVersion, 2, 'unsupported Trivy report schema');
   assert.equal(report.ArtifactType, 'container_image');
   assert.equal(report.ArtifactName, image, 'report/image mismatch');

@@ -82,6 +82,8 @@ not cleared or reused.
   Unknown fields/class/type combinations and malformed array/value types block
   rather than becoming a clean result. Genuine empty findings arrays may be
   omitted (`omitempty`); unexpected/renamed findings fields may not.
+  The pinned `Report` envelope is also checked for known fields and value types
+  in both raw and converted reports, before omitted findings can mean clean.
 - Unknown images/digests (even clean ones), unexpected findings at the blocking
   threshold, expired policy, missing/malformed reports and scanner/conversion
   failures fail the job. Individual scan failures do not stop later images.
