@@ -52,11 +52,17 @@ const entry = {
   ],
 };
 const policy = { ...committed, images: [entry] };
+const metadata = (reference) => ({
+  RepoDigests: [reference.replace(/:[^:@/]+@/, '@')],
+  Reference: reference.replace(/:[^:@/]+@/, '@'),
+  ImageID: `sha256:${'c'.repeat(64)}`,
+  ImageConfig: { os: 'linux', architecture: 'arm64' },
+});
 const report = {
   SchemaVersion: 2,
   ArtifactName: image,
   ArtifactType: 'container_image',
-  Metadata: { ImageConfig: { os: 'linux', architecture: 'arm64' } },
+  Metadata: metadata(image),
   Results: [
     {
       Target: target,
@@ -64,6 +70,48 @@ const report = {
       Type: 'node-pkg',
       Packages: [{ Name: 'undici', Version: '6.28.0', FilePath: path }],
       Vulnerabilities: [finding],
+    },
+  ],
+};
+// Actual Trivy 0.76.2 output from a synthetic custom-rule scan, not credentials.
+// Secret results have NO Type, Packages or Vulnerabilities fields.
+const secretResult = {
+  Target: 'settings.py',
+  Class: 'secret',
+  Secrets: [
+    {
+      RuleID: 'schema-test-rule',
+      Category: 'general',
+      Severity: 'HIGH',
+      Title: 'Synthetic schema test marker (not credentials)',
+      StartLine: 1,
+      EndLine: 1,
+      Code: {
+        Lines: [
+          {
+            Number: 1,
+            Content: 'marker = "***********************************" # Synthetic, not a credential',
+            IsCause: true,
+            Annotation: '',
+            Truncated: false,
+            Highlighted:
+              'marker = "***********************************" # Synthetic, not a credential',
+            FirstCause: true,
+            LastCause: true,
+          },
+          {
+            Number: 2,
+            Content: '',
+            IsCause: false,
+            Annotation: '',
+            Truncated: false,
+            FirstCause: false,
+            LastCause: false,
+          },
+        ],
+      },
+      Match: 'marker = "***********************************" # Synthetic, not a credential',
+      Offset: 10,
     },
   ],
 };
@@ -157,6 +205,206 @@ test('known, covered image can genuinely have zero blocking findings', () => {
   assert.equal(evaluate(raw).rawBlocking, 0);
   assert.equal(evaluate(raw).accepted.length, 0);
 });
+
+for (const [label, change] of [
+  [
+    'missing RepoDigests',
+    (m) => {
+      delete m.RepoDigests;
+    },
+  ],
+  [
+    'wrong RepoDigests',
+    (m) => {
+      m.RepoDigests = [`fixture@sha256:${'f'.repeat(64)}`];
+    },
+  ],
+  [
+    'empty RepoDigests',
+    (m) => {
+      m.RepoDigests = [];
+    },
+  ],
+  [
+    'null RepoDigests',
+    (m) => {
+      m.RepoDigests = null;
+    },
+  ],
+  [
+    'non-array RepoDigests',
+    (m) => {
+      m.RepoDigests = m.RepoDigests[0];
+    },
+  ],
+  [
+    'non-string digest',
+    (m) => {
+      m.RepoDigests = [42];
+    },
+  ],
+  [
+    'wrong repository',
+    (m) => {
+      m.RepoDigests = [m.RepoDigests[0].replace('fixture@', 'elsewhere@')];
+    },
+  ],
+  [
+    'config digest substituted for pin',
+    (m) => {
+      m.RepoDigests = [`fixture@${m.ImageID}`];
+    },
+  ],
+  [
+    'mixed image identities',
+    (m) => {
+      m.RepoDigests.push(otherImage.replace(/:[^:@/]+@/, '@'));
+    },
+  ],
+  [
+    'duplicate digest identities',
+    (m) => {
+      m.RepoDigests.push(m.RepoDigests[0]);
+    },
+  ],
+  [
+    'missing Reference',
+    (m) => {
+      delete m.Reference;
+    },
+  ],
+  [
+    'wrong Reference',
+    (m) => {
+      m.Reference = otherImage.replace(/:[^:@/]+@/, '@');
+    },
+  ],
+  [
+    'malformed Reference',
+    (m) => {
+      m.Reference = { digest: m.Reference };
+    },
+  ],
+  [
+    'missing ImageID',
+    (m) => {
+      delete m.ImageID;
+    },
+  ],
+  [
+    'malformed ImageID',
+    (m) => {
+      m.ImageID = 'not-an-image-id';
+    },
+  ],
+]) {
+  test(`review: ${label} fails despite unchanged ArtifactName`, () => {
+    const raw = clone(report);
+    change(raw.Metadata);
+    assert.throws(() => evaluate(raw));
+  });
+}
+
+test('review: converted identity cannot differ from raw selected image configuration', () => {
+  const converted = clone(report);
+  converted.Metadata.ImageID = `sha256:${'d'.repeat(64)}`;
+  assert.throws(() => evaluate(report, converted));
+});
+
+for (const [label, change] of [
+  [
+    'unsupported Class',
+    (r) => {
+      r.Class = 'future-class';
+    },
+  ],
+  [
+    'unsupported Type',
+    (r) => {
+      r.Type = 'future-package-format';
+    },
+  ],
+  [
+    'missing Class',
+    (r) => {
+      delete r.Class;
+    },
+  ],
+  [
+    'missing Type',
+    (r) => {
+      delete r.Type;
+    },
+  ],
+  [
+    'mismatched Class/Type',
+    (r) => {
+      r.Class = 'os-pkgs';
+    },
+  ],
+  [
+    'renamed vulnerability array',
+    (r) => {
+      r.UnrecognizedFindings = r.Vulnerabilities;
+      delete r.Vulnerabilities;
+    },
+  ],
+  [
+    'unknown findings field alongside known findings',
+    (r) => {
+      r.FutureFindings = [];
+    },
+  ],
+  [
+    'unexpected scanner field',
+    (r) => {
+      r.Misconfigurations = [];
+    },
+  ],
+  [
+    'renamed fix availability',
+    (r) => {
+      r.Vulnerabilities[0].PatchedVersion = r.Vulnerabilities[0].FixedVersion;
+      delete r.Vulnerabilities[0].FixedVersion;
+    },
+  ],
+  [
+    'malformed package value',
+    (r) => {
+      r.Packages.push({ Name: 42 });
+    },
+  ],
+  [
+    'malformed optional version',
+    (r) => {
+      r.Packages.push({ Name: 'extra', Version: [] });
+    },
+  ],
+  [
+    'malformed advisory array value',
+    (r) => {
+      r.Vulnerabilities[0].VendorIDs = [42];
+    },
+  ],
+  [
+    'null optional advisory field',
+    (r) => {
+      r.Vulnerabilities[0].FixedVersion = null;
+    },
+  ],
+  [
+    'malformed suppression value',
+    (r) => {
+      r.ExperimentalModifiedFindings = [null];
+    },
+  ],
+]) {
+  test(`review: ${label} in both reports cannot masquerade as a clean schema`, () => {
+    const raw = clone(report);
+    change(raw.Results[0]);
+    assert.throws(() => evaluate(raw));
+  });
+}
 
 test('global threshold stays HIGH/CRITICAL with a published fix', () => {
   const raw = clone(report);
@@ -415,14 +663,106 @@ test('suppressed raw report cannot masquerade as unfiltered evidence', () => {
 
 test('secrets are never covered by a vulnerability acceptance or hidden by conversion', () => {
   const raw = clone(report);
-  raw.Results[0].Secrets = [{ RuleID: 'private-key', Severity: 'HIGH' }];
+  raw.Results.push(clone(secretResult));
   assert.equal(evaluate(raw).rejected[0].kind, 'secret');
   const legacy = clone(raw);
-  delete legacy.Results[0].Secrets;
+  legacy.Results.pop();
   assert.throws(() => evaluate(raw, legacy), /hide secrets/);
-  raw.Results[0].Secrets[0].Severity = 'UNKNOWN-SCHEMA';
+  raw.Results[1].Secrets[0].Severity = 'UNKNOWN-SCHEMA';
   assert.throws(() => evaluate(raw), /unknown secret severity/);
 });
+
+test('genuine secret shape omits Type and unrelated arrays, but keeps findings blocking', () => {
+  const raw = clone(report);
+  raw.Results.push(clone(secretResult));
+  const result = evaluate(raw);
+  assert.equal(result.accepted.length, 1);
+  assert.equal(result.rejected.length, 1);
+  assert.deepEqual(result.rejected[0], {
+    id: 'schema-test-rule',
+    target: 'settings.py',
+    severity: 'HIGH',
+    kind: 'secret',
+  });
+});
+
+for (const [label, change] of [
+  [
+    'unexpected Type',
+    (r) => {
+      r.Type = 'node-pkg';
+    },
+  ],
+  [
+    'null Type',
+    (r) => {
+      r.Type = null;
+    },
+  ],
+  [
+    'package findings on secret result',
+    (r) => {
+      r.Vulnerabilities = [];
+    },
+  ],
+  [
+    'renamed secret array',
+    (r) => {
+      r.OtherSecrets = r.Secrets;
+      delete r.Secrets;
+    },
+  ],
+  [
+    'malformed secret entry',
+    (r) => {
+      r.Secrets = [null];
+    },
+  ],
+  [
+    'malformed RuleID',
+    (r) => {
+      r.Secrets[0].RuleID = [];
+    },
+  ],
+  [
+    'malformed Category',
+    (r) => {
+      r.Secrets[0].Category = {};
+    },
+  ],
+  [
+    'malformed line number',
+    (r) => {
+      r.Secrets[0].StartLine = '1';
+    },
+  ],
+  [
+    'malformed Match',
+    (r) => {
+      r.Secrets[0].Match = [];
+    },
+  ],
+  [
+    'malformed code lines',
+    (r) => {
+      r.Secrets[0].Code.Lines = {};
+    },
+  ],
+  [
+    'unknown secret field',
+    (r) => {
+      r.Secrets[0].OtherFinding = {};
+    },
+  ],
+]) {
+  test(`secret schema rejects ${label} in raw and converted reports`, () => {
+    const raw = clone(report);
+    const secret = clone(secretResult);
+    change(secret);
+    raw.Results.push(secret);
+    assert.throws(() => evaluate(raw));
+  });
+}
 
 function fixture(t) {
   const directory = mkdtempSync(
@@ -455,6 +795,7 @@ function fixture(t) {
   savePolicy();
   const clean = clone(report);
   clean.ArtifactName = otherImage;
+  clean.Metadata = metadata(otherImage);
   clean.Results[0].Vulnerabilities = [];
   put('reports.json', JSON.stringify({ [image]: report, [otherImage]: clean }));
   put(
@@ -484,6 +825,13 @@ if (args[0] === 'image') {
       process.exit(0);
     }
     if (mode === 'new-advisory') raw.Results[0].Vulnerabilities[0].VulnerabilityID = 'CVE-2026-999999';
+    if (mode === 'identity-missing') delete raw.Metadata.RepoDigests;
+    if (mode === 'identity-mismatch') raw.Metadata.RepoDigests = ['fixture@sha256:' + 'f'.repeat(64)];
+    if (mode === 'schema-unsupported-type') raw.Results[0].Type = 'future-package-format';
+    if (mode === 'schema-renamed-findings') {
+      raw.Results[0].UnrecognizedFindings = raw.Results[0].Vulnerabilities;
+      delete raw.Results[0].Vulnerabilities;
+    }
   }
   writeFileSync(flag('--output'), JSON.stringify(raw));
   if (mode === 'scan-error' && reference.startsWith('fixture:')) process.exit(7);
@@ -554,6 +902,10 @@ for (const mode of [
   'missing-report',
   'malformed-report',
   'new-advisory',
+  'identity-missing',
+  'identity-mismatch',
+  'schema-unsupported-type',
+  'schema-renamed-findings',
 ]) {
   test(`runner blocks ${mode} and still attempts every image`, (t) => {
     const f = fixture(t);
@@ -631,4 +983,38 @@ test('enumeration rejects unpinned Compose references and missing source files',
   rmSync(join(f.directory, 'backend/Dockerfile'));
   assert.equal(f.run().status, 1);
   assert.match(f.summary().errors[0].error, /failed/);
+});
+
+const unreviewedImage = `unreviewed:1@sha256:${'e'.repeat(64)}`;
+for (const [label, declaration] of [
+  ['flow service', `  unreviewed: { image: '${unreviewedImage}' }\n`],
+  ['flow service with quoted image key', `  unreviewed: { "image": "${unreviewedImage}" }\n`],
+  ['quoted image key', `  unreviewed:\n    'image': '${unreviewedImage}'\n`],
+  ['JSON image key', `  unreviewed:\n    "image": "${unreviewedImage}"\n`],
+  ['escaped image key', `  unreviewed:\n    "\\u0069mage": "${unreviewedImage}"\n`],
+  ['explicit image key', `  unreviewed:\n    ? image\n    : '${unreviewedImage}'\n`],
+  ['flow alias', `  unreviewed: &hidden { image: '${unreviewedImage}' }\n`],
+]) {
+  test(`review: valid unreviewed Compose ${label} cannot escape the runner`, (t) => {
+    const f = fixture(t);
+    f.put(
+      'docker-compose.prod.yml',
+      `services:\n  reviewed:\n    image: '${otherImage}'\n${declaration}`,
+    );
+    const result = f.run();
+    assert.equal(result.status, 1, 'unreviewed service silently escaped scanning/policy');
+    assert.equal(f.summary().passedPolicy, false);
+  });
+}
+
+test('review: a JSON/flow Compose document cannot escape enumeration', (t) => {
+  const f = fixture(t);
+  f.put(
+    'docker-compose.prod.yml',
+    JSON.stringify({
+      services: { reviewed: { image: otherImage }, unreviewed: { image: unreviewedImage } },
+    }),
+  );
+  assert.equal(f.run().status, 1);
+  assert.equal(f.summary().passedPolicy, false);
 });

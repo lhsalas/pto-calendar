@@ -7,6 +7,186 @@ const severities = ['UNKNOWN', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 const blocking = (finding) =>
   ['HIGH', 'CRITICAL'].includes(finding.severity) && Boolean(finding.fixedVersion);
 
+function object(value, label) {
+  assert.ok(value && typeof value === 'object' && !Array.isArray(value), `malformed ${label}`);
+}
+
+function knownFields(value, allowed, label) {
+  object(value, label);
+  for (const key of Object.keys(value)) {
+    assert.ok(allowed.includes(key), `unsupported ${label} field: ${key}`);
+  }
+}
+
+function stringFields(value, names) {
+  for (const key of names) {
+    if (Object.hasOwn(value, key)) assert.equal(typeof value[key], 'string', `malformed ${key}`);
+  }
+}
+
+function stringArrays(value, names) {
+  for (const key of names) {
+    if (Object.hasOwn(value, key)) {
+      assert.ok(
+        Array.isArray(value[key]) && value[key].every((item) => typeof item === 'string'),
+        `malformed ${key}`,
+      );
+    }
+  }
+}
+
+function validateVulnerability(value) {
+  // Trivy 0.76.2 DetectedVulnerability + advisory detail fields. Unknown keys
+  // must not turn a renamed FixedVersion/findings field into "unfixed/clean".
+  const strings = [
+    'VulnerabilityID',
+    'PkgID',
+    'PkgName',
+    'PkgPath',
+    'InstalledVersion',
+    'FixedVersion',
+    'Status',
+    'SeveritySource',
+    'PrimaryURL',
+    'Fingerprint',
+    'Title',
+    'Description',
+    'Severity',
+    'PublishedDate',
+    'LastModifiedDate',
+  ];
+  const arrays = ['VendorIDs', 'CweIDs', 'References'];
+  const objects = ['PkgIdentifier', 'Layer', 'DataSource', 'VendorSeverity', 'CVSS'];
+  knownFields(value, [...strings, ...arrays, ...objects], 'vulnerability');
+  stringFields(value, strings);
+  stringArrays(value, arrays);
+  for (const key of objects) if (Object.hasOwn(value, key)) object(value[key], key);
+}
+
+function validatePackage(value) {
+  const strings = [
+    'ID',
+    'Name',
+    'Version',
+    'Release',
+    'Arch',
+    'SrcName',
+    'SrcVersion',
+    'SrcRelease',
+    'Maintainer',
+    'Modularitylabel',
+    'Relationship',
+    'FilePath',
+    'Digest',
+    'AnalyzedBy',
+  ];
+  const arrays = ['Licenses', 'DependsOn', 'InstalledFiles'];
+  const objects = ['Identifier', 'BuildInfo', 'Repository', 'Layer'];
+  knownFields(
+    value,
+    [...strings, ...arrays, ...objects, 'Epoch', 'SrcEpoch', 'Dev', 'Indirect', 'Locations'],
+    'package',
+  );
+  assert.ok(typeof value.Name === 'string' && value.Name.length > 0, 'missing package name');
+  stringFields(value, strings);
+  stringArrays(value, arrays);
+  for (const key of objects) if (Object.hasOwn(value, key)) object(value[key], key);
+  for (const key of ['Epoch', 'SrcEpoch']) {
+    if (Object.hasOwn(value, key)) assert.ok(Number.isSafeInteger(value[key]), `malformed ${key}`);
+  }
+  for (const key of ['Dev', 'Indirect']) {
+    if (Object.hasOwn(value, key)) assert.equal(typeof value[key], 'boolean', `malformed ${key}`);
+  }
+  if (Object.hasOwn(value, 'Locations')) {
+    assert.ok(Array.isArray(value.Locations), 'malformed Locations');
+    for (const location of value.Locations) {
+      knownFields(location, ['StartLine', 'EndLine'], 'location');
+      for (const line of Object.values(location)) assert.ok(Number.isSafeInteger(line));
+    }
+  }
+}
+
+function validateSecret(value) {
+  knownFields(
+    value,
+    [
+      'RuleID',
+      'Category',
+      'Severity',
+      'Title',
+      'StartLine',
+      'EndLine',
+      'Code',
+      'Match',
+      'Layer',
+      'Offset',
+    ],
+    'secret',
+  );
+  assert.ok(typeof value.RuleID === 'string' && value.RuleID.length > 0, 'missing secret RuleID');
+  assert.ok(severities.includes(value.Severity), 'unknown secret severity');
+  for (const key of ['Category', 'Title', 'Match'])
+    assert.equal(typeof value[key], 'string', `malformed secret ${key}`);
+  for (const key of [
+    'StartLine',
+    'EndLine',
+    ...(Object.hasOwn(value, 'Offset') ? ['Offset'] : []),
+  ]) {
+    assert.ok(Number.isSafeInteger(value[key]) && value[key] >= 0, `malformed secret ${key}`);
+  }
+  assert.ok(value.EndLine >= value.StartLine, 'invalid secret line range');
+  if (Object.hasOwn(value, 'Layer')) object(value.Layer, 'secret Layer');
+  knownFields(value.Code, ['Lines'], 'secret Code');
+  if (Object.hasOwn(value.Code, 'Lines')) {
+    assert.ok(Array.isArray(value.Code.Lines), 'malformed secret Code.Lines');
+    for (const line of value.Code.Lines) {
+      knownFields(
+        line,
+        [
+          'Number',
+          'Content',
+          'IsCause',
+          'Annotation',
+          'Truncated',
+          'Highlighted',
+          'FirstCause',
+          'LastCause',
+        ],
+        'secret code line',
+      );
+      assert.ok(
+        Number.isSafeInteger(line.Number) && line.Number >= 0,
+        'malformed code line number',
+      );
+      stringFields(line, ['Content', 'Annotation', 'Highlighted']);
+      for (const key of ['IsCause', 'Truncated', 'FirstCause', 'LastCause']) {
+        if (Object.hasOwn(line, key)) assert.equal(typeof line[key], 'boolean', `malformed ${key}`);
+      }
+    }
+  }
+}
+
+function validateResult(result) {
+  object(result, 'result');
+  const secret = result.Class === 'secret' && !Object.hasOwn(result, 'Type');
+  const packages =
+    (result.Class === 'os-pkgs' && result.Type === 'alpine') ||
+    (result.Class === 'lang-pkgs' && ['gobinary', 'node-pkg'].includes(result.Type));
+  assert.ok(secret || packages, 'unsupported result Class/Type');
+  knownFields(
+    result,
+    secret
+      ? ['Target', 'Class', 'Secrets']
+      : ['Target', 'Class', 'Type', 'Packages', 'Vulnerabilities', 'ExperimentalModifiedFindings'],
+    'result',
+  );
+  for (const key of ['Packages', 'Vulnerabilities', 'Secrets', 'ExperimentalModifiedFindings']) {
+    if (Object.hasOwn(result, key)) assert.ok(Array.isArray(result[key]), `malformed ${key}`);
+  }
+  for (const pkg of result.Packages ?? []) validatePackage(pkg);
+  for (const finding of result.Secrets ?? []) validateSecret(finding);
+}
+
 export function validatePolicy(policy, today = new Date().toISOString().slice(0, 10)) {
   assert.equal(policy.approvedOn, '2026-11-15');
   assert.equal(policy.expiresOn, EXPIRY, 'no silent renewal of the owner-approved first deadline');
@@ -58,6 +238,13 @@ function validateReport(image, report, entry) {
   assert.equal(report.SchemaVersion, 2, 'unsupported Trivy report schema');
   assert.equal(report.ArtifactType, 'container_image');
   assert.equal(report.ArtifactName, image, 'report/image mismatch');
+  const [tagged, digest] = image.split('@');
+  const expected = `${tagged.slice(0, tagged.lastIndexOf(':'))}@${digest}`;
+  // All four reviewed remote reports retain the requested index digest here.
+  // ImageID is the selected ARM64 config digest, NOT an alternate accepted pin.
+  assert.deepEqual(report.Metadata?.RepoDigests, [expected], 'missing or inconsistent RepoDigests');
+  assert.equal(report.Metadata?.Reference, expected, 'missing or inconsistent Reference');
+  assert.match(report.Metadata?.ImageID, /^sha256:[0-9a-f]{64}$/, 'malformed or missing ImageID');
   assert.equal(
     report.Metadata?.ImageConfig?.architecture,
     'arm64',
@@ -67,12 +254,10 @@ function validateReport(image, report, entry) {
   assert.ok(Array.isArray(report.Results) && report.Results.length > 0, 'missing scan results');
   const targets = new Set();
   for (const result of report.Results) {
+    validateResult(result);
     assert.ok(typeof result.Target === 'string' && result.Target.length > 0, 'missing target');
     assert.ok(!targets.has(result.Target), 'duplicate report target');
     targets.add(result.Target);
-    for (const key of ['Packages', 'Vulnerabilities', 'Secrets', 'ExperimentalModifiedFindings']) {
-      if (Object.hasOwn(result, key)) assert.ok(Array.isArray(result[key]), `malformed ${key}`);
-    }
   }
   for (const target of entry.targets) {
     const result = report.Results.find((candidate) => candidate.Target === target);
@@ -100,6 +285,8 @@ function findings(report, suppressed = false, legacySource) {
   for (const result of report.Results) {
     const vulnerabilities = suppressed
       ? (result.ExperimentalModifiedFindings ?? []).map((item) => {
+          knownFields(item, ['Type', 'Status', 'Statement', 'Source', 'Finding'], 'suppression');
+          stringFields(item, ['Statement']);
           assert.equal(item.Status, 'ignored');
           assert.equal(item.Type, 'vulnerability');
           assert.equal(item.Source, legacySource, 'unexpected suppression source');
@@ -108,6 +295,7 @@ function findings(report, suppressed = false, legacySource) {
       : (result.Vulnerabilities ?? []);
     assert.ok(Array.isArray(vulnerabilities));
     for (const vulnerability of vulnerabilities) {
+      validateVulnerability(vulnerability);
       assert.ok(vulnerability && typeof vulnerability.VulnerabilityID === 'string');
       assert.ok(vulnerability.VulnerabilityID.length > 0);
       assert.ok(typeof vulnerability.PkgName === 'string' && vulnerability.PkgName.length > 0);
@@ -140,6 +328,11 @@ export function evaluateImage(image, raw, legacy, policy, legacySource, today) {
   assert.ok(entry, `image/digest has no explicit review: ${image}`);
   validateReport(image, raw, entry);
   validateReport(image, legacy, entry);
+  assert.equal(
+    raw.Metadata.ImageID,
+    legacy.Metadata.ImageID,
+    'converted image identity differs from raw',
+  );
   assert.ok(
     raw.Results.every((result) => !result.ExperimentalModifiedFindings?.length),
     'raw report must not suppress findings',

@@ -58,6 +58,11 @@ not cleared or reused.
 
 - Each enumerated image is scanned remotely on `linux/arm64`, including all
   severities, unfixed findings and secrets, with no ignore file.
+- Compose enumeration accepts this repository's plain-key block mappings and
+  scalar lists. Flow/JSON mappings, quoted/explicit keys, anchors/aliases, tags,
+  block scalars and imported service definitions are explicitly rejected,
+  never silently omitted. Convert unsupported declarations to block form or
+  review parser support before using them.
 - Raw `*-raw.json` and scan logs are preserved. A separate `trivy convert`
   applies the **unchanged** `.trivyignore.yaml`, retaining suppressed rows in
   `*-legacy.json`. The legacy file is SHA-256-bound in the policy; its original
@@ -67,6 +72,16 @@ not cleared or reused.
   HIGH/CRITICAL-with-a-fix threshold, then exact temporary matching. HIGH/CRITICAL
   secrets remain blocking. Lower/unfixed findings remain visible, not newly
   accepted.
+- `Metadata.RepoDigests` and `Reference` must identify the exact requested pin.
+  The four reviewed remote reports retain that index digest; `ImageID` is the
+  separate selected ARM64 configuration digest and must agree between raw and
+  converted reports. It is not a second authorized image pin. Missing, malformed,
+  unrelated or inconsistent digest metadata blocks.
+- Supported result schemas are `os-pkgs/alpine`, `lang-pkgs/gobinary`,
+  `lang-pkgs/node-pkg`, and Trivy's `secret` result with omitted `Type`.
+  Unknown fields/class/type combinations and malformed array/value types block
+  rather than becoming a clean result. Genuine empty findings arrays may be
+  omitted (`omitempty`); unexpected/renamed findings fields may not.
 - Unknown images/digests (even clean ones), unexpected findings at the blocking
   threshold, expired policy, missing/malformed reports and scanner/conversion
   failures fail the job. Individual scan failures do not stop later images.
