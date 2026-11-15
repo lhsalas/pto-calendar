@@ -1,29 +1,60 @@
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { PTOViewModal } from '../../src/components/pto/PTOViewModal';
 import { STUB_PTO, STUB_USER } from '../mocks/handlers';
 import { formatRangeLabel } from '../../src/lib/calendar';
+import * as api from '../../src/api/client';
+import type { PTO } from '../../src/types/api';
+
+type ModalProps = React.ComponentProps<typeof PTOViewModal>;
+
+const PTO_DETAIL: PTO = {
+  id: STUB_PTO.id,
+  userId: STUB_USER.id,
+  startDate: STUB_PTO.startDate,
+  endDate: STUB_PTO.endDate,
+  dayPart: STUB_PTO.dayPart,
+  note: null,
+  createdAt: '2026-05-01T10:00:00.000Z',
+  updatedAt: '2026-05-01T10:00:00.000Z',
+};
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 function renderModal(
-  props: Partial<React.ComponentProps<typeof PTOViewModal>> = {},
-): ReturnType<typeof render> {
-  const onClose = vi.fn();
-  const onEdit = vi.fn();
-  const onDelete = vi.fn(async () => {});
-  return render(
-    <PTOViewModal
-      pto={STUB_PTO}
-      currentUser={STUB_USER}
-      onClose={onClose}
-      onEdit={onEdit}
-      onDelete={onDelete}
-      {...props}
-    />,
-  );
+  props: Partial<ModalProps> = {},
+): ReturnType<typeof render> & { rerenderModal: (props: Partial<ModalProps>) => void } {
+  const modalProps: ModalProps = {
+    pto: STUB_PTO,
+    currentUser: STUB_USER,
+    onClose: vi.fn(),
+    onEdit: vi.fn(),
+    onDelete: vi.fn(async () => {}),
+    ...props,
+  };
+  const view = render(<PTOViewModal {...modalProps} />);
+  return {
+    ...view,
+    rerenderModal: (nextProps) => view.rerender(<PTOViewModal {...modalProps} {...nextProps} />),
+  };
 }
+
+afterEach(() => vi.restoreAllMocks());
 
 describe('PTOViewModal', () => {
   it('renders the PTO details and shows the day part label', () => {
@@ -43,7 +74,10 @@ describe('PTOViewModal', () => {
     expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
   });
 
-  it('hides Edit and Delete buttons for a member viewing another user PTO', () => {
+  it('never loads a note for a member who cannot modify the PTO', async () => {
+    const user = userEvent.setup();
+    const requestDetail = vi.fn(() => HttpResponse.json(PTO_DETAIL));
+    server.use(http.get('/pto/:id', requestDetail));
     const otherMember = {
       id: 'other-member-id',
       name: 'Other',
@@ -57,23 +91,35 @@ describe('PTOViewModal', () => {
     });
     expect(screen.queryByRole('button', { name: /edit/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /load note/i })).not.toBeInTheDocument();
+    expect(screen.getByText('(no note)')).toHaveClass(
+      'text-ink-muted/70',
+      'dark:text-ink-muted-dark/70',
+    );
+    await user.click(screen.getByText('Note'));
+    await user.click(screen.getByRole('button', { name: /^close$/i }));
+    expect(requestDetail).not.toHaveBeenCalled();
   });
 
-  it('shows Edit and Delete buttons for a team lead viewing another user PTO', () => {
-    const teamLead = {
-      id: 'team-lead-id',
-      name: 'Lead',
-      role: 'team_lead' as const,
-      email: 'lead@example.com',
-      colorCode: '#000',
-    };
-    renderModal({
-      pto: { ...STUB_PTO, user: { ...STUB_PTO.user, id: 'not-this-user' } },
-      currentUser: teamLead,
-    });
-    expect(screen.getByRole('button', { name: /edit/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
-  });
+  it.each(['team_lead', 'admin'] as const)(
+    'shows modification and note-loading buttons for a %s viewing another user PTO',
+    (role) => {
+      const teamLead = {
+        id: 'team-lead-id',
+        name: 'Lead',
+        role,
+        email: 'lead@example.com',
+        colorCode: '#000',
+      };
+      renderModal({
+        pto: { ...STUB_PTO, user: { ...STUB_PTO.user, id: 'not-this-user' } },
+        currentUser: teamLead,
+      });
+      expect(screen.getByRole('button', { name: /edit/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /load note/i })).toBeInTheDocument();
+    },
+  );
 
   it('calls onEdit when Edit is clicked', async () => {
     const user = userEvent.setup();
@@ -109,24 +155,281 @@ describe('PTOViewModal', () => {
 
   it('loads the note when the owner clicks "Load note"', async () => {
     const user = userEvent.setup();
-    server.use(
-      http.get('/pto/:id', () =>
-        HttpResponse.json({
-          id: STUB_PTO.id,
-          userId: STUB_USER.id,
-          startDate: STUB_PTO.startDate,
-          endDate: STUB_PTO.endDate,
-          dayPart: 'morning',
-          note: 'Private note',
-          user: STUB_PTO.user,
-          createdAt: '2026-05-01T10:00:00.000Z',
-          updatedAt: '2026-05-01T10:00:00.000Z',
-        }),
-      ),
+    const requestDetail = vi.fn(() => HttpResponse.json({ ...PTO_DETAIL, note: 'Private note' }));
+    server.use(http.get('/pto/:id', requestDetail));
+    renderModal({ currentUser: { ...STUB_USER, role: 'member' } });
+    expect(screen.getByText('(no note)')).toHaveClass(
+      'text-ink-muted/70',
+      'dark:text-ink-muted-dark/70',
     );
-    renderModal({ pto: { ...STUB_PTO, note: null } });
+    expect(requestDetail).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: /load note/i }));
     expect(await screen.findByText('Private note')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /load note/i })).not.toBeInTheDocument();
+    expect(screen.queryByText('(no note)')).not.toBeInTheDocument();
+    expect(requestDetail).toHaveBeenCalledTimes(1);
+  });
+
+  it('remembers a loaded empty note until the modal is reopened', async () => {
+    const user = userEvent.setup();
+    const requestDetail = vi.fn(() => HttpResponse.json(PTO_DETAIL));
+    server.use(http.get('/pto/:id', requestDetail));
+    const { rerenderModal, unmount } = renderModal();
+    await user.click(screen.getByRole('button', { name: /load note/i }));
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /load note/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('(no note)')).not.toHaveClass('text-ink-muted/70');
+    expect(screen.getByText('(no note)')).not.toHaveClass('dark:text-ink-muted-dark/70');
+    expect(screen.getByText('(no note)')).toHaveClass('text-ink', 'dark:text-ink-dark');
+
+    // A fresh list object for the same PTO must not make the note unknown again.
+    rerenderModal({ pto: { ...STUB_PTO } });
+    await user.click(screen.getByText('(no note)'));
+    expect(screen.queryByRole('button', { name: /load note/i })).not.toBeInTheDocument();
+    expect(requestDetail).toHaveBeenCalledTimes(1);
+
+    unmount();
+    renderModal();
+    expect(screen.getByRole('button', { name: /load note/i })).toBeInTheDocument();
+    expect(screen.getByText('(no note)')).toHaveClass('text-ink-muted/70');
+    await user.click(screen.getByRole('button', { name: /load note/i }));
+    await waitFor(() => expect(requestDetail).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+  });
+
+  it('keeps a failed note load retryable and clears the error on retry', async () => {
+    const user = userEvent.setup();
+    const requestDetail = vi
+      .fn()
+      .mockImplementationOnce(() =>
+        HttpResponse.json(
+          { error: { code: 'UNAVAILABLE', message: 'Cannot load note' } },
+          { status: 503 },
+        ),
+      )
+      .mockImplementationOnce(() => HttpResponse.json(PTO_DETAIL));
+    server.use(http.get('/pto/:id', requestDetail));
+    renderModal();
+    await user.click(screen.getByRole('button', { name: /load note/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Cannot load note');
+    expect(screen.getByRole('button', { name: /load note/i })).toBeInTheDocument();
+    expect(screen.getByText('(no note)')).toHaveClass('text-ink-muted/70');
+
+    await user.click(screen.getByRole('button', { name: /load note/i }));
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /load note/i })).not.toBeInTheDocument();
+    expect(screen.getByText('(no note)')).toHaveClass('text-ink', 'dark:text-ink-dark');
+    expect(requestDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows a fallback error when a note load rejects without an Error', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(api, 'apiRequest').mockRejectedValueOnce('unavailable');
+    renderModal();
+    await user.click(screen.getByRole('button', { name: /load note/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load PTO details.');
+    expect(screen.getByRole('button', { name: /load note/i })).toBeInTheDocument();
+  });
+
+  it('deduplicates rapid clicks while the note is loading', async () => {
+    const response = deferred<PTO>();
+    const requestDetail = vi.spyOn(api, 'apiRequest').mockReturnValue(response.promise);
+    renderModal();
+    const button = screen.getByRole('button', { name: /load note/i });
+    // Both events arrive before React commits the loading state.
+    act(() => {
+      button.click();
+      button.click();
+    });
+    expect(requestDetail).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading note…');
+    expect(screen.queryByRole('button', { name: /load note/i })).not.toBeInTheDocument();
+    expect(screen.getByText('(no note)')).toHaveClass('text-ink-muted/70');
+
+    await act(async () => response.resolve(PTO_DETAIL));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /load note/i })).not.toBeInTheDocument();
+    expect(screen.getByText('(no note)')).toHaveClass('text-ink', 'dark:text-ink-dark');
+  });
+
+  it.each([
+    { label: 'empty', note: null },
+    { label: 'text', note: 'Private note' },
+  ])(
+    'keeps keyboard focus inside the dialog through a successful $label load',
+    async ({ note }) => {
+      const user = userEvent.setup();
+      const response = deferred<PTO>();
+      const requestDetail = vi.spyOn(api, 'apiRequest').mockReturnValue(response.promise);
+      renderModal();
+      const button = screen.getByRole('button', { name: /load note/i });
+      const noteContent = screen.getByTestId('pto-note-content');
+      expect(noteContent.tagName).toBe('DD');
+      expect(noteContent).toHaveAccessibleDescription('Note');
+      expect(noteContent).not.toHaveAttribute('aria-labelledby');
+      button.focus();
+      await user.keyboard('{Enter}');
+      expect(screen.getByRole('status')).toHaveTextContent('Loading note…');
+      expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+      expect(noteContent).toHaveFocus();
+
+      await act(async () => response.resolve({ ...PTO_DETAIL, note }));
+      expect(noteContent).toHaveFocus();
+      expect(noteContent).toHaveTextContent(note ?? '(no note)');
+      expect(screen.queryByRole('button', { name: /load note/i })).not.toBeInTheDocument();
+      expect(requestDetail).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('returns keyboard focus to the retry button after a failed note load', async () => {
+    const user = userEvent.setup();
+    const response = deferred<PTO>();
+    const retry = deferred<PTO>();
+    const requestDetail = vi
+      .spyOn(api, 'apiRequest')
+      .mockReturnValueOnce(response.promise)
+      .mockReturnValueOnce(retry.promise);
+    renderModal();
+    const button = screen.getByRole('button', { name: /load note/i });
+    const noteContent = screen.getByTestId('pto-note-content');
+    button.focus();
+    await user.keyboard('{Enter}');
+    expect(noteContent).toHaveFocus();
+
+    await act(async () => {
+      response.reject(new Error('Cannot load note'));
+      await response.promise.catch(() => undefined);
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('Cannot load note');
+    expect(screen.getByRole('button', { name: /load note/i })).toHaveFocus();
+
+    await user.keyboard('{Enter}');
+    expect(noteContent).toHaveFocus();
+    await act(async () => retry.resolve(PTO_DETAIL));
+    expect(noteContent).toHaveFocus();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /load note/i })).not.toBeInTheDocument();
+    expect(requestDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['success', 'failure'])(
+    'does not reclaim focus moved to another control before note load %s',
+    async (outcome) => {
+      const user = userEvent.setup();
+      const response = deferred<PTO>();
+      vi.spyOn(api, 'apiRequest').mockReturnValue(response.promise);
+      renderModal();
+      const button = screen.getByRole('button', { name: /load note/i });
+      const noteContent = screen.getByTestId('pto-note-content');
+      button.focus();
+      await user.keyboard('{Enter}');
+      expect(noteContent).toHaveFocus();
+
+      await user.tab();
+      const closeButton = screen.getByRole('button', { name: /^close$/i });
+      expect(closeButton).toHaveFocus();
+      await act(async () => {
+        if (outcome === 'success') response.resolve(PTO_DETAIL);
+        else response.reject(new Error('Cannot load note'));
+        await response.promise.catch(() => undefined);
+      });
+      expect(closeButton).toHaveFocus();
+      if (outcome === 'failure') {
+        expect(screen.getByRole('button', { name: /load note/i })).not.toHaveFocus();
+      }
+    },
+  );
+
+  it.each(['success', 'failure'])(
+    'does not move focus for an unfocused note button activation before %s',
+    async (outcome) => {
+      const response = deferred<PTO>();
+      vi.spyOn(api, 'apiRequest').mockReturnValue(response.promise);
+      renderModal();
+      const dismissButton = screen.getByRole('button', { name: /dismiss/i });
+      expect(dismissButton).toHaveFocus();
+
+      act(() => screen.getByRole('button', { name: /load note/i }).click());
+      expect(screen.getByRole('status')).toBeInTheDocument();
+      expect(dismissButton).toHaveFocus();
+      await act(async () => {
+        if (outcome === 'success') response.resolve(PTO_DETAIL);
+        else response.reject(new Error('Cannot load note'));
+        await response.promise.catch(() => undefined);
+      });
+      expect(dismissButton).toHaveFocus();
+    },
+  );
+
+  it('does not fetch a note already supplied as text', () => {
+    const requestDetail = vi.spyOn(api, 'apiRequest');
+    renderModal({ pto: { ...STUB_PTO, note: 'Known note' } });
+    expect(screen.getByText('Known note')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /load note/i })).not.toBeInTheDocument();
+    expect(requestDetail).not.toHaveBeenCalled();
+  });
+
+  it('resets a loaded note when a different PTO is selected', async () => {
+    const user = userEvent.setup();
+    const otherPto = { ...STUB_PTO, id: 'other-pto-id' };
+    const requestDetail = vi
+      .spyOn(api, 'apiRequest')
+      .mockResolvedValueOnce({ ...PTO_DETAIL, note: 'First note' })
+      .mockResolvedValueOnce({ ...PTO_DETAIL, id: otherPto.id, note: 'Other note' });
+    const { rerenderModal } = renderModal();
+    await user.click(screen.getByRole('button', { name: /load note/i }));
+    expect(await screen.findByText('First note')).toBeInTheDocument();
+
+    rerenderModal({ pto: otherPto });
+    expect(screen.queryByText('First note')).not.toBeInTheDocument();
+    expect(screen.getByText('(no note)')).toHaveClass('text-ink-muted/70');
+    await user.click(screen.getByRole('button', { name: /load note/i }));
+    expect(await screen.findByText('Other note')).toBeInTheDocument();
+    expect(requestDetail).toHaveBeenNthCalledWith(2, `/pto/${otherPto.id}`);
+  });
+
+  it('resets note errors and delete confirmation when a different PTO is selected', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(api, 'apiRequest').mockRejectedValueOnce(new Error('Cannot load note'));
+    const { rerenderModal } = renderModal();
+    await user.click(screen.getByRole('button', { name: /load note/i }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^delete$/i }));
+    expect(screen.getByText(/cannot be undone/i)).toBeInTheDocument();
+
+    rerenderModal({ pto: { ...STUB_PTO, id: 'other-pto-id' } });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText(/cannot be undone/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /load note/i })).toBeInTheDocument();
+  });
+
+  it.each(['success', 'failure'])('ignores a late %s from the previous PTO', async (outcome) => {
+    const user = userEvent.setup();
+    const response = deferred<PTO>();
+    vi.spyOn(api, 'apiRequest')
+      .mockReturnValueOnce(response.promise)
+      .mockResolvedValueOnce({ ...PTO_DETAIL, note: 'Other note' });
+    const { rerenderModal } = renderModal();
+    await user.click(screen.getByRole('button', { name: /load note/i }));
+    expect(screen.getByRole('status')).toBeInTheDocument();
+
+    rerenderModal({ pto: { ...STUB_PTO, id: 'other-pto-id' } });
+    expect(screen.getByText('(no note)')).toHaveClass('text-ink-muted/70');
+    await user.click(screen.getByRole('button', { name: /load note/i }));
+    expect(await screen.findByText('Other note')).toBeInTheDocument();
+
+    await act(async () => {
+      if (outcome === 'success') response.resolve({ ...PTO_DETAIL, note: 'Stale note' });
+      else response.reject(new Error('Stale error'));
+      await response.promise.catch(() => undefined);
+    });
+    expect(screen.getByText('Other note')).toBeInTheDocument();
+    expect(screen.queryByText('Stale note')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /load note/i })).not.toBeInTheDocument();
   });
 
   it('calls onClose when the Close button is clicked', async () => {
