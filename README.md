@@ -61,6 +61,14 @@ environment. Keep that environment approval-gated and store
 `OPENCODE_API_KEY` as an environment secret, not an unrestricted repository
 secret.
 
+### 8. AI Agent Access Assessment
+
+- **File:** [`docs/ai-agent-access-report.html`](docs/ai-agent-access-report.html)
+- **Purpose:** Repository findings and proposed requirements for CLI/MCP PTO
+  access, self-service personal access tokens (maximum 365 days), permissions,
+  agent safety, and phased delivery. Open the HTML in a browser; this is a
+  proposal, not an implemented feature.
+
 ## Functional Summary
 
 The app is intended to support:
