@@ -31,6 +31,9 @@ The [temporary image-risk policy (#273)](image-risk-acceptance.md) expires
 2026-12-15; it is accepted risk, **not remediation**, and #247 remains
 open/high priority. Any replacement digest, including #248's Node patch,
 requires its own scan and explicit policy review rather than inheriting acceptance.
+The dated [#248 review](node-security-review-2026-11-15.md) now records that
+explicit authorization for the exact 24.22.3 digest and all six npm-bundle
+tuples. It preserves the original deadline and is not an npm/image fix.
 
 When a new Node.js 24.x security release ships, update together:
 

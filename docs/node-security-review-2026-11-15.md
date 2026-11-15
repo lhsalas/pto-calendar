@@ -32,7 +32,7 @@ linux/arm64 and `NODE_VERSION=24.22.3`; that metadata is **not** runtime-test
 evidence. The existing nginx final stage and all non-Node pins/config are
 unchanged by #248.
 
-## Fresh raw scan: acceptance still requires review
+## Raw evidence and explicit temporary acceptance
 
 Checksum-verified Trivy **0.76.2**, DB updated
 `2026-11-15T18:56:37.733847835Z`, scanned the exact index on **linux/arm64**
@@ -64,14 +64,49 @@ bundles undici **6.28.0**. npm executes during image preparation and
 migration/bootstrap tooling, so "not an application dependency" is not proof
 of no exposure.
 
-No acceptance is added in this change. Once #273 is validated/merged, the
-coordinator must obtain explicit review of **this new digest and all six exact
-advisory/package/path combinations** before adding data using that policy.
-No existing acceptance may transfer merely because the Node tag or target
-name looks similar. Keep raw reports and accepted-risk summaries visible, use
-the bounded review/expiry policy, and retain every CI/security gate.
+### Dated #248 new-digest review — 2026-11-15
 
-Reproduce the raw review separately from policy evaluation:
+The policy-only #273 did **not** pre-authorize this replacement. After #273
+merged at `ada8e0ba61d20bdc4a27cb6d06c314b3bd71b15e`, the coordinator explicitly
+authorized applying the independently reviewed #248 Node entry under the
+owner's 2026-11-15 temporary decision. **All six exact new-digest tuples above
+were reviewed**, not inherited from the old digest.
+
+The manifest replaces the obsolete 24.22.1 entry with the exact reviewed
+24.22.3 entry and its Alpine 3.24.4/`Node.js` coverage targets. The three
+temporary matches are undici CVE-2026-109383, CVE-2026-109869 and CVE-2026-87018.
+The unchanged, hash-bound legacy YAML separately accounts for brace-expansion
+CVE-2026-102276/CVE-2026-102278 and undici CVE-2026-19534. Those three were also
+explicitly included in this new-digest review; no legacy scope or expiry changed.
+
+Approved proposal: `policy-review/proposed-node-entry.json`, SHA-256
+`1588794398fe9fe68ecf76e90d91d9a973c56a146094303f528f057f9dc8bdf8`.
+The source entry must be structurally identical. All global fields, the other
+three image entries and the legacy hash remain unchanged; the first temporary
+expiry remains **2026-12-15 at 00:00 UTC**, not a restarted review clock.
+
+The full evidence packet is under
+`/tmp/opencode/pto-issue-248-node-baseline-20261115/policy-review/`.
+Its subsequent **fixed-DB repeat, not a fresh-advisory check**, used the
+canonical DB updated above, SHA-256
+`e22c0a587282c1e3f3cd7f8aaded14f60d3c8bbd22ee9edb17538560a11cfc88`,
+without DB/Java DB downloads. It retained all severities/unfixed findings,
+vulnerability and secret scans, complete report envelopes, exact ARM64 identity,
+19 OS/146 Node packages, and separate legacy conversion with suppressed rows:
+
+| Full report | SHA-256 |
+| --- | --- |
+| Raw, no ignore file | `8675ae7671e4d29d08183e0292137a97973f4f3026da7d7a972837be6947cef2` |
+| Converted, unchanged legacy YAML | `b4451ba9a350f031091eb393b2eb734f4dc5be4f18539fc33fb3a96c90e9bed2` |
+
+The packet contains 20 raw vulnerabilities (1 LOW, 13 MEDIUM, 6 HIGH), zero
+detected secrets, and 17 visible plus 3 legacy-suppressed converted findings.
+No finding is represented as fixed or clean. Fresh CI must update advisory
+data and fail any unexpected blocking finding. Future digests/CVEs still need
+their own explicit review; this entry grants no automatic inheritance.
+
+The initial HIGH/CRITICAL-only diagnostic can be reproduced separately from
+policy evaluation; it is not the complete policy input:
 
 ```bash
 trivy image --image-src remote --platform linux/arm64 \
@@ -85,7 +120,7 @@ contains registry bytes, scanner command/log/raw JSON and summaries. Raw
 JSON SHA-256:
 `f0c00d5578684bd09d60d224eda36a8242973b3e964256b82867c2760507f17d`.
 
-## Executed host check versus pending container checks
+## Executed host checks and final-candidate gates
 
 The official `node-v24.22.3-linux-x64.tar.xz` was downloaded to isolated
 temporary tool storage and verified against the official `SHASUMS256.txt`:
@@ -102,12 +137,17 @@ has no Node runtime; its real builder is tested instead. Existing service and
 application smoke remain. CI runs these containers natively on its runner;
 the ARM64 raw scan is not ARM64 runtime execution.
 
-Local container execution is unavailable because rootless Podman cannot create
-namespaces. No privileged workaround was attempted. Container build/smoke,
-backup roundtrip, integration coverage and Chromium E2E are still required on
-the final rebased candidate, using the coordinator's exclusive disposable
-test lease where applicable. All current CI checks and independent review
-remain merge prerequisites; this local candidate is not pushed or merge-ready.
+Draft PR #274's original source `99e699c593e94ec736796ac745695fb67e5addb5`
+passed all five actual CI Node probes at 24.22.3 (both builders, backend
+runtime, backend service and migration service). That run had 10/11 green
+checks, with Security scan failing before the reviewed policy integration.
+
+Local container execution remains unavailable because rootless Podman cannot
+create namespaces; no privileged workaround was attempted. The policy
+integration/follow-up preserves the pushed source through a merge, not a
+history rewrite. Its final source still needs independent review, fresh
+all-current CI, container/backup checks and leased integration coverage/
+Chromium E2E where applicable. No DB/E2E lease is held by this worker.
 
 Isolated checks passed with the verified Node 24.22.3 host toolchain:
 repository/infra formatting, both workspaces' lint/typecheck/unit tests
@@ -119,6 +159,15 @@ probe shell syntax/Compose target mappings were validated without containers.
 The shared lockfile was compared structurally with the base: only the root
 Node engine floor changed, not a single dependency resolution. Logs and
 statuses are retained in the evidence directory's `isolated-gates/`.
+
+After policy integration, those isolated checks passed again, together with
+all **158 daemon-free image-policy regressions**. Replaying the retained full
+raw/converted reports through the actual integrated evaluator yielded six
+raw blocking matches: **3 temporary + 3 unchanged legacy, 0 rejected**.
+The source Node entry was checked against the approved proposal before/after
+application; globals, other images, policy code and legacy YAML are unchanged.
+Logs/proofs are in the evidence directory's `policy-application/`. This replay
+invoked no Trivy scan and does not replace fresh-advisory CI or final gates.
 
 ## Pending dependency PR disposition
 

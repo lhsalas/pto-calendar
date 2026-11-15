@@ -335,6 +335,11 @@ installed versions and severities. The 79 existing legacy matches remain
 separate. New findings, unknown images (even clean ones) and expiry remain
 blocking; no future Node digest is pre-authorized. All eleven CI jobs, npm
 audit and coverage gates remain required.
+The subsequent dated [#248 Node review](node-security-review-2026-11-15.md)
+explicitly authorizes only its reviewed 24.22.3 entry after #273 integration,
+with all six tuples reviewed, unchanged globals/legacy hash and the original
+deadline. Its complete fixed-DB replay is not a fresh-advisory check; final CI
+must refresh advisory data and reject unexpected blocking findings.
 
 The `production-image-security` artifact and job summary retain raw reports,
 legacy-filtered reports with suppressed rows, logs, `summary.json` and
