@@ -1,0 +1,190 @@
+{
+  "approvedOn": "2026-11-15",
+  "expiresOn": "2026-12-15",
+  "owner": "Repository maintainers",
+  "issue": 273,
+  "remediationIssue": 247,
+  "legacyIgnoreSha256": "877db7ee3f4fb86691c8af30c0f346bb897c6f945ed656da6e57df73051e74bc",
+  "images": [
+    {
+      "image": "caddy:2-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f",
+      "targets": [
+        "caddy:2-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f (alpine 3.23.7)",
+        "usr/bin/caddy"
+      ],
+      "packages": [
+        {
+          "name": "brotli-libs",
+          "target": "caddy:2-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f (alpine 3.23.7)",
+          "path": "caddy:2-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f (alpine 3.23.7)",
+          "installedVersion": "1.2.0-r0",
+          "severity": "CRITICAL",
+          "advisories": ["CVE-2026-111497"]
+        },
+        {
+          "name": "curl",
+          "target": "caddy:2-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f (alpine 3.23.7)",
+          "path": "caddy:2-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f (alpine 3.23.7)",
+          "installedVersion": "8.22.0-r0",
+          "severity": "HIGH",
+          "advisories": ["CVE-2026-92392"]
+        },
+        {
+          "name": "libcurl",
+          "target": "caddy:2-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f (alpine 3.23.7)",
+          "path": "caddy:2-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f (alpine 3.23.7)",
+          "installedVersion": "8.22.0-r0",
+          "severity": "HIGH",
+          "advisories": ["CVE-2026-92392"]
+        },
+        {
+          "name": "github.com/go-jose/go-jose/v4",
+          "target": "usr/bin/caddy",
+          "path": "usr/bin/caddy",
+          "installedVersion": "v4.1.5",
+          "severity": "HIGH",
+          "advisories": ["CVE-2026-116587"]
+        },
+        {
+          "name": "golang.org/x/net",
+          "target": "usr/bin/caddy",
+          "path": "usr/bin/caddy",
+          "installedVersion": "v0.59.0",
+          "severity": "HIGH",
+          "advisories": ["CVE-2026-78661"]
+        }
+      ]
+    },
+    {
+      "image": "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de",
+      "targets": [
+        "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)"
+      ],
+      "packages": [
+        {
+          "name": "brotli-libs",
+          "target": "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)",
+          "path": "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)",
+          "installedVersion": "1.2.0-r0",
+          "severity": "CRITICAL",
+          "advisories": ["CVE-2026-111497"]
+        },
+        {
+          "name": "curl",
+          "target": "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)",
+          "path": "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)",
+          "installedVersion": "8.17.0-r1",
+          "severity": "HIGH",
+          "advisories": ["CVE-2026-92392"]
+        },
+        {
+          "name": "libcurl",
+          "target": "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)",
+          "path": "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)",
+          "installedVersion": "8.17.0-r1",
+          "severity": "HIGH",
+          "advisories": ["CVE-2026-92392"]
+        },
+        {
+          "name": "libexpat",
+          "target": "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)",
+          "path": "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)",
+          "installedVersion": "2.7.5-r0",
+          "severity": "HIGH",
+          "advisories": ["CVE-2026-113351", "CVE-2026-115506", "CVE-2026-117610", "CVE-2026-118370"]
+        },
+        {
+          "name": "libxslt",
+          "target": "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)",
+          "path": "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)",
+          "installedVersion": "1.1.43-r3",
+          "severity": "HIGH",
+          "advisories": ["CVE-2026-125350", "CVE-2026-87636", "CVE-2026-9947"]
+        },
+        {
+          "name": "musl",
+          "target": "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)",
+          "path": "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)",
+          "installedVersion": "1.2.5-r23",
+          "severity": "HIGH",
+          "advisories": ["CVE-2026-107891"]
+        },
+        {
+          "name": "musl-utils",
+          "target": "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)",
+          "path": "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)",
+          "installedVersion": "1.2.5-r23",
+          "severity": "HIGH",
+          "advisories": ["CVE-2026-107891"]
+        },
+        {
+          "name": "zlib",
+          "target": "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)",
+          "path": "nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de (alpine 3.23.4)",
+          "installedVersion": "1.3.2-r0",
+          "severity": "HIGH",
+          "advisories": ["CVE-2026-85091"]
+        }
+      ]
+    },
+    {
+      "image": "node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53",
+      "targets": [
+        "node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 (alpine 3.24.3)",
+        "Node.js"
+      ],
+      "packages": [
+        {
+          "name": "undici",
+          "target": "Node.js",
+          "path": "usr/local/lib/node_modules/npm/node_modules/undici/package.json",
+          "installedVersion": "6.28.0",
+          "severity": "HIGH",
+          "advisories": ["CVE-2026-109383", "CVE-2026-109869", "CVE-2026-87018"]
+        }
+      ]
+    },
+    {
+      "image": "postgres:16-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36",
+      "targets": [
+        "postgres:16-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36 (alpine 3.24.3)",
+        "usr/local/bin/gosu"
+      ],
+      "packages": [
+        {
+          "name": "krb5-libs",
+          "target": "postgres:16-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36 (alpine 3.24.3)",
+          "path": "postgres:16-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36 (alpine 3.24.3)",
+          "installedVersion": "1.22.2-r1",
+          "severity": "HIGH",
+          "advisories": [
+            "CVE-2026-107364",
+            "CVE-2026-112315",
+            "CVE-2026-112316",
+            "CVE-2026-112317",
+            "CVE-2026-112318",
+            "CVE-2026-112319",
+            "CVE-2026-112320",
+            "CVE-2026-112321",
+            "CVE-2026-112322",
+            "CVE-2026-112323",
+            "CVE-2026-118380",
+            "CVE-2026-119079",
+            "CVE-2026-40355",
+            "CVE-2026-40356",
+            "CVE-2026-71199",
+            "CVE-2026-71200"
+          ]
+        },
+        {
+          "name": "libxslt",
+          "target": "postgres:16-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36 (alpine 3.24.3)",
+          "path": "postgres:16-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36 (alpine 3.24.3)",
+          "installedVersion": "1.1.43-r3",
+          "severity": "HIGH",
+          "advisories": ["CVE-2026-125350", "CVE-2026-87636", "CVE-2026-9947"]
+        }
+      ]
+    }
+  ]
+}
