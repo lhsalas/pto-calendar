@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { DayPart, PTO, PTOWithUser, User } from '../../types/api';
 import { canModifyPto } from '../../lib/permissions';
@@ -43,6 +43,11 @@ function PTOViewModalContent({
     pto.note === null ? { status: 'unknown' } : { status: 'loaded', note: pto.note },
   );
   const noteRequest = useRef<Promise<void> | null>(null);
+  const noteContentRef = useRef<HTMLElement>(null);
+  const focusRetryButton = useCallback((button: HTMLButtonElement | null): void => {
+    // Restore retry focus only if the user has stayed on the note while waiting.
+    if (button && document.activeElement === noteContentRef.current) button.focus();
+  }, []);
 
   const canModify = canModifyPto(
     { id: currentUser.id, role: currentUser.role },
@@ -68,6 +73,12 @@ function PTOViewModalContent({
     })();
     noteRequest.current = request;
     return request;
+  }
+
+  function handleLoadNote(event: React.MouseEvent<HTMLButtonElement>): void {
+    // This element persists when the focused button is replaced by loading/result text.
+    if (document.activeElement === event.currentTarget) noteContentRef.current?.focus();
+    void loadDetail();
   }
 
   async function handleDelete(): Promise<void> {
@@ -151,8 +162,15 @@ function PTOViewModalContent({
               </dd>
             </div>
             <div className="flex items-start justify-between gap-3">
-              <dt className="text-ink-muted dark:text-ink-muted-dark">Note</dt>
-              <dd className="max-w-xs text-right text-ink dark:text-ink-dark">
+              <dt id="pto-note-label" className="text-ink-muted dark:text-ink-muted-dark">
+                Note
+              </dt>
+              <dd
+                ref={noteContentRef}
+                tabIndex={-1}
+                aria-labelledby="pto-note-label"
+                className="max-w-xs rounded-sm text-right text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:text-ink-dark dark:focus-visible:ring-offset-surface-dark"
+              >
                 {noteState.status === 'loaded' ? (
                   (noteState.note ?? '(no note)')
                 ) : (
@@ -160,8 +178,9 @@ function PTOViewModalContent({
                 )}
                 {canModify && noteState.status === 'unknown' ? (
                   <button
+                    ref={focusRetryButton}
                     type="button"
-                    onClick={() => void loadDetail()}
+                    onClick={handleLoadNote}
                     className="ml-2 text-xs text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:focus-visible:ring-offset-surface-dark"
                   >
                     Load note

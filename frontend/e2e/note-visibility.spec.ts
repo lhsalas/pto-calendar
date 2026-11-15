@@ -45,6 +45,7 @@ test('loading an empty PTO note removes the load button for this opening', async
       .click();
     const dialog = page.getByRole('dialog', { name: /pto details/i });
     const loadNote = dialog.getByRole('button', { name: /^load note$/i });
+    const noteContent = dialog.getByRole('definition', { name: 'Note', exact: true });
     const noNote = dialog.getByText('(no note)', { exact: true });
     await expect(loadNote).toBeVisible();
     await expect(noNote).toHaveClass(/text-ink-muted\/70/);
@@ -56,17 +57,42 @@ test('loading an empty PTO note removes the load button for this opening', async
         detailRequests += 1;
       }
     });
+    let releaseDetail!: () => void;
+    const holdDetail = new Promise<void>((resolve) => {
+      releaseDetail = resolve;
+    });
+    await page.route(
+      (url) => url.pathname === detailPath,
+      async (route) => {
+        const response = await route.fetch();
+        await holdDetail;
+        await route.fulfill({ response });
+      },
+      { times: 1 },
+    );
     const detailResponse = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === detailPath && response.request().method() === 'GET',
     );
-    await loadNote.click();
+    await loadNote.focus();
+    await expect(loadNote).toBeFocused();
+    try {
+      await loadNote.press('Enter');
+      await expect(dialog.getByRole('status')).toHaveText('Loading note…');
+      await expect(noteContent).toBeFocused();
+    } finally {
+      releaseDetail();
+    }
     expect((await detailResponse).status()).toBe(200);
     await expect(dialog.getByRole('status')).toHaveCount(0);
     await expect(loadNote).toHaveCount(0);
     await expect(noNote).toBeVisible();
     await expect(noNote).not.toHaveClass(/text-ink-muted/);
-    await expect(noNote).toHaveClass(/text-ink dark:text-ink-dark/);
+    await expect(noNote).toHaveClass(/text-ink/);
+    await expect(noNote).toHaveClass(/dark:text-ink-dark/);
+    await expect(noteContent).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(dialog.getByRole('button', { name: /^close$/i })).toBeFocused();
     await noNote.click();
     expect(detailRequests).toBe(1);
   } finally {
