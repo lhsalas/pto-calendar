@@ -21,7 +21,8 @@ the existing Firebase-to-OCI redirect.
 
 ### Node.js runtime baseline
 
-The supported Node.js patch level is pinned in `.nvmrc` and is the single
+The supported Node.js patch level is **24.22.3** (November 2026 HTTP/2/TLS
+security release), pinned in `.nvmrc`, which is the single
 source of truth for the container base image, the CI runtime, and the
 `engines.node` floor. `backend/Dockerfile` and `frontend/Dockerfile` reference
 `node:<version>-alpine` by digest.
@@ -31,10 +32,19 @@ When a new Node.js 24.x security release ships, update together:
 1. `.nvmrc`.
 2. `MINIMUM_SUPPORTED_VERSION` in `infra/tests/node-version.mjs`.
 3. The `FROM` digest in `backend/Dockerfile` and `frontend/Dockerfile`.
-4. The `engines.node` floor in the root `package.json`.
+4. The `engines.node` floor in the root `package.json` and root lockfile metadata.
 
 `npm run node:baseline:check` fails when these drift, and the Docker smoke
-job asserts the built images report at least the pinned runtime.
+job exports and executes both Node builder stages and the backend runtime,
+requiring an exact version match. The backend build stage also supplies
+all-in-one migrations and production bootstrap; production migrations use the
+runtime stage. The final frontend image is nginx and contains no Node runtime.
+
+See [the Node patch review](node-security-review-2026-11-15.md) for the
+immutable image/platform evidence, remaining npm-bundle findings, and disposition
+of the isolated dependency PRs. A new digest needs its own raw scan and explicit
+review under #273; an existing acceptance must never apply automatically. #247
+remains the open, high-priority permanent image-remediation issue.
 
 ### Compute and storage
 

@@ -232,18 +232,28 @@ pins one 24.x patch level, and the same value is used by:
   a cached runner can never silently fall back to an older 24.x patch level;
 - the container base image tag (`node:<version>-alpine`) in
   `backend/Dockerfile` and `frontend/Dockerfile`, still pinned by digest;
-- the `engines.node` floor in the root `package.json`.
+- the `engines.node` floor in the root `package.json` and root lockfile metadata.
 
 `npm run node:baseline:check` (`infra/tests/node-baseline.test.mjs`) asserts
 these stay in sync and that the pinned version is at least the minimum
-supported release. The Docker smoke job additionally runs
-`infra/tests/node-runtime-check.mjs` against the running backend and migration
-images, so the assertion covers the runtime that is actually built rather than
-only the Dockerfile text.
+supported release, **24.22.3**, containing the November 2026 HTTP/2/TLS security
+fixes. Its daemon-free runtime-checker regression tests reject older/newer
+patches, other majors, malformed versions and a floor override.
+
+The Docker smoke job builds, exports and executes `backend:build`,
+`frontend:build` and `backend:runtime` from the actual Dockerfiles, then runs
+`infra/tests/node-runtime-check.mjs` with an exact `.nvmrc` match. Backend build
+is also the all-in-one migration/production bootstrap target; backend runtime
+is the production migration/API target. It retains the all-in-one backend and
+migration service probes and application smoke. The final nginx image is not
+misrepresented as a Node runtime. These checks validate executed artifacts,
+not only tags or image-config environment metadata; they use the CI runner's
+native platform, while the production base security scan remains linux/arm64.
 
 Bump `.nvmrc`, the `MINIMUM_SUPPORTED_VERSION` constant in
-`infra/tests/node-version.mjs`, and the container digests together whenever a
-newer 24.x security release ships.
+`infra/tests/node-version.mjs`, root engine/lock metadata and the container
+digests together whenever a newer 24.x security release ships. Preserve exact
+alignment; a newer or other-major container runtime must not silently pass.
 
 ### 10.2 Triggers
 - `pull_request`: full pipeline.
