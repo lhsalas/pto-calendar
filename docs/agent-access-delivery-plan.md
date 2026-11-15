@@ -280,6 +280,15 @@ current CI green, plus baseline repairs and the published contract, **before any
 new agent feature implementation (#249 onward)**. Documentation and operational
 prerequisites are not an exception to this rule.
 
+**Additional baseline prerequisite [#270] (2026-11-15):** the coordinator
+reproduced a direct backend unit coverage failure on unchanged master `156cc6f`,
+not a #235/#246 regression. All 269 unit tests pass, but declared critical-path
+100% thresholds fail; CI currently runs backend units without coverage (frontend
+CI does run coverage). See [baseline evidence](testing-strategy.md#5-coverage-targets).
+Revalidate after #227, then deliver #270 after the original backlog and before
+#249/#251 token implementation; it is not a twelfth original backlog issue.
+#247 remains merge-blocking; no scan or coverage policy is weakened.
+
 ### Feature order, with explicit prerequisites
 
 Rows give the safe serial default. Parallel development is restricted to the
@@ -287,9 +296,9 @@ approved waves below after prerequisites merge; every row is one deliverable/PR.
 
 | Order | Issue / deliverable | Prerequisites |
 | --- | --- | --- |
-| 1 | [#249] PAT persistence/invalidation | Entire backlog gate above (settled Prisma #234) |
+| 1 | [#249] PAT persistence/invalidation | Entire backlog gate above (settled Prisma #234), plus #270 |
 | 2 | [#250] Session-only token APIs | #249 |
-| 3 | [#251] Scoped PAT authentication | #250 |
+| 3 | [#251] Scoped PAT authentication | #250, #270 |
 | 4 | [#252] Credential-attributed lifecycle/PTO audit | #251 |
 | 5 | [#253] Issuance and agent quotas | #251 |
 | 6 | [#254] All-role own-token settings UI | #250, #252, #253 |
@@ -317,7 +326,8 @@ approved waves below after prerequisites merge; every row is one deliverable/PR.
    **#235 -> #236 -> #237** note lane.
 2. Run **#227 -> #228 -> #230 -> #229 -> #231 -> #234 -> #233 -> #232** as one
    serial dependency/lockfile integration lane, after the note lane/baseline.
-   Complete the entire backlog/CI gate before scheduling feature work.
+   Revalidate #270 after #227; complete #270 after the entire original
+   backlog/CI gate and before scheduling feature work.
 3. Serial foundation **#249 -> #250 -> #251**.
 4. Parallel **#252 audit / #253 quotas / #255 queries**. Once #252+#253 merge,
    **#254 UI** may overlap **#256 -> #257 -> #258** (the integrity chain waits
@@ -434,3 +444,4 @@ proposal addendum and affected README/API/testing/deployment docs together.
 [#267]: https://github.com/lhsalas/pto-calendar/issues/267
 [#268]: https://github.com/lhsalas/pto-calendar/issues/268
 [#269]: https://github.com/lhsalas/pto-calendar/issues/269
+[#270]: https://github.com/lhsalas/pto-calendar/issues/270
