@@ -1108,7 +1108,8 @@
           </p>
           <p class="recommendation">
             <strong>Recommended:</strong> token-enabled REST API → shared client → CLI + local stdio
-            MCP server. Add hosted MCP only if the team’s agent clients need it.
+            MCP server. Hosted MCP/OAuth is excluded from the approved delivery scope; see the
+            <a href="#approved-delivery">dated delivery addendum</a>.
           </p>
         </aside>
       </div>
@@ -1135,6 +1136,7 @@
       <div class="layout">
         <nav class="contents" aria-label="Report contents">
           <span class="label">Inside this report</span>
+          <a href="#approved-delivery"><span>ADR</span> Approved delivery addendum</a>
           <a href="#findings"><span>01</span> Project findings</a>
           <a href="#architecture"><span>02</span> CLI or MCP?</a>
           <a href="#tokens"><span>03</span> Token requirements</a>
@@ -1152,6 +1154,47 @@
         </nav>
 
         <main id="report">
+          <section id="approved-delivery" aria-labelledby="approved-delivery-title">
+            <div class="section-top">
+              <span class="section-num">ADR</span
+              ><span class="label">Delivery addendum · 15 Nov 2026 · not implementation</span>
+            </div>
+            <h2 id="approved-delivery-title">Approved scope. Ordered delivery.</h2>
+            <p class="lede">
+              The original assessment remains dated 12 November 2026 at <code>fc6b7d7</code>. Owner
+              decisions recorded in
+              <a href="https://github.com/lhsalas/pto-calendar/issues/246">issue #246</a>
+              and the
+              <a href="agent-access-delivery-plan.md">approved delivery plan / shared contract</a>
+              supersede the illustrative phases and open choices below. Planning verified master
+              <code>156cc6f</code>; no feature is implemented or certified by this documentation.
+            </p>
+            <ul>
+              <li>
+                Deliver both CLI and local stdio MCP for OpenCode V2, Claude Code and VS
+                Code/Copilot. No hosted MCP/OAuth. Finish all 11 pre-existing issues
+                <strong>#227–#237</strong> before new feature implementation.
+              </li>
+              <li>
+                All roles manage only their own tokens: 90-day default, 30/90/180/365-day choices,
+                hard <strong>365*24h</strong> absolute maximum, 10 active tokens per owner.
+                Read-only default; notes and personal/team writes require explicit opt-in.
+              </li>
+              <li>
+                Final proposed write contract: missing precondition <strong>428</strong>; failed
+                <code>If-Match</code> <strong>412 STALE_WRITE</strong>; business/idempotency
+                conflicts <strong>409</strong>. The earlier 409 stale-write example was
+                illustrative, not the accepted HTTP mapping.
+              </li>
+              <li>
+                The linked plan records #247/#248 baseline repair, all issue dependencies, maximum
+                three implementation workers plus one independent reviewer, sole orchestrator merge
+                authority, exclusive disposable-test leases, all current 11 CI checks and explicit
+                production go/no-go. A worktree is not DB/port isolation.
+              </li>
+            </ul>
+          </section>
+
           <section id="findings" aria-labelledby="findings-title">
             <div class="section-top">
               <span class="section-num">01</span
@@ -1859,8 +1902,11 @@
                   <li>
                     <strong>Versions:</strong> add <code>PTORequest.version</code> (integer, default
                     1). Return it on reads/writes. Update/delete atomically require the expected
-                    version; stale requests return a documented conflict (for example HTTP 409
-                    <code>STALE_WRITE</code>). Apply the rule consistently to legacy PUT too.
+                    version through a documented precondition. Approved proposal update (15 Nov):
+                    missing precondition returns HTTP 428; failed <code>If-Match</code> returns HTTP
+                    412 <code>STALE_WRITE</code>, not the original illustrative 409. Reserve 409 for
+                    business/idempotency conflicts. Apply the rule consistently to browser and PAT
+                    writes, including legacy PUT.
                   </li>
                   <li>
                     <strong>Idempotent create:</strong> support <code>Idempotency-Key</code> and
@@ -1877,7 +1923,7 @@
                   <li>
                     <strong>Errors:</strong> retain
                     <code>{ error: { code, message, details? } }</code>, HTTP
-                    400/401/403/404/409/429, <code>Retry-After</code>, and
+                    400/401/403/404/409/412/428/429, <code>Retry-After</code>, and
                     <code>X-Request-Id</code>. Use a generic credential failure for
                     unknown/expired/revoked PATs; never echo the supplied secret.
                   </li>
@@ -2063,8 +2109,9 @@ pto delete &lt;pto-id&gt; --if-version 4 --yes --json</code></pre>
             </div>
             <h2 id="delivery-title">Build the boundary first.</h2>
             <p class="lede">
-              Each phase is an independently reviewable deliverable. These are suggested issue
-              boundaries, not issues created by this report.
+              Original assessment phases are illustrative, not the approved issue sequence. The
+              <a href="agent-access-delivery-plan.md">delivery plan</a> now defines #247–#269, the
+              all-11 backlog-first gate, independent deliverables and approved parallel waves.
             </p>
 
             <div class="phase">
@@ -2136,23 +2183,24 @@ pto delete &lt;pto-id&gt; --if-version 4 --yes --json</code></pre>
                   clients the team selects.
                 </p>
                 <p class="gate">
-                  Exit gate: all four operations work end to end in at least one selected MCP
-                  client, with user approval for writes and no secret entering model context.
+                  Approved exit gate: all four operations work end to end in all three selected
+                  clients, with actual per-call approval/rejection evidence for writes and no secret
+                  entering model context.
                 </p>
               </div>
             </div>
             <div class="phase">
-              <div class="phase-mark">Optional<br />Hosted MCP</div>
+              <div class="phase-mark">Out of scope<br />Hosted MCP</div>
               <div>
-                <h3>Add remote transport only on demand</h3>
+                <h3>Excluded from this delivery</h3>
                 <p>
                   Confirm a real client need, then design OAuth/auth compatibility, audience
                   isolation, discovery, proxy transport settings, remote consent, and
                   credential/grant lifetime policy.
                 </p>
                 <p class="gate">
-                  Not required for the local CLI + stdio solution. No effort estimate is reliable
-                  until client/auth requirements are chosen.
+                  The owner-approved scope is local CLI + stdio only. Any future hosted transport
+                  needs a separate approved OAuth design and deliverable.
                 </p>
               </div>
             </div>
@@ -2279,8 +2327,8 @@ pto delete &lt;pto-id&gt; --if-version 4 --yes --json</code></pre>
                   <li>
                     <span class="req-id">CLIENT-01</span>Exercise CLI JSON/exit codes, hidden
                     credential input, storage permissions, redirect rejection, cancellation,
-                    401/403/409/429 behavior, no secret logging, and no automatic unsafe write
-                    retry.
+                    401/403/409/412/428/429 behavior, no secret logging, and no automatic unsafe
+                    write retry.
                   </li>
                   <li>
                     <span class="req-id">MCP-01</span>Test initialization, tool discovery, strict
@@ -2320,6 +2368,14 @@ pto delete &lt;pto-id&gt; --if-version 4 --yes --json</code></pre>
               ><span class="label">Recommended defaults &amp; open choices</span>
             </div>
             <h2 id="decisions-title">A few decisions before coding.</h2>
+            <p class="small">
+              These are the original assessment questions. The
+              <a href="#approved-delivery">15 November addendum</a> and
+              <a href="agent-access-delivery-plan.md">approved contract</a> record the selected
+              clients, frozen token policy, explicit scopes and host-consent boundary. Concrete
+              protocol/SDK/client versions and configuration recipes still require actual testing;
+              follow current official client docs rather than freeze unverified snippets.
+            </p>
             <ul class="decision-list">
               <li>
                 <strong>Which agent clients will people use?</strong>Confirm whether they can
@@ -2356,8 +2412,8 @@ pto delete &lt;pto-id&gt; --if-version 4 --yes --json</code></pre>
               <p>
                 <strong>Bottom line:</strong> yes, this project can support the requested experience
                 without replacing its authentication or PTO domain. Add self-service PATs and scoped
-                bearer access, harden automated writes, then expose the same API through a CLI
-                and/or local MCP server.
+                bearer access, harden automated writes, then expose the same API through a CLI and
+                local MCP server.
               </p>
             </div>
           </section>

@@ -3,6 +3,15 @@
 ## 1. Purpose
 This document defines the technical specification for an internal PTO/vacation calendar app where authenticated users can create and view PTO entries, and only the owner or a team lead can modify or delete them.
 
+> **Proposed agent-access architecture (#246), not current functionality:**
+> [Shared scope/API/compatibility contract](agent-access-delivery-plan.md)
+> covers session-only own-token management, scoped bearer REST, complete paged
+> queries and versioned writes before CLI/local MCP delivery. Failed `If-Match`
+> is proposed as **412 STALE_WRITE**, missing preconditions as **428**, and
+> business/idempotency conflicts as **409**. Owning implementation PRs update
+> this specification, OpenAPI and browser callers together; no new route or
+> security scheme is made available by this documentation.
+
 ## 2. Scope
 The application will support:
 - Authentication for all users

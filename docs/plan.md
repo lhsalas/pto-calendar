@@ -3,6 +3,13 @@
 ## 1. Goal
 Build a small internal app where team members can record planned PTO/vacation dates, view everyone’s time off in a shared calendar, and manage entries with role-based permissions.
 
+> **Proposed next initiative (#246; approved plan recorded 2026-11-15):**
+> [Personal-token CLI + local stdio MCP delivery plan / ADR](agent-access-delivery-plan.md)
+> defines the shared contract and parallel waves. All 11 pre-existing issues
+> #227–#237 must be delivered with green CI before feature implementation.
+> Token settings, bearer access and agent adapters are planned, not shipped here;
+> hosted MCP/OAuth remains out of scope.
+
 ## 2. Core Users
 - **Team member**
   - Can log in

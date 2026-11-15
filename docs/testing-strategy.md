@@ -195,6 +195,16 @@ Additional shipped journeys (frontend enhancements #18–#26):
 - MSW handlers mirror `openapi.yaml` response shapes.
 - Reuse handlers between component tests and Storybook (post-MVP).
 
+### 9.4 Parallel issue work: exclusive disposable-test lease
+
+For the [approved #246 execution plan](agent-access-delivery-plan.md), worktrees
+do **not** isolate DBs, ports, Compose container names or volumes. Shared-service
+integration/E2E/Docker gates and any migrations/truncation/teardown need an
+exclusive coordinator-issued disposable-test lease: holder, commit/worktree,
+verified non-production DB/service targets, reset scope and cleanup/release.
+Never infer the target from a default `.env` or a test script's DB fallback.
+Static/unit checks without shared services may run in isolated worktrees.
+
 ## 10. CI/CD Automation (GitHub Actions)
 
 ### 10.1 Pipeline layout
@@ -265,8 +275,9 @@ PostgreSQL backup roundtrip integration test remains the real database check.
 
 ### 10.4 Required status checks
 `lint`, `typecheck`, `test-backend-unit`, `test-backend-integration`,
-`test-frontend`, `deployment-config`, `security`, `e2e`, `docker-smoke`, and
-`coverage-gate` must all pass before merge to `master`. The OCI deployment
+`test-frontend`, `build`, `deployment-config`, `security`, `e2e`, `docker-smoke`, and
+`coverage-gate` must all pass before merge to `master` — **all current 11 checks**,
+not the stale count of eight in older instructions. The OCI deployment
 workflow lists the same job names, so a release cannot be tagged around a
 failing check.
 
@@ -422,3 +433,21 @@ assessment, an owner and an expiry date.
 ## 16. Open Decisions
 
 - None for MVP. All tooling choices above are confirmed.
+
+## 17. Planned agent-access acceptance (#246)
+
+The [delivery contract and release gates](agent-access-delivery-plan.md) are
+approved requirements, **not tests implemented or passed by this documentation**.
+Keep existing per-path floors and backend integration All files lines >=90%;
+new authentication/authorization/scope/validation code requires 100% unit coverage
+across metrics. Other new agent packages target >=90% lines/statements/functions
+and >=80% branches; wire each workspace into existing CI/security gates.
+
+Owning stories add expiry/cap/reset/revoke and role/scope/owner/note matrices,
+cookie/PAT/CSRF isolation, atomic audit/overlap/idempotency, complete queries,
+412 stale/428 missing preconditions versus 409 business conflicts, secret-safe
+adapter process tests, clean packed installs and actual OpenCode V2/Claude
+Code/VS Code Copilot approve/reject evidence. Preserve #235–#237 browser note
+regressions. Manual permission checks supplement automation; plausible chat output
+or tool annotations are not consent evidence. #269 owns dated staging go/no-go;
+production rollout/mutations still require explicit maintainer approval.

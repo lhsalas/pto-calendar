@@ -1,4 +1,7 @@
 openapi: 3.0.3
+# Proposed agent-access contract (not available endpoints/security schemes):
+# docs/agent-access-delivery-plan.md, tracked by #246 and owning #249–#269 PRs.
+# Add PAT, pagination and precondition schemas only with their implementations.
 info:
   title: PTO / Vacation Calendar API
   version: 1.1.0

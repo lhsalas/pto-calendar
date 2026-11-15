@@ -67,7 +67,17 @@ secret.
 - **Purpose:** Repository findings and proposed requirements for CLI/MCP PTO
   access, self-service personal access tokens (maximum 365 days), permissions,
   agent safety, and phased delivery. Open the HTML in a browser; this is a
-  proposal, not an implemented feature.
+  proposal, not an implemented feature. The original 12 November 2026 snapshot
+  is preserved; its delivery addendum links to the approved plan below.
+
+### 9. Approved Agent Access Delivery Plan / ADR
+
+- **File:** [`docs/agent-access-delivery-plan.md`](docs/agent-access-delivery-plan.md)
+- **Purpose:** Approved scope/security/API/compatibility contracts, complete
+  backlog-first ordering, dependency-aware parallel waves and release gates for
+  [#246](https://github.com/lhsalas/pto-calendar/issues/246). Both CLI and local
+  stdio MCP are planned; neither is shipped by this documentation. All 11
+  pre-existing issues must be delivered before new feature implementation.
 
 ## Functional Summary
 
