@@ -249,11 +249,35 @@ not count as delivered work. No silent exception clears the backlog-first gate.
 
 ### Baseline repair and every pre-existing issue
 
-First restore gates: [#247] repairs vulnerable production image pins while
-preserving immutable pins/security policy; [#248] follows with coherent Node 24
-runtime/image/engine pins. Revalidate observed scan findings/versions, do not weaken
-checks. Reconcile PRs #241/#244 under #248, #240 under #231, and review/rebase
-grouped #245 after baseline repair; the plan does not merge or close them.
+**Owner decision — 2026-11-15:** the
+[dated authorization](https://github.com/lhsalas/pto-calendar/issues/246#issuecomment-6901267341)
+supersedes the earlier investigation-only/no-new-exception boundary **only** for
+[#273]'s temporary acceptance of reviewed production-image findings. This records
+authorization, not a merged policy, green CI or fixed vulnerabilities. An
+**accepted-risk** result is not a **raw-clean** scan.
+
+[#273] is a separate policy-only deliverable: exact current image digest,
+advisory and affected package/path, maintainer ownership and owner-accepted risk,
+with first expiry/review **2026-12-15**, no silent renewal or inherited acceptance
+for a new digest. Retain every linux/arm64 image scan, unfiltered raw reports,
+visible accepted-risk summaries and aggregate results across all images.
+Scanner/enumeration errors and unmatched advisories/packages/paths/digests remain
+blocking; no blanket bypass, optional security job or global severity reduction.
+npm audit, coverage, immutable pins and all current 11 CI checks remain unchanged.
+
+Keep permanent remediation [#247] **OPEN, priority:high** until compatible fixed
+upstream images are validated and temporary acceptances removed; review maintained
+official candidates at least weekly and after security rebuild announcements.
+Merging #273 closes only that policy deliverable, **not #247**. Once #273 is
+validated/merged and all current CI passes under the accepted policy, #247's open
+status no longer independently blocks unrelated merges.
+
+The current baseline lane is **#273 -> #248**. #248 aligns Node 24
+runtime/image/engine pins; each new digest needs a fresh raw scan and explicit
+review, not automatic inheritance of #273 acceptance. No new registry/builder
+infrastructure, permissions, publication or deployment is authorized. Reconcile
+PRs #241/#244 under #248, #240 under #231, and review/rebase grouped #245 on the
+validated baseline; this plan does not merge or close them.
 
 The complete **serial reference order** for all 11 original open issues is:
 
@@ -276,9 +300,9 @@ intrinsic library dependencies. Revalidate historical 2026-10-23 version/API cla
 against current official docs in each story. Preserve all three note regressions.
 
 **Hard scheduling gate:** all **11** above must be delivered on master with
-current CI green, plus baseline repairs and the published contract, **before any
-new agent feature implementation (#249 onward)**. Documentation and operational
-prerequisites are not an exception to this rule.
+current CI green, plus the validated #273/#248 baseline and published contract,
+**before any new agent feature implementation (#249 onward)**. Documentation and
+operational prerequisites are not an exception to this rule.
 
 **Additional baseline prerequisite [#270] (2026-11-15):** the coordinator
 reproduced a direct backend unit coverage failure on unchanged master `156cc6f`,
@@ -287,7 +311,7 @@ not a #235/#246 regression. All 269 unit tests pass, but declared critical-path
 CI does run coverage). See [baseline evidence](testing-strategy.md#5-coverage-targets).
 Revalidate after #227, then deliver #270 after the original backlog and before
 #249/#251 token implementation; it is not a twelfth original backlog issue.
-#247 remains merge-blocking; no scan or coverage policy is weakened.
+The image-only risk acceptance above does not waive #270 or change coverage policy.
 
 ### Feature order, with explicit prerequisites
 
@@ -320,10 +344,12 @@ approved waves below after prerequisites merge; every row is one deliverable/PR.
 
 ### Approved waves and ownership rules
 
-1. Start **#247 infrastructure**, **#235 frontend**, and **#246 documentation**
-   in separate worktrees. #235 development may overlap baseline repairs; merges
-   still require repaired, green gates. Continue #248 after #247 alongside the
-   **#235 -> #236 -> #237** note lane.
+1. Initial wave: **#247 infrastructure**, **#235 frontend**, and **#246
+   documentation** in separate worktrees. The later **2026-11-15 owner decision**
+   preserves #247 WIP and replaces the blocking infrastructure lane with
+   **#273 -> #248**, alongside **#235 -> #236 -> #237**. Merges still require all
+   current CI green under the explicitly accepted policy, not permanent #247
+   closure.
 2. Run **#227 -> #228 -> #230 -> #229 -> #231 -> #234 -> #233 -> #232** as one
    serial dependency/lockfile integration lane, after the note lane/baseline.
    Revalidate #270 after #227; complete #270 after the entire original
@@ -445,3 +471,4 @@ proposal addendum and affected README/API/testing/deployment docs together.
 [#268]: https://github.com/lhsalas/pto-calendar/issues/268
 [#269]: https://github.com/lhsalas/pto-calendar/issues/269
 [#270]: https://github.com/lhsalas/pto-calendar/issues/270
+[#273]: https://github.com/lhsalas/pto-calendar/issues/273

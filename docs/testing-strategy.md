@@ -452,6 +452,12 @@ assessment, an owner and an expiry date.
 
 ## 17. Planned agent-access acceptance (#246)
 
+**#246 execution update (2026-11-15):** see the
+[dated owner decision and baseline sequence](agent-access-delivery-plan.md#baseline-repair-and-every-pre-existing-issue)
+for #273's image-only temporary risk acceptance while #247 stays open/high priority.
+Accepted risk is not a raw-clean scan; all current CI, npm audit and coverage
+requirements still apply. #273 owns policy implementation/runbook details.
+
 The [delivery contract and release gates](agent-access-delivery-plan.md) are
 approved requirements, **not tests implemented or passed by this documentation**.
 Keep existing per-path floors and backend integration All files lines >=90%;

@@ -3,8 +3,10 @@
 ## Approved next-initiative roadmap (proposal only)
 
 The [#246 delivery plan / ADR](agent-access-delivery-plan.md) records the complete
-serial order, prerequisites and approved parallel waves: #247/#248 restore merge
-gates; all 11 existing #227–#237 deliverables precede #249–#269 agent work.
+serial order, prerequisites and approved parallel waves. **Owner update
+(2026-11-15):** #273 -> #248 is the planned baseline lane under bounded image-risk
+acceptance; permanent remediation #247 stays open/high priority. All 11 existing
+#227–#237 deliverables plus #270 still precede #249–#269 agent work.
 The older MVP epics below are not the scheduling authority for this initiative.
 Each issue is one deliverable/PR; closing without delivering does not clear the
 backlog gate. Update the roadmap with merged PR/commit and acceptance evidence on
