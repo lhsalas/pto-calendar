@@ -1,0 +1,2573 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="PTO Calendar project assessment and requirements for secure CLI and MCP access with self-service personal access tokens."
+    />
+    <title>PTO Calendar · AI agent access report</title>
+    <style>
+      @font-face {
+        font-family: 'Fraunces';
+        src:
+          local('Fraunces'),
+          url('../frontend/public/fonts/fraunces-latin-500-normal.woff2') format('woff2');
+        font-weight: 500;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'IBM Plex Sans';
+        src:
+          local('IBM Plex Sans'),
+          url('../frontend/public/fonts/ibm-plex-sans-latin-400-normal.woff2') format('woff2');
+        font-weight: 400;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'IBM Plex Sans';
+        src:
+          local('IBM Plex Sans SemiBold'),
+          url('../frontend/public/fonts/ibm-plex-sans-latin-600-normal.woff2') format('woff2');
+        font-weight: 600 800;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'IBM Plex Mono';
+        src:
+          local('IBM Plex Mono'),
+          url('../frontend/public/fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2');
+        font-display: swap;
+      }
+      :root {
+        --paper: #fbf8f1;
+        --paper-2: #f5efe4;
+        --card: #fefcf8;
+        --ink: #1f1b16;
+        --muted: #6b5f4f;
+        --line: #e8dfd0;
+        --accent: #b5533a;
+        --accent-hover: #a04c32;
+        --tint: #f8e6df;
+        --success: #6b8e4e;
+        --danger: #a53d2a;
+        --display: 'Fraunces', Georgia, serif;
+        --sans: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+        --mono: 'IBM Plex Mono', Consolas, monospace;
+      }
+      :root[data-theme='dark'] {
+        color-scheme: dark;
+        --paper: #1b1a18;
+        --paper-2: #252320;
+        --card: #2d2a26;
+        --ink: #f5efe4;
+        --muted: #a89d8b;
+        --line: #3b3631;
+        --accent: #f0d0c2;
+        --accent-hover: #f8e6df;
+        --tint: #5c2a1e;
+        --danger: #f0d0c2;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+        scroll-padding-top: 28px;
+      }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font: 16px/1.65 var(--sans);
+        -webkit-font-smoothing: antialiased;
+      }
+      a {
+        color: var(--accent-hover);
+        text-underline-offset: 4px;
+      }
+      a:hover {
+        color: var(--ink);
+      }
+      button,
+      summary,
+      a {
+        -webkit-tap-highlight-color: transparent;
+      }
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 5px;
+      }
+      button {
+        font: inherit;
+        cursor: pointer;
+      }
+      h1,
+      h2,
+      h3,
+      h4,
+      p {
+        margin-top: 0;
+      }
+      h1,
+      h2 {
+        font-family: var(--display);
+        font-weight: 500;
+      }
+      h1 {
+        font-size: clamp(3.2rem, 6.2vw, 5.8rem);
+        line-height: 1.04;
+        letter-spacing: -0.055em;
+        margin-bottom: 26px;
+      }
+      h2 {
+        font-size: clamp(2rem, 3.4vw, 3rem);
+        line-height: 1.15;
+        letter-spacing: -0.035em;
+        margin-bottom: 18px;
+      }
+      h3 {
+        font-size: 1.12rem;
+        line-height: 1.35;
+        font-weight: 600;
+        margin-bottom: 10px;
+      }
+      h4 {
+        font-size: 1rem;
+        margin-bottom: 8px;
+      }
+      p {
+        margin-bottom: 16px;
+      }
+      ul,
+      ol {
+        padding-left: 22px;
+        margin: 10px 0 18px;
+      }
+      li {
+        padding-left: 3px;
+        margin-bottom: 8px;
+      }
+      strong {
+        font-weight: 600;
+      }
+      code {
+        font: 0.83em/1.6 var(--mono);
+        overflow-wrap: anywhere;
+      }
+      :not(pre) > code {
+        background: var(--paper-2);
+        border-radius: 3px;
+        padding: 2px 5px;
+      }
+      pre {
+        background: #1b1a18;
+        color: #f5efe4;
+        padding: 24px;
+        border-radius: 8px;
+        overflow-x: auto;
+        font: 0.82rem/1.8 var(--mono);
+        tab-size: 2;
+      }
+      pre code {
+        font: inherit;
+        overflow-wrap: normal;
+      }
+      .code-comment {
+        color: #a89d8b;
+      }
+      .code-accent {
+        color: #f0d0c2;
+      }
+      .skip {
+        position: absolute;
+        top: -100px;
+        left: 16px;
+        z-index: 5;
+        padding: 12px 20px;
+        background: var(--card);
+      }
+      .skip:focus {
+        top: 12px;
+      }
+      .wrap {
+        width: min(1320px, calc(100% - 96px));
+        margin-inline: auto;
+      }
+      .masthead {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 27px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+      .brand svg {
+        color: var(--accent);
+        width: 29px;
+        height: 29px;
+      }
+      .controls {
+        display: flex;
+        gap: 8px;
+      }
+      .controls button {
+        min-height: 44px;
+        border: 1px solid var(--line);
+        background: transparent;
+        border-radius: 6px;
+        padding: 8px 14px;
+        color: var(--ink);
+        font-size: 0.85rem;
+      }
+      .controls button:hover {
+        background: var(--paper-2);
+      }
+      .controls button[aria-pressed='true'] {
+        background: var(--tint);
+        border-color: var(--accent);
+      }
+      .eyebrow,
+      .label {
+        font: 0.69rem/1.6 var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 0.13em;
+      }
+      .eyebrow {
+        color: var(--accent);
+        margin-bottom: 22px;
+      }
+      .hero {
+        display: grid;
+        grid-template-columns: 1.6fr 1fr;
+        gap: 70px;
+        padding: 74px 0 54px;
+        align-items: center;
+      }
+      .hero h1 em {
+        color: var(--accent);
+        font-style: normal;
+      }
+      .hero .intro {
+        color: var(--muted);
+        max-width: 630px;
+        font-size: 1.15rem;
+        line-height: 1.65;
+      }
+      .hero-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 24px;
+        color: var(--muted);
+        font: 0.72rem/1.7 var(--mono);
+      }
+      .verdict {
+        border-top: 3px solid var(--accent);
+        padding: 27px 28px 22px;
+        background: var(--paper-2);
+        border-radius: 0 0 10px 10px;
+        position: relative;
+      }
+      .verdict h2 {
+        font-size: 2rem;
+        margin-top: 16px;
+      }
+      .verdict p {
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        border: 1px solid var(--line);
+        border-radius: 100px;
+        padding: 5px 10px;
+        font: 0.66rem/1.4 var(--mono);
+        letter-spacing: 0.025em;
+      }
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--success);
+        display: inline-block;
+      }
+      .verdict .recommendation {
+        border-top: 1px solid var(--line);
+        padding-top: 16px;
+        margin-top: 18px;
+        margin-bottom: 0;
+        color: var(--ink);
+      }
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        border-block: 1px solid var(--line);
+        margin-bottom: 58px;
+      }
+      .metric {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        padding: 24px 28px;
+      }
+      .metric:first-child {
+        padding-left: 0;
+      }
+      .metric + .metric {
+        border-left: 1px solid var(--line);
+      }
+      .metric .number {
+        font-family: var(--display);
+        font-size: 2.8rem;
+        line-height: 1;
+        color: var(--accent);
+      }
+      .metric p {
+        margin: 0;
+        font-size: 0.86rem;
+        line-height: 1.5;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 198px minmax(0, 1fr);
+        gap: 56px;
+        align-items: start;
+      }
+      .contents {
+        position: sticky;
+        top: 28px;
+        padding-bottom: 25px;
+      }
+      .contents .label {
+        color: var(--muted);
+        display: block;
+        margin: 0 0 15px 10px;
+      }
+      .contents a {
+        display: flex;
+        align-items: baseline;
+        gap: 11px;
+        text-decoration: none;
+        color: var(--muted);
+        border-left: 2px solid var(--line);
+        padding: 10px;
+        font-size: 0.82rem;
+        line-height: 1.35;
+        min-height: 44px;
+      }
+      .contents a span {
+        font: 0.65rem var(--mono);
+        color: var(--accent-hover);
+      }
+      .contents a:hover,
+      .contents a[aria-current='location'] {
+        background: var(--paper-2);
+        border-left-color: var(--accent);
+        color: var(--ink);
+      }
+      .contents .aside-note {
+        margin: 24px 0 0 12px;
+        font-size: 0.74rem;
+        color: var(--muted);
+        line-height: 1.65;
+      }
+      main {
+        min-width: 0;
+      }
+      section {
+        padding-bottom: 55px;
+        margin-bottom: 52px;
+        border-bottom: 1px solid var(--line);
+      }
+      .section-top {
+        display: flex;
+        gap: 14px;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+      .section-num {
+        display: grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        border: 1px solid var(--accent);
+        border-radius: 50%;
+        font: 0.7rem var(--mono);
+        color: var(--accent);
+        flex-shrink: 0;
+      }
+      .section-top .label {
+        color: var(--muted);
+      }
+      .lede {
+        color: var(--muted);
+        font-size: 1.05rem;
+        max-width: 760px;
+        margin-bottom: 26px;
+      }
+      .grid-2 {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+        margin: 23px 0;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 23px;
+      }
+      .card p,
+      .card li {
+        font-size: 0.91rem;
+      }
+      .card > :last-child {
+        margin-bottom: 0;
+      }
+      .card .label {
+        color: var(--accent);
+        display: block;
+        margin-bottom: 13px;
+      }
+      .callout {
+        border-left: 3px solid var(--accent);
+        background: var(--tint);
+        padding: 18px 22px;
+        margin: 25px 0;
+        border-radius: 0 6px 6px 0;
+        font-size: 0.92rem;
+      }
+      .callout p:last-child {
+        margin: 0;
+      }
+      .table-scroll {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        margin: 23px 0;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+        font-size: 0.87rem;
+      }
+      caption {
+        text-align: left;
+        padding: 14px 18px;
+        font-weight: 600;
+        background: var(--paper-2);
+      }
+      th {
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--muted);
+        background: var(--paper-2);
+      }
+      th,
+      td {
+        padding: 14px 17px;
+        vertical-align: top;
+        border-bottom: 1px solid var(--line);
+      }
+      tr:last-child td,
+      tr:last-child th[scope='row'] {
+        border-bottom: 0;
+      }
+      th[scope='row'] {
+        text-transform: none;
+        letter-spacing: 0;
+        font-size: 0.87rem;
+        color: var(--ink);
+        background: transparent;
+        font-weight: 600;
+        min-width: 140px;
+      }
+      .method {
+        font: 0.69rem var(--mono);
+        color: var(--accent);
+        display: block;
+        margin-bottom: 5px;
+      }
+      .small {
+        font-size: 0.8rem;
+      }
+      .source {
+        color: var(--muted);
+        font-size: 0.76rem;
+      }
+      details {
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--card);
+        margin: 14px 0;
+      }
+      summary {
+        cursor: pointer;
+        padding: 17px 20px;
+        font-size: 0.92rem;
+        font-weight: 600;
+        min-height: 55px;
+      }
+      summary::marker {
+        color: var(--accent);
+      }
+      .detail-body {
+        padding: 0 22px 7px;
+        font-size: 0.91rem;
+      }
+      .detail-body .table-scroll {
+        margin-top: 10px;
+      }
+      .option {
+        position: relative;
+      }
+      .option.recommended {
+        border: 1px solid var(--accent);
+        background: var(--paper-2);
+      }
+      .option .tag {
+        color: var(--accent-hover);
+        font: 0.66rem var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        display: block;
+        margin-bottom: 12px;
+      }
+      .flow {
+        margin: 27px 0;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        overflow: hidden;
+      }
+      .flow-head {
+        background: var(--paper-2);
+        padding: 16px 22px;
+        font: 0.7rem var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+      }
+      .flow-row {
+        display: grid;
+        grid-template-columns: 1fr 40px 1fr;
+        gap: 10px;
+        align-items: center;
+        padding: 22px;
+      }
+      .flow-box {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 17px;
+        background: var(--card);
+        font-size: 0.9rem;
+        text-align: center;
+      }
+      .flow-box small {
+        display: block;
+        color: var(--muted);
+        font-size: 0.76rem;
+        margin-top: 5px;
+      }
+      .arrow {
+        color: var(--accent);
+        text-align: center;
+        font-size: 1.7rem;
+      }
+      .flow-spine {
+        text-align: center;
+        padding: 15px 24px;
+        border-top: 1px dashed var(--line);
+        font-size: 0.9rem;
+      }
+      .flow-spine strong {
+        display: block;
+      }
+      .flow-spine.accent {
+        background: var(--tint);
+      }
+      .policy {
+        display: grid;
+        grid-template-columns: 190px minmax(0, 1fr);
+        gap: 18px;
+        padding: 17px 0;
+        border-bottom: 1px solid var(--line);
+        font-size: 0.91rem;
+      }
+      .policy:last-child {
+        border-bottom: 0;
+      }
+      .policy p {
+        margin: 0;
+      }
+      .policy dt {
+        font-weight: 600;
+      }
+      .policy dd {
+        margin: 0;
+      }
+      .schema {
+        background: var(--paper-2);
+        border-radius: 6px;
+        padding: 18px;
+        font: 0.78rem/1.9 var(--mono);
+        overflow-wrap: anywhere;
+      }
+      .screen {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--card);
+        overflow: hidden;
+        margin: 27px 0;
+      }
+      .screen-bar {
+        border-bottom: 1px solid var(--line);
+        padding: 14px 22px;
+        display: flex;
+        justify-content: space-between;
+        gap: 15px;
+        color: var(--muted);
+        font-size: 0.74rem;
+      }
+      .screen-body {
+        padding: 30px;
+      }
+      .screen h3 {
+        font: 500 1.75rem var(--display);
+      }
+      .screen .token-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 18px;
+        border-top: 1px solid var(--line);
+        padding: 20px 0 0;
+      }
+      .screen .token-row p {
+        margin: 4px 0;
+      }
+      .screen .mock-action {
+        display: inline-block;
+        background: var(--accent);
+        color: var(--paper);
+        padding: 9px 14px;
+        border-radius: 5px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .screen .mock-revoke {
+        color: var(--danger);
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        padding: 8px 12px;
+        font-size: 0.8rem;
+      }
+      .journey {
+        counter-reset: step;
+        list-style: none;
+        padding: 0;
+        margin: 26px 0;
+      }
+      .journey li {
+        counter-increment: step;
+        display: grid;
+        grid-template-columns: 29px 1fr;
+        column-gap: 12px;
+        padding: 0;
+        margin-bottom: 18px;
+        font-size: 0.91rem;
+      }
+      .journey li::before {
+        content: counter(step, decimal-leading-zero);
+        color: var(--accent);
+        font: 0.75rem/1.8 var(--mono);
+      }
+      .journey li strong {
+        display: block;
+      }
+      .requirements {
+        list-style: none;
+        padding: 0;
+      }
+      .requirements li {
+        padding: 12px 0 12px 27px;
+        position: relative;
+        border-bottom: 1px solid var(--line);
+        font-size: 0.91rem;
+      }
+      .requirements li::before {
+        content: '';
+        width: 12px;
+        height: 12px;
+        border: 1px solid var(--accent);
+        position: absolute;
+        top: 19px;
+        left: 0;
+        border-radius: 2px;
+      }
+      .requirements li:last-child {
+        border: 0;
+      }
+      .req-id {
+        font: 0.69rem var(--mono);
+        color: var(--accent);
+        display: block;
+        margin-bottom: 4px;
+      }
+      .phase {
+        display: grid;
+        grid-template-columns: 86px 1fr;
+        gap: 20px;
+        padding: 25px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .phase:last-child {
+        border-bottom: 0;
+      }
+      .phase-mark {
+        color: var(--accent);
+        font: 0.69rem/1.6 var(--mono);
+        text-transform: uppercase;
+      }
+      .phase h3 {
+        margin-bottom: 9px;
+      }
+      .phase p {
+        font-size: 0.91rem;
+        margin-bottom: 10px;
+      }
+      .phase .gate {
+        font-size: 0.79rem;
+        color: var(--muted);
+      }
+      .decision-list {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0 28px;
+        padding: 0;
+        list-style: none;
+      }
+      .decision-list li {
+        padding: 17px 0;
+        margin: 0;
+        border-top: 1px solid var(--line);
+        font-size: 0.9rem;
+      }
+      .decision-list strong {
+        display: block;
+        margin-bottom: 6px;
+      }
+      .evidence {
+        padding-left: 20px;
+        font-size: 0.86rem;
+      }
+      .evidence li {
+        padding-left: 6px;
+        margin-bottom: 16px;
+      }
+      .evidence code {
+        font-size: 0.83em;
+      }
+      .swatches {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 24px;
+      }
+      .swatch {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font: 0.65rem var(--mono);
+        color: var(--muted);
+      }
+      .swatch i {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        border: 1px solid var(--line);
+        background: var(--swatch);
+      }
+      footer {
+        padding: 0 0 40px;
+        display: flex;
+        justify-content: space-between;
+        gap: 24px;
+        font-size: 0.76rem;
+        color: var(--muted);
+      }
+      footer p {
+        margin: 0;
+      }
+      @media (max-width: 1100px) {
+        .wrap {
+          width: calc(100% - 56px);
+        }
+        .hero {
+          gap: 35px;
+        }
+        .layout {
+          grid-template-columns: 165px minmax(0, 1fr);
+          gap: 30px;
+        }
+        .metric {
+          padding-inline: 22px;
+        }
+      }
+      @media (max-width: 800px) {
+        .hero {
+          grid-template-columns: 1fr;
+          gap: 28px;
+          padding-top: 45px;
+        }
+        .hero h1 {
+          max-width: 650px;
+        }
+        .hero .intro {
+          max-width: none;
+        }
+        .verdict {
+          max-width: none;
+        }
+        .layout {
+          display: block;
+        }
+        .contents {
+          position: static;
+          margin-bottom: 35px;
+          border-bottom: 1px solid var(--line);
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 6px;
+        }
+        .contents .label,
+        .contents .aside-note {
+          display: none;
+        }
+        .contents a {
+          border-left: 0;
+          border-bottom: 1px solid var(--line);
+        }
+        .metric {
+          gap: 12px;
+          padding: 22px 16px;
+        }
+        .metric .number {
+          font-size: 2.35rem;
+        }
+        .metric p {
+          font-size: 0.77rem;
+        }
+        section {
+          margin-bottom: 38px;
+          padding-bottom: 38px;
+        }
+      }
+      @media (max-width: 520px) {
+        .wrap {
+          width: calc(100% - 36px);
+        }
+        .masthead {
+          gap: 12px;
+          flex-wrap: wrap;
+          padding-block: 18px;
+        }
+        .brand {
+          font-size: 0.9rem;
+        }
+        .controls button {
+          padding-inline: 11px;
+          font-size: 0.76rem;
+        }
+        h1 {
+          font-size: 3.15rem;
+        }
+        .hero {
+          padding-top: 35px;
+        }
+        .hero .intro {
+          font-size: 1rem;
+        }
+        .metrics {
+          grid-template-columns: 1fr;
+          margin-bottom: 30px;
+        }
+        .metric,
+        .metric:first-child {
+          padding: 15px 0;
+        }
+        .metric + .metric {
+          border-left: 0;
+          border-top: 1px solid var(--line);
+        }
+        .metric .number {
+          min-width: 64px;
+        }
+        .metric p {
+          font-size: 0.85rem;
+        }
+        .contents {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .grid-2,
+        .decision-list {
+          grid-template-columns: 1fr;
+        }
+        .card {
+          padding: 19px;
+        }
+        .policy {
+          grid-template-columns: 1fr;
+          gap: 5px;
+        }
+        .flow-row {
+          grid-template-columns: 1fr;
+          padding: 17px;
+        }
+        .flow-row .arrow {
+          transform: rotate(90deg);
+          line-height: 1;
+        }
+        .phase {
+          grid-template-columns: 1fr;
+          gap: 8px;
+        }
+        .screen-body {
+          padding: 21px;
+        }
+        .screen .token-row {
+          flex-wrap: wrap;
+        }
+        pre {
+          padding: 18px;
+        }
+        th,
+        td {
+          padding: 12px;
+        }
+        footer {
+          flex-direction: column;
+          gap: 10px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+      }
+      @media print {
+        :root,
+        :root[data-theme='dark'] {
+          --paper: #fff;
+          --paper-2: #f5efe4;
+          --card: #fff;
+          --ink: #1f1b16;
+          --muted: #6b5f4f;
+          --line: #ddd;
+          --accent: #a04c32;
+          --accent-hover: #a04c32;
+          --tint: #f8e6df;
+          --danger: #a53d2a;
+          color-scheme: light;
+        }
+        body {
+          font-size: 10pt;
+        }
+        .wrap {
+          width: 100%;
+        }
+        .controls,
+        .contents,
+        .skip {
+          display: none;
+        }
+        .layout {
+          display: block;
+        }
+        .hero {
+          padding: 25px 0;
+          gap: 24px;
+        }
+        h1 {
+          font-size: 37pt;
+        }
+        h2 {
+          font-size: 23pt;
+        }
+        .verdict h2 {
+          font-size: 20pt;
+        }
+        section {
+          margin-bottom: 22px;
+          padding-bottom: 22px;
+        }
+        .metrics {
+          margin-bottom: 28px;
+        }
+        .card,
+        .callout,
+        .flow,
+        .screen,
+        .phase,
+        pre {
+          break-inside: avoid;
+        }
+        h2,
+        h3,
+        summary,
+        .section-top {
+          break-after: avoid;
+        }
+        pre {
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+          background: #f5efe4;
+          color: #1f1b16;
+        }
+        .code-comment {
+          color: #6b5f4f;
+        }
+        .code-accent {
+          color: #a04c32;
+        }
+        .table-scroll {
+          overflow: visible;
+        }
+        .screen .mock-action {
+          color: #fff;
+        }
+        a {
+          text-decoration: none;
+        }
+        footer {
+          padding-bottom: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#report">Skip to report</a>
+    <div class="wrap">
+      <header class="masthead" id="top">
+        <div class="brand">
+          <svg
+            viewBox="0 0 28 28"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.7"
+            aria-hidden="true"
+          >
+            <rect x="3" y="5" width="22" height="20" rx="3" />
+            <path d="M3 11h22M9 2v6M19 2v6" />
+            <path d="M8 16h3m5 0h3M8 20h3m5 0h3" />
+          </svg>
+          PTO Calendar <span class="muted">/ Engineering notes</span>
+        </div>
+        <div class="controls" aria-label="Report controls">
+          <button type="button" id="theme-toggle" aria-pressed="false" hidden>Dark mode</button>
+          <button type="button" id="print-report" hidden>Print / PDF</button>
+        </div>
+      </header>
+
+      <div class="hero">
+        <div>
+          <p class="eyebrow">Feasibility &amp; requirements · Decision brief 01</p>
+          <h1>Your calendar.<br />Your agent.<br /><em>Your rules.</em></h1>
+          <p class="intro">
+            Let the team create, query, update, and delete PTO through an AI agent—with personal
+            tokens they generate themselves, valid for up to one year.
+          </p>
+          <div class="hero-meta">
+            <span>Reviewed 12 Nov 2026</span><span>Repository snapshot: fc6b7d7</span
+            ><span>Proposal, not implementation</span>
+          </div>
+        </div>
+        <aside class="verdict" aria-labelledby="verdict-title">
+          <span class="pill"
+            ><span class="dot" aria-hidden="true"></span> Feasible · existing API reusable</span
+          >
+          <h2 id="verdict-title">Extend access.<br />Don’t rebuild PTO.</h2>
+          <p>
+            All CRUD routes already exist. The missing foundation is a secure, revocable personal
+            access token system—not another calendar backend.
+          </p>
+          <p class="recommendation">
+            <strong>Recommended:</strong> token-enabled REST API → shared client → CLI + local stdio
+            MCP server. Add hosted MCP only if the team’s agent clients need it.
+          </p>
+        </aside>
+      </div>
+
+      <div class="metrics" aria-label="At a glance">
+        <div class="metric">
+          <span class="number">5</span>
+          <p>
+            Existing PTO routes<br /><span class="muted">List, detail, create, update, delete</span>
+          </p>
+        </div>
+        <div class="metric">
+          <span class="number">365</span>
+          <p>
+            Days, maximum token life<br /><span class="muted">Hard expiry; shorter by default</span>
+          </p>
+        </div>
+        <div class="metric">
+          <span class="number">2</span>
+          <p>Thin agent interfaces<br /><span class="muted">One API, one permission model</span></p>
+        </div>
+      </div>
+
+      <div class="layout">
+        <nav class="contents" aria-label="Report contents">
+          <span class="label">Inside this report</span>
+          <a href="#findings"><span>01</span> Project findings</a>
+          <a href="#architecture"><span>02</span> CLI or MCP?</a>
+          <a href="#tokens"><span>03</span> Token requirements</a>
+          <a href="#experience"><span>04</span> Self-service UI</a>
+          <a href="#contracts"><span>05</span> API &amp; tool contracts</a>
+          <a href="#safety"><span>06</span> Agent safety</a>
+          <a href="#delivery"><span>07</span> Delivery &amp; testing</a>
+          <a href="#decisions"><span>08</span> Decisions to make</a>
+          <a href="#evidence"><span>09</span> Evidence &amp; sources</a>
+          <p class="aside-note">
+            Read the headlines for the recommendation. Expand the technical notes for implementation
+            details.<br /><br />No app behavior, database, or authentication was changed by this
+            review.
+          </p>
+        </nav>
+
+        <main id="report">
+          <section id="findings" aria-labelledby="findings-title">
+            <div class="section-top">
+              <span class="section-num">01</span
+              ><span class="label">Verified in the repository</span>
+            </div>
+            <h2 id="findings-title">The foundation is already here.</h2>
+            <p class="lede">
+              The current Express API can be the single source of truth for the browser, a CLI, and
+              an MCP adapter. Keep validation and permissions on the server.
+            </p>
+
+            <div
+              class="table-scroll"
+              role="region"
+              aria-label="Existing PTO endpoints"
+              tabindex="0"
+            >
+              <table>
+                <caption>
+                  Existing behavior—not proposed functionality
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Operation</th>
+                    <th scope="col">Route</th>
+                    <th scope="col">What the code does today</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th scope="row">Query a range</th>
+                    <td><span class="method">GET</span><code>/pto?start=…&amp;end=…</code></td>
+                    <td>
+                      All signed-in users see the shared calendar. Inclusive ranges up to 366 days;
+                      at most 1,000 results. Notes are always <code>null</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Read one PTO</th>
+                    <td><span class="method">GET</span><code>/pto/:id</code></td>
+                    <td>
+                      Any signed-in user can read the record. Only its owner, a team lead, or an
+                      admin receives the note.
+                    </td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Create</th>
+                    <td><span class="method">POST</span><code>/pto</code></td>
+                    <td>
+                      Creates for the authenticated user only. A request cannot select another
+                      owner—even when the actor is a lead.
+                    </td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Update</th>
+                    <td><span class="method">PUT</span><code>/pto/:id</code></td>
+                    <td>
+                      Owner, team lead, or admin. Requires both dates; uses the create schema. This
+                      is not a partial-update endpoint.
+                    </td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Delete</th>
+                    <td><span class="method">DELETE</span><code>/pto/:id</code></td>
+                    <td>
+                      Owner, team lead, or admin. Hard-deletes the entry and returns HTTP 204; no
+                      restore endpoint.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="source">
+              Evidence: <a href="#source-pto">PTO routes and services</a>,
+              <a href="#source-calendar">calendar range/query</a>,
+              <a href="#source-permissions">authorization rules</a>.
+            </p>
+
+            <div class="grid-2">
+              <article class="card">
+                <span class="label">Ready to reuse</span>
+                <h3>Business rules &amp; permissions</h3>
+                <p>
+                  Shared validation covers real ISO dates, date ordering, weekday start/end,
+                  500-character notes, and overlaps. Single-day PTO requires <code>morning</code>,
+                  <code>evening</code>, or <code>all_day</code>; multi-day PTO normalizes to
+                  <code>all_day</code>.
+                </p>
+              </article>
+              <article class="card">
+                <span class="label">Missing capability</span>
+                <h3>Agent-friendly authentication</h3>
+                <p>
+                  <code>requireAuth</code> accepts cookie sessions only. The default cookie lifetime
+                  is 24 hours, configurable. There is no PAT model, bearer-token verifier, token
+                  settings page, CLI workspace, or MCP dependency.
+                </p>
+              </article>
+              <article class="card">
+                <span class="label">Partially ready</span>
+                <h3>Auditing &amp; request tracing</h3>
+                <p>
+                  Update/delete are audited transactionally. Create is not audited. Request IDs,
+                  sensitive-header redaction, and Redis-backed production rate limiting already
+                  exist; token identity and token-lifecycle events do not.
+                </p>
+              </article>
+              <article class="card">
+                <span class="label">Important product boundary</span>
+                <h3>No approvals, no team tenancy</h3>
+                <p>
+                  PTO is informational; there is no approve/reject workflow or PTO status field. The
+                  schema has one shared calendar and no team-membership model. Do not invent
+                  approval tools or claim team isolation.
+                </p>
+              </article>
+            </div>
+
+            <details>
+              <summary>Integration traps to resolve before enabling writable agents</summary>
+              <div class="detail-body">
+                <ul>
+                  <li>
+                    <strong>PUT can erase a note:</strong> an omitted <code>note</code> normalizes
+                    to <code>null</code>. A “change my end date” tool must not send a sparse PUT.
+                    Frontend <code>UpdatePTORequest</code> marks fields optional, but the backend
+                    still requires both dates.
+                  </li>
+                  <li>
+                    <strong>Queries can silently truncate:</strong> <code>take: 1000</code> has no
+                    pagination or completeness flag. There is no server-side
+                    <code>userId</code> filter. Filtering after truncation can make “my PTO” look
+                    empty or incomplete.
+                  </li>
+                  <li>
+                    <strong>Overlap checks are not atomic:</strong> create/update check for overlap
+                    before writing. Concurrent writers can race; use a database-enforced date-range
+                    exclusion or a correctly locked/serializable transaction with retry handling.
+                  </li>
+                  <li>
+                    <strong>No retry or concurrency contract:</strong> there is no idempotency-key
+                    handling, row version, or conditional update/delete. A timed-out write is not
+                    proof that it failed.
+                  </li>
+                  <li>
+                    <strong>Not a drop-in frontend client:</strong>
+                    <code>frontend/src/api/client.ts</code> is Vite-configured and cookie-based.
+                    Types are hand-maintained in <code>frontend/src/types/api.ts</code>; no
+                    generation command is present. Build a runtime-neutral shared client instead of
+                    importing browser code.
+                  </li>
+                  <li>
+                    <strong>Do not reuse setup tokens:</strong> existing account-setup tokens are
+                    single-use, short-lived password-setup credentials. Their random-secret +
+                    SHA-256 storage pattern is useful, but PATs need a separate lifecycle and table.
+                  </li>
+                </ul>
+              </div>
+            </details>
+          </section>
+
+          <section id="architecture" aria-labelledby="architecture-title">
+            <div class="section-top">
+              <span class="section-num">02</span><span class="label">Recommended approach</span>
+            </div>
+            <h2 id="architecture-title">One API. Two ways in.</h2>
+            <p class="lede">
+              The CLI and MCP are complementary. Ship the token foundation first; put a small, typed
+              adapter in front of the existing API for each agent environment.
+            </p>
+
+            <div class="grid-2">
+              <article class="card option recommended">
+                <span class="tag">Recommended · first interface</span>
+                <h3>A CLI for terminal-based agents</h3>
+                <p>
+                  A <code>pto</code> command provides predictable flags, JSON output, stable exit
+                  codes, and explicit write confirmation. Easy to script and useful without an AI
+                  agent.
+                </p>
+                <p>
+                  <strong>Best fit:</strong> agents that can execute local commands. No new public
+                  service or protocol endpoint.
+                </p>
+              </article>
+              <article class="card option recommended">
+                <span class="tag">Recommended · same foundation</span>
+                <h3>A local stdio MCP server</h3>
+                <p>
+                  A local process exposes typed PTO tools to an MCP-capable agent. It loads the
+                  user’s API token from a credential store or process environment, then calls REST
+                  over HTTPS.
+                </p>
+                <p>
+                  <strong>Best fit:</strong> clients that can launch local MCP processes. No
+                  repeated browser login for tool calls.
+                </p>
+              </article>
+            </div>
+
+            <div class="flow" aria-label="Proposed local agent architecture">
+              <div class="flow-head">Proposed request path · no direct database access</div>
+              <div class="flow-row">
+                <div class="flow-box">
+                  <strong>User signs in once</strong><small>Account → Personal access tokens</small>
+                </div>
+                <span class="arrow" aria-hidden="true">→</span>
+                <div class="flow-box">
+                  <strong>Token stored locally</strong
+                  ><small>OS keychain preferred · never a chat message</small>
+                </div>
+              </div>
+              <div class="flow-spine">
+                <strong>AI agent → CLI or local stdio MCP → shared API client</strong
+                ><span class="muted"
+                  >Authorization: Bearer &lt;user PAT&gt; · HTTPS · fixed API origin</span
+                >
+              </div>
+              <div class="flow-spine accent">
+                <strong>REST API security boundary</strong>Authenticate → enforce token scope + live
+                role + record ownership → validate
+              </div>
+              <div class="flow-spine">
+                <strong>Existing PTO services → PostgreSQL + audit records</strong
+                ><span class="muted">Browser cookie sessions keep working as before</span>
+              </div>
+            </div>
+
+            <p>
+              <strong>Suggested workspaces:</strong> <code>packages/api-client</code> for
+              runtime-neutral requests/contracts, <code>cli</code> for command parsing and output,
+              and <code>mcp</code> for tool definitions. Both adapters call REST directly; neither
+              bypasses the API or shells out to the other.
+            </p>
+
+            <details>
+              <summary>When a hosted HTTP MCP endpoint is worth the extra work</summary>
+              <div class="detail-body">
+                <p>
+                  Use hosted Streamable HTTP MCP if the selected clients cannot launch local
+                  processes, or if centrally hosted agents need remote access. First verify each
+                  target client’s supported transport and authentication mode.
+                </p>
+                <ul>
+                  <li>
+                    <strong>A PAT-protected REST API is not automatically an MCP server.</strong>
+                    HTTP MCP adds protocol lifecycle, tools, transport behavior, and its own
+                    authentication boundary.
+                  </li>
+                  <li>
+                    The current MCP HTTP authorization framework is OAuth-based and implementations
+                    <strong>SHOULD</strong> follow it. For broad compatibility, plan
+                    protected-resource metadata/discovery, authorization-server integration,
+                    PKCE-capable flows, resource/audience validation, scopes, and refresh-token
+                    management.
+                  </li>
+                  <li>
+                    Custom static-bearer authentication can work with explicitly compatible clients;
+                    do not advertise universal compatibility. A UI-created REST PAT is not a
+                    substitute for OAuth discovery.
+                  </li>
+                  <li>
+                    A remote MCP server must only accept tokens intended for itself.
+                    <strong>Do not forward an inbound MCP token to a separate upstream API.</strong>
+                    Co-locate and call the domain layer under a verified principal, or obtain
+                    separately authorized upstream credentials.
+                  </li>
+                  <li>
+                    Add reverse-proxy routing for <code>/mcp</code> and OAuth metadata/authorization
+                    paths; verify streaming/buffering, timeouts, HTTPS, Origin validation, and
+                    multi-client isolation.
+                  </li>
+                  <li>
+                    If OAuth is chosen, keep access tokens short-lived. A rotating, revocable
+                    refresh grant can provide the convenient login experience, but cap the
+                    <em>absolute grant lifetime</em> at 365 days if the same one-year policy
+                    applies. This is a different design from a one-year PAT.
+                  </li>
+                </ul>
+                <p class="source">
+                  Protocol guidance:
+                  <a
+                    href="https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization"
+                    >MCP authorization</a
+                  >
+                  and
+                  <a
+                    href="https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/security-considerations"
+                    >token audience / passthrough rules</a
+                  >, verified via Context7.
+                </p>
+              </div>
+            </details>
+          </section>
+
+          <section id="tokens" aria-labelledby="tokens-title">
+            <div class="section-top">
+              <span class="section-num">03</span
+              ><span class="label">Required security foundation</span>
+            </div>
+            <h2 id="tokens-title">Long-lived, not all-powerful.</h2>
+            <p class="lede">
+              Give every member, team lead, and admin self-service personal access tokens. A token
+              acts as its owner; it never creates a new role or grants more access than that person
+              has.
+            </p>
+
+            <dl>
+              <div class="policy">
+                <dt>Lifetime</dt>
+                <dd>
+                  Offer 30 / 90 / 180 / 365 days, with 90 days recommended by default. Enforce
+                  <code>0 &lt; expiresAt − createdAt ≤ 365 × 24h</code> on the server in UTC. No
+                  “never expires,” sliding extension, or configuration override above the cap.
+                  Reject at <code>now ≥ expiresAt</code>.
+                </dd>
+              </div>
+              <div class="policy">
+                <dt>Creation &amp; visibility</dt>
+                <dd>
+                  Only an authenticated browser session may mint a token, for that same user, after
+                  recent password verification. Return the raw secret once with
+                  <code>Cache-Control: no-store</code>. Later list/detail responses contain metadata
+                  only.
+                </dd>
+              </div>
+              <div class="policy">
+                <dt>Secret format &amp; storage</dt>
+                <dd>
+                  Use an opaque token such as
+                  <code>pto_pat_&lt;public-id&gt;.&lt;random-secret&gt;</code>, with at least 32
+                  cryptographically random bytes of secret. Store only a SHA-256 digest of the
+                  secret and a non-secret display prefix. High entropy makes a fast digest
+                  appropriate; do not store plaintext or encrypt tokens just to reveal them later.
+                </dd>
+              </div>
+              <div class="policy">
+                <dt>Validation on every call</dt>
+                <dd>
+                  Parse the bearer header strictly, look up the public ID, compare the digest
+                  safely, and check expiry, revocation, owner existence/account eligibility,
+                  credential version, and live role. Fail closed on database errors. Convenience
+                  removes repeated <em>interactive sign-in</em>, not request authentication.
+                </dd>
+              </div>
+              <div class="policy">
+                <dt>Revocation &amp; resets</dt>
+                <dd>
+                  Revoke one or all of your tokens immediately for subsequent requests. Bind
+                  issuance to the owner’s <code>sessionVersion</code>; password reset/setup already
+                  increments it and should invalidate existing PATs too. Deny PATs while
+                  <code>passwordHash</code> is null. Ordinary browser logout does not revoke PATs.
+                </dd>
+              </div>
+              <div class="policy">
+                <dt>Least privilege</dt>
+                <dd>
+                  Default to read-only. Users explicitly opt into create/update/delete capabilities.
+                  Team-level scopes require a current lead/admin role at issuance <em>and</em> use.
+                  Revoke elevated tokens on demotion so a later promotion cannot accidentally
+                  resurrect their privileges.
+                </dd>
+              </div>
+              <div class="policy">
+                <dt>Client-side protection</dt>
+                <dd>
+                  Use the OS credential store where available, otherwise an explicitly accepted
+                  owner-only file. Environment injection is a noninteractive fallback, not a secret
+                  vault. Never put tokens in command arguments, URLs, repository files, frontend
+                  build variables, browser localStorage, prompts, or tool results.
+                </dd>
+              </div>
+              <div class="policy">
+                <dt>Renewal</dt>
+                <dd>
+                  Warn before expiry and let users create a replacement in the UI. Allow a brief
+                  user-controlled overlap, then revoke the old token. No automatic extension of an
+                  existing PAT; each replacement has its own hard expiry and recent-auth check.
+                </dd>
+              </div>
+            </dl>
+
+            <div class="callout">
+              <p>
+                <strong>Why opaque PATs instead of one-year JWTs?</strong> This application already
+                uses PostgreSQL-backed user checks. A stored token record gives simple immediate
+                revocation, per-device visibility, and up-to-date permissions without adding a JWT
+                refresh/blocklist subsystem.
+              </p>
+            </div>
+
+            <details>
+              <summary>Proposed token model and scope matrix</summary>
+              <div class="detail-body">
+                <p>
+                  Add a dedicated <code>PersonalAccessToken</code> model and migration; do not
+                  change cookie lifetime or overload <code>setupTokenHash</code>.
+                </p>
+                <div class="schema">
+                  id · userId (FK) · name · displayPrefix · secretHash<br />scopes[] ·
+                  issuedSessionVersion · createdAt · expiresAt<br />lastUsedAt? · revokedAt?
+                </div>
+                <p class="small muted">
+                  Index owner + creation time; primary-key lookup by token ID. Add a database expiry
+                  check where practical, a per-user active-token cap (proposed: 10), and
+                  retention/cleanup rules. Throttle last-used updates, but do not cache validity in
+                  a way that delays revocation.
+                </p>
+                <div
+                  class="table-scroll"
+                  role="region"
+                  aria-label="Proposed token scopes"
+                  tabindex="0"
+                >
+                  <table>
+                    <thead>
+                      <tr>
+                        <th scope="col">Scope</th>
+                        <th scope="col">Allowed action</th>
+                        <th scope="col">Additional gate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><code>pto:read</code></td>
+                        <td>List and read calendar metadata</td>
+                        <td>
+                          Same shared-calendar visibility as the app; no private notes by itself
+                        </td>
+                      </tr>
+                      <tr>
+                        <td><code>pto:notes:read</code></td>
+                        <td>Return a note on an authorized detail read</td>
+                        <td>
+                          Also requires <code>pto:read</code> and <code>canViewNote</code>; applies
+                          to write responses too
+                        </td>
+                      </tr>
+                      <tr>
+                        <td><code>pto:create</code></td>
+                        <td>Create for the token owner</td>
+                        <td>Never accepts a target owner</td>
+                      </tr>
+                      <tr>
+                        <td><code>pto:update:self</code></td>
+                        <td>Edit owner’s PTO</td>
+                        <td>Record owner must match authenticated actor</td>
+                      </tr>
+                      <tr>
+                        <td><code>pto:delete:self</code></td>
+                        <td>Delete owner’s PTO</td>
+                        <td>Record owner must match authenticated actor</td>
+                      </tr>
+                      <tr>
+                        <td><code>pto:update:team</code></td>
+                        <td>Edit another person’s PTO</td>
+                        <td>Live role is lead/admin and <code>canModifyPTO</code> passes</td>
+                      </tr>
+                      <tr>
+                        <td><code>pto:delete:team</code></td>
+                        <td>Delete another person’s PTO</td>
+                        <td>Live role is lead/admin and <code>canModifyPTO</code> passes</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p>
+                  A “Manage my PTO” UI preset can combine read + create + self-update + self-delete.
+                  Private-note access is an additional opt-in. Leads using self-only scopes must
+                  <strong>not</strong> inherit team-wide writes from their role alone.
+                </p>
+                <p>
+                  These PATs grant no user administration, password reset, holiday administration,
+                  audit browsing, or token-minting access. Apply a bearer-route allowlist so
+                  broadening <code>requireAuth</code> does not accidentally open every existing
+                  route.
+                </p>
+              </div>
+            </details>
+
+            <details>
+              <summary>Authentication and CSRF integration requirements</summary>
+              <div class="detail-body">
+                <ul>
+                  <li>
+                    Introduce an auth context with <code>method: session | pat</code>, actor, token
+                    ID, scopes, and request ID. Keep session-specific fields out of the shared actor
+                    type.
+                  </li>
+                  <li>
+                    Make credential choice unambiguous. Reject requests carrying both session and
+                    bearer credentials; an invalid bearer must never fall back to a valid cookie.
+                  </li>
+                  <li>
+                    Keep token management session-only. An otherwise valid PAT must not list, mint,
+                    revoke, or reset credentials, nor log into a browser session.
+                  </li>
+                  <li>
+                    The current CSRF middleware runs before route authentication. Refactor
+                    ordering/policy deliberately: exempt only
+                    <em>successfully verified, cookie-free</em> bearer requests from cookie-specific
+                    CSRF requirements. Do not bypass checks merely because an Authorization header
+                    exists. Preserve rejection of disallowed browser origins.
+                  </li>
+                  <li>
+                    Keep existing cookie protections and regression tests. Native CLI/stdio requests
+                    are not subject to browser CORS; there is no need to loosen CORS to
+                    <code>*</code>.
+                  </li>
+                  <li>
+                    PAT validation must use current permissions. Existing session role caching
+                    defaults to 15 seconds; do not copy that cache into a path promising immediate
+                    role/revocation enforcement.
+                  </li>
+                  <li>
+                    The schema has no disabled-user flag. Version invalidation and password-reset
+                    blocking cover existing flows; introduce an account-status field only if a
+                    separate suspension/offboarding feature is added.
+                  </li>
+                </ul>
+              </div>
+            </details>
+          </section>
+
+          <section id="experience" aria-labelledby="experience-title">
+            <div class="section-top">
+              <span class="section-num">04</span
+              ><span class="label">Every user, not just administrators</span>
+            </div>
+            <h2 id="experience-title">A small security page.<br />A much easier setup.</h2>
+            <p class="lede">
+              Add <code>/settings/tokens</code> behind the normal authenticated-user guard, with an
+              Account / API access link visible to all roles. Do not put this under lead-only
+              administration.
+            </p>
+
+            <div
+              class="screen"
+              aria-label="Illustration of the proposed personal access token settings screen"
+            >
+              <div class="screen-bar">
+                <span>PTO Calendar / Account / API access</span
+                ><span>Proposed screen · not functional</span>
+              </div>
+              <div class="screen-body">
+                <h3>Personal access tokens</h3>
+                <p class="muted small">
+                  Connect your CLI or AI agent. Tokens act as you and expire within one year.
+                </p>
+                <p><span class="mock-action">+ Create a token</span></p>
+                <div class="token-row">
+                  <div>
+                    <strong>Work laptop · PTO assistant</strong>
+                    <p class="small muted"><code>pto_pat_…</code> · Read + manage own PTO</p>
+                    <p class="small muted">Expires in 82 days · Last used today · Active</p>
+                  </div>
+                  <span class="mock-revoke">Revoke</span>
+                </div>
+              </div>
+            </div>
+
+            <ol class="journey">
+              <li>
+                <div>
+                  <strong>Name it and choose access.</strong>Use a recognizable device/agent label.
+                  Start read-only; explain the impact of each write permission and warn leads about
+                  team-wide access.
+                </div>
+              </li>
+              <li>
+                <div>
+                  <strong>Choose an expiry and verify identity.</strong>Show an absolute date and
+                  timezone alongside 30/90/180/365-day options. Require a fresh password check for
+                  issuance; rate-limit it and never persist the submitted password.
+                </div>
+              </li>
+              <li>
+                <div>
+                  <strong>Copy the secret once.</strong>Show a clear “you won’t see this again”
+                  notice and a Copy button. Keep the token in component memory only; clear it when
+                  the dialog closes or the route changes. Never include the secret in analytics or
+                  error reporting.
+                </div>
+              </li>
+              <li>
+                <div>
+                  <strong>Connect the chosen client.</strong>Offer CLI and local MCP setup guidance
+                  with placeholders, not secret-filled config snippets. Store the credential outside
+                  the agent’s conversation and test identity with a safe status command.
+                </div>
+              </li>
+              <li>
+                <div>
+                  <strong>Review and revoke.</strong>List name, prefix, scopes, creation, absolute
+                  expiry, last use, and active/expired/revoked status. Offer revoke-one and
+                  revoke-all with confirmation; allow replacement after expiry or loss.
+                </div>
+              </li>
+            </ol>
+
+            <p class="small muted">
+              UI acceptance also includes keyboard/focus support, screen-reader labels, accessible
+              success/error feedback, empty/loading states, mobile layout, and the application’s
+              existing light/dark tokens. Revocation should remain easy during an incident; a valid
+              browser session is sufficient to revoke.
+            </p>
+          </section>
+
+          <section id="contracts" aria-labelledby="contracts-title">
+            <div class="section-top">
+              <span class="section-num">05</span
+              ><span class="label">Proposed contracts · not available today</span>
+            </div>
+            <h2 id="contracts-title">Make the interfaces predictable.</h2>
+            <p class="lede">
+              Keep the existing URLs and domain rules. Add explicit credential management and a
+              small number of safety-oriented API capabilities before a writable pilot.
+            </p>
+
+            <div
+              class="table-scroll"
+              role="region"
+              aria-label="Proposed API additions"
+              tabindex="0"
+            >
+              <table>
+                <caption>
+                  Recommended API changes
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Contract</th>
+                    <th scope="col">Authentication</th>
+                    <th scope="col">Requirement</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>GET /auth/tokens</code></td>
+                    <td>Browser session only</td>
+                    <td>Return only the current user’s metadata. Never return a secret/hash.</td>
+                  </tr>
+                  <tr>
+                    <td><code>POST /auth/tokens</code></td>
+                    <td>Session + recent password check</td>
+                    <td>
+                      Accept name, approved scopes, and lifetime. Compute expiry on the server.
+                      Return secret once; HTTP 201, no-store.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <code>DELETE /auth/tokens/:id</code><br /><code
+                        >POST /auth/tokens/revoke-all</code
+                      >
+                    </td>
+                    <td>Browser session only</td>
+                    <td>
+                      Revoke only owned tokens; do not leak whether someone else’s ID exists. Make
+                      repeated own-token revocation harmless.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>GET /auth/me</code></td>
+                    <td>Session or PAT</td>
+                    <td>
+                      Allow a PAT-safe identity check with expiry/scopes metadata and no secret.
+                      Keep other auth routes PAT-ineligible.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Existing <code>/pto</code> routes</td>
+                    <td>Session or scoped PAT</td>
+                    <td>
+                      Require the appropriate scope on every bearer operation, including legacy PUT;
+                      preserve browser permissions.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>PATCH /pto/:id</code></td>
+                    <td>Session or scoped PAT</td>
+                    <td>
+                      Add partial updates: omitted fields stay unchanged;
+                      <code>note: null</code> explicitly clears. Validate the merged record and
+                      condition on a version.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>GET /pto?userId=…&amp;cursor=…</code></td>
+                    <td>Session or scoped PAT</td>
+                    <td>
+                      Filter before result limiting. Add stable pagination and explicit
+                      completeness/next-cursor metadata; update the current array contract
+                      compatibly or version it.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <details>
+              <summary>Write safety, response contracts, and deployment details</summary>
+              <div class="detail-body">
+                <ul>
+                  <li>
+                    <strong>Versions:</strong> add <code>PTORequest.version</code> (integer, default
+                    1). Return it on reads/writes. Update/delete atomically require the expected
+                    version; stale requests return a documented conflict (for example HTTP 409
+                    <code>STALE_WRITE</code>). Apply the rule consistently to legacy PUT too.
+                  </li>
+                  <li>
+                    <strong>Idempotent create:</strong> support <code>Idempotency-Key</code> and
+                    store a request fingerprint + result scoped to actor, token, and operation. Same
+                    key/payload returns the original result; same key/different payload conflicts.
+                    Do not use the key as a substitute for authentication. Define a retention window
+                    and do not retry beyond it without reconciliation.
+                  </li>
+                  <li>
+                    <strong>Overlap integrity:</strong> enforce no overlapping inclusive date ranges
+                    for the same owner under concurrent requests. Preserve the current rule that
+                    even different half-day entries on the same date conflict.
+                  </li>
+                  <li>
+                    <strong>Errors:</strong> retain
+                    <code>{ error: { code, message, details? } }</code>, HTTP
+                    400/401/403/404/409/429, <code>Retry-After</code>, and
+                    <code>X-Request-Id</code>. Use a generic credential failure for
+                    unknown/expired/revoked PATs; never echo the supplied secret.
+                  </li>
+                  <li>
+                    <strong>Privacy:</strong> keep list notes redacted. Redact detail and mutation
+                    responses unless both note scope and existing note authorization permit
+                    disclosure; do not let a read token enumerate privileged notes.
+                  </li>
+                  <li>
+                    <strong>Contract maintenance:</strong> add bearer security as an alternative to
+                    cookies on PTO routes in <code>docs/openapi.yaml</code>; explicitly retain
+                    cookie-only token management. Align frontend types and introduce generated or
+                    contract-tested shared types.
+                  </li>
+                  <li>
+                    <strong>Deployment:</strong> existing nginx <code>/auth</code> and
+                    <code>/pto</code> proxies already cover the proposed local-client REST paths.
+                    Verify Authorization forwarding, no-store behavior, trusted proxy settings, and
+                    TLS in the deployed chain; no new public port is needed.
+                  </li>
+                </ul>
+              </div>
+            </details>
+
+            <h3>CLI shape</h3>
+            <p class="small muted">
+              Illustrative commands for the proposed CLI—not commands that work in this repository
+              yet. <code>PTO_API_URL</code> selects a trusted server; the raw token is supplied
+              through a hidden prompt or stdin and saved outside the shell history.
+            </p>
+            <pre><code><span class="code-comment"># One-time local setup; no --token &lt;secret&gt; argument</span>
+<span class="code-accent">pto auth set --token-stdin</span>
+pto auth status --json
+
+<span class="code-comment"># Query a complete, bounded date range</span>
+pto list --from 2026-12-01 --to 2026-12-31 --mine --json
+pto get &lt;pto-id&gt; --json
+
+<span class="code-comment"># Writes show the owner/dates and require approval</span>
+pto create --start 2026-12-07 --end 2026-12-11 \
+  --day-part all_day --yes --json
+pto update &lt;pto-id&gt; --end 2026-12-10 --if-version 3 --yes --json
+pto delete &lt;pto-id&gt; --if-version 4 --yes --json</code></pre>
+            <p class="small">
+              Default interactive writes show a preview and ask for confirmation. Noninteractive
+              writes fail unless explicitly opted in; the agent host must obtain user approval
+              before using <code>--yes</code>. JSON goes to stdout, diagnostics to stderr; exit
+              codes distinguish usage, authentication, authorization, conflict, rate-limit, and
+              network failures. Never silently prompt for a password during a tool call.
+            </p>
+
+            <h3>Local MCP tools</h3>
+            <div class="table-scroll" role="region" aria-label="Proposed MCP tools" tabindex="0">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Tool</th>
+                    <th scope="col">Inputs / behavior</th>
+                    <th scope="col">Annotations</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>pto_list</code></td>
+                    <td>
+                      Start/end, optional owner filter and cursor; return records + completeness
+                      metadata.
+                    </td>
+                    <td>Read-only</td>
+                  </tr>
+                  <tr>
+                    <td><code>pto_get</code></td>
+                    <td>Record ID; return authorized detail + version.</td>
+                    <td>Read-only</td>
+                  </tr>
+                  <tr>
+                    <td><code>pto_create</code></td>
+                    <td>
+                      ISO dates, day part, optional note, stable idempotency key; owner is derived
+                      from PAT.
+                    </td>
+                    <td>
+                      Write; additive; mark idempotent only once replay protection is implemented
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><code>pto_update</code></td>
+                    <td>ID, expected version, changed fields; PATCH, never sparse PUT.</td>
+                    <td>Write; destructive</td>
+                  </tr>
+                  <tr>
+                    <td><code>pto_delete</code></td>
+                    <td>ID and expected version; no wildcard or bulk-delete tool.</td>
+                    <td>Write; destructive</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="small">
+              Use strict input schemas, bounded output, and structured results with success/error
+              codes and request IDs. Reuse backend constraints. The local MCP process reads
+              credentials outside tool arguments; stdout is reserved for protocol messages and logs
+              go to stderr.
+            </p>
+          </section>
+
+          <section id="safety" aria-labelledby="safety-title">
+            <div class="section-top">
+              <span class="section-num">06</span
+              ><span class="label">Writable agents need guardrails</span>
+            </div>
+            <h2 id="safety-title">A token is permission.<br />Not consent.</h2>
+            <p class="lede">
+              The API must enforce authority even when an agent is mistaken. The agent client must
+              separately establish that the user actually wants a particular change.
+            </p>
+
+            <ul class="requirements">
+              <li>
+                <span class="req-id">SAFE-01 · Consent</span>Show the exact user, dates, day part,
+                and update diff or delete target before writes. Require confirmation for
+                create/update/delete in supported agent hosts. Tool annotations and a model-supplied
+                <code>confirmed: true</code> are hints, not proof of human approval; if
+                server-enforced approval is mandatory, add a separately authenticated approval flow.
+              </li>
+              <li>
+                <span class="req-id">SAFE-02 · Correct dates</span>Use ISO date-only fields; resolve
+                “next Friday” in the user’s intended timezone and confirm the absolute date. Never
+                silently shift weekend dates or treat <code>evening</code> as a new enum value like
+                <code>afternoon</code>. Display the existing PM meaning clearly.
+              </li>
+              <li>
+                <span class="req-id">SAFE-03 · Private context</span>PTO notes can contain sensitive
+                personal information. Default notes off for agent access; opt in only when needed
+                and authorized. Explain that data returned to a cloud AI agent may leave the app’s
+                hosting boundary, and apply the organization’s retention/model policy.
+              </li>
+              <li>
+                <span class="req-id">SAFE-04 · Prompt injection</span>Treat names, notes, and all
+                tool results as untrusted data—not instructions to run commands, reveal credentials,
+                or change another record. Do not let tool inputs choose arbitrary URLs, file paths,
+                shell fragments, or headers.
+              </li>
+              <li>
+                <span class="req-id">SAFE-05 · Safe networking</span>Bind credentials to a
+                configured, trusted HTTPS origin. Permit plain HTTP only for explicit loopback
+                development. Reject cross-origin credential redirects, validate TLS, use real
+                request cancellation/timeouts, and never log Authorization headers or token bodies.
+              </li>
+              <li>
+                <span class="req-id">SAFE-06 · Retries &amp; concurrency</span>Retry bounded reads
+                with backoff and respect <code>Retry-After</code>. Retry create only with the same
+                persisted idempotency key. On stale version, read again and ask before overwriting.
+                Reconcile an ambiguous write rather than claiming it failed or blindly repeating it.
+              </li>
+              <li>
+                <span class="req-id">SAFE-07 · Abuse controls</span>Keep the shared Redis-backed IP
+                limiter and add verified-token/user limits so office NATs do not make every agent
+                share one quota. Rate-limit invalid bearer attempts and token issuance separately.
+                No uncontrolled polling or unbounded agent loops.
+              </li>
+              <li>
+                <span class="req-id">SAFE-08 · Accountability</span>Audit create/update/delete and
+                token creation/revocation with actor, token ID, target owner/record, request ID, and
+                credential type. Never store the raw token in audit details. Preserve
+                transactionality and define note/audit retention; existing update audits currently
+                include the note text.
+              </li>
+            </ul>
+            <div class="callout">
+              <p>
+                <strong>Rollout rule:</strong> start with read-only tokens. Enable personal writes
+                only after scope enforcement, note privacy, safe updates, retry protection,
+                concurrency handling, and audit coverage pass. Team-wide writes are a separate
+                explicit opt-in.
+              </p>
+            </div>
+          </section>
+
+          <section id="delivery" aria-labelledby="delivery-title">
+            <div class="section-top">
+              <span class="section-num">07</span><span class="label">Implementation plan</span>
+            </div>
+            <h2 id="delivery-title">Build the boundary first.</h2>
+            <p class="lede">
+              Each phase is an independently reviewable deliverable. These are suggested issue
+              boundaries, not issues created by this report.
+            </p>
+
+            <div class="phase">
+              <div class="phase-mark">Phase 01<br />Foundation</div>
+              <div>
+                <h3>Add personal-token authentication</h3>
+                <p>
+                  Token schema/migration, issuance and revocation services, session-only management
+                  routes, recent-password verification, bearer principal, scoped route allowlist,
+                  reset/version invalidation, and lifecycle audits.
+                </p>
+                <p class="gate">
+                  Exit gate: hard 365-day cap; no privilege escalation; immediate revoke/reset
+                  enforcement; existing cookie/CSRF behavior unchanged.
+                </p>
+              </div>
+            </div>
+            <div class="phase">
+              <div class="phase-mark">Phase 02<br />Self-service</div>
+              <div>
+                <h3>Add the account token page</h3>
+                <p>
+                  All-role settings entry, name/scope/expiry form, show-once secret, metadata list,
+                  revoke-one/all, status/expiry feedback, and client setup guidance.
+                </p>
+                <p class="gate">
+                  Exit gate: a normal member can create and revoke only their own tokens; no secret
+                  survives navigation or appears in metadata/logs.
+                </p>
+              </div>
+            </div>
+            <div class="phase">
+              <div class="phase-mark">Phase 03<br />Read pilot</div>
+              <div>
+                <h3>Ship the shared client and read-only CLI</h3>
+                <p>
+                  Runtime-neutral contracts, safe credential storage, identity/status command,
+                  bounded list/detail queries, owner filtering + complete pagination, JSON/error
+                  conventions, and packaging/versioned distribution.
+                </p>
+                <p class="gate">
+                  Exit gate: a real team member can configure once and query without browser
+                  cookies; expired/revoked tokens give a clear recovery message.
+                </p>
+              </div>
+            </div>
+            <div class="phase">
+              <div class="phase-mark">Phase 04<br />Safe writes</div>
+              <div>
+                <h3>Harden the API, then enable CRUD</h3>
+                <p>
+                  Partial PATCH, atomic expected-version checks, idempotent create, atomic overlap
+                  enforcement, create audits, note-scope handling, CLI preview/confirmation, and
+                  controlled write rollout.
+                </p>
+                <p class="gate">
+                  Exit gate: retries cannot duplicate creates, stale writes cannot overwrite newer
+                  data, and parallel requests cannot create overlaps.
+                </p>
+              </div>
+            </div>
+            <div class="phase">
+              <div class="phase-mark">Phase 05<br />MCP adapter</div>
+              <div>
+                <h3>Expose local PTO tools</h3>
+                <p>
+                  Strict schemas, structured results, conservative annotations, protocol-only
+                  stdout, credential lookup, and tested configuration recipes for the actual agent
+                  clients the team selects.
+                </p>
+                <p class="gate">
+                  Exit gate: all four operations work end to end in at least one selected MCP
+                  client, with user approval for writes and no secret entering model context.
+                </p>
+              </div>
+            </div>
+            <div class="phase">
+              <div class="phase-mark">Optional<br />Hosted MCP</div>
+              <div>
+                <h3>Add remote transport only on demand</h3>
+                <p>
+                  Confirm a real client need, then design OAuth/auth compatibility, audience
+                  isolation, discovery, proxy transport settings, remote consent, and
+                  credential/grant lifetime policy.
+                </p>
+                <p class="gate">
+                  Not required for the local CLI + stdio solution. No effort estimate is reliable
+                  until client/auth requirements are chosen.
+                </p>
+              </div>
+            </div>
+
+            <details>
+              <summary>Files and modules likely to change</summary>
+              <div class="detail-body">
+                <div
+                  class="table-scroll"
+                  role="region"
+                  aria-label="Implementation touchpoints"
+                  tabindex="0"
+                >
+                  <table>
+                    <thead>
+                      <tr>
+                        <th scope="col">Area</th>
+                        <th scope="col">Existing touchpoints / proposed additions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <th scope="row">Data</th>
+                        <td>
+                          <code>backend/prisma/schema.prisma</code> + migrations: PATs, PTO version,
+                          idempotency records, overlap integrity.
+                        </td>
+                      </tr>
+                      <tr>
+                        <th scope="row">Auth</th>
+                        <td>
+                          <code>backend/src/middleware/requireAuth.ts</code>, <code>csrf.ts</code>,
+                          <code>server.ts</code>, <code>routes/auth.ts</code>,
+                          <code>config/env.ts</code>; new token service/schemas and session-only
+                          gate.
+                        </td>
+                      </tr>
+                      <tr>
+                        <th scope="row">Permissions</th>
+                        <td>
+                          <code>services/authorization/AuthorizationService.ts</code> + PAT scope
+                          checks. Update <code>services/users/UserService.ts</code> invalidation
+                          flows.
+                        </td>
+                      </tr>
+                      <tr>
+                        <th scope="row">PTO API</th>
+                        <td>
+                          <code>routes/pto.ts</code>, <code>services/pto/</code>,
+                          <code>services/calendar/</code>, and
+                          <code>services/audit/AuditLogService.ts</code>.
+                        </td>
+                      </tr>
+                      <tr>
+                        <th scope="row">Operations</th>
+                        <td>
+                          <code>lib/rateLimit.ts</code>, <code>logger.ts</code>,
+                          <code>logSanitizers.ts</code>; allowlisted auth metadata only, redaction
+                          tests, quota and token-expiry configuration with a non-overridable hard
+                          cap.
+                        </td>
+                      </tr>
+                      <tr>
+                        <th scope="row">Browser UI</th>
+                        <td>
+                          <code>frontend/src/routes/AppRoutes.tsx</code>, account navigation in
+                          <code>pages/CalendarPage.tsx</code>, new settings page/components, API
+                          types, and token tests.
+                        </td>
+                      </tr>
+                      <tr>
+                        <th scope="row">Agent packages</th>
+                        <td>
+                          New <code>packages/api-client</code>, <code>cli</code>, <code>mcp</code>;
+                          root workspace/build/test configuration and lockfile.
+                        </td>
+                      </tr>
+                      <tr>
+                        <th scope="row">Docs / CI</th>
+                        <td>
+                          <code>docs/openapi.yaml</code>, <code>README.md</code>,
+                          plan/backlog/technical spec/testing strategy, deployment guidance, package
+                          distribution and agent-client setup documentation.
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </details>
+
+            <details>
+              <summary>Release acceptance checklist and required coverage</summary>
+              <div class="detail-body">
+                <ul class="requirements">
+                  <li>
+                    <span class="req-id">AUTH-01</span>A member, lead, and admin can each issue,
+                    list, and revoke only their own PATs using browser auth. Another user’s token ID
+                    never exposes metadata or enables revocation.
+                  </li>
+                  <li>
+                    <span class="req-id">AUTH-02</span>Test exact expiry boundaries, 365-day
+                    success, over-limit/zero/negative/invalid lifetimes, revoked/unknown/malformed
+                    secrets, no plaintext persistence, one-time reveal, and active-token caps.
+                  </li>
+                  <li>
+                    <span class="req-id">AUTH-03</span>PATs cannot mint credentials or access
+                    administration. Mixed/invalid credentials cannot fall back to a session.
+                    Reset/setup invalidates PATs; role demotion removes elevated access on the next
+                    request.
+                  </li>
+                  <li>
+                    <span class="req-id">AUTHZ-01</span>Test every scope × role × owner combination
+                    on every PTO route, including legacy PUT and note-bearing write responses.
+                    Members cannot write another person’s PTO; self-only lead tokens cannot do team
+                    writes.
+                  </li>
+                  <li>
+                    <span class="req-id">PTO-01</span>Run existing date/day-part/overlap tests
+                    through bearer auth. Add concurrent overlap, idempotency replay/mismatch, stale
+                    update/delete, omitted-note preservation, note-clear, pagination, and
+                    filter-before-limit tests.
+                  </li>
+                  <li>
+                    <span class="req-id">CLIENT-01</span>Exercise CLI JSON/exit codes, hidden
+                    credential input, storage permissions, redirect rejection, cancellation,
+                    401/403/409/429 behavior, no secret logging, and no automatic unsafe write
+                    retry.
+                  </li>
+                  <li>
+                    <span class="req-id">MCP-01</span>Test initialization, tool discovery, strict
+                    inputs, structured success/errors, stdout purity, missing-token startup, revoked
+                    credentials, and real-client write approval. Use the same authorization tests as
+                    the CLI.
+                  </li>
+                  <li>
+                    <span class="req-id">UI-01</span>Browser tests cover normal-member access,
+                    issuance, show-once/copy/clear behavior, server-side lifetime rejection,
+                    revoke-one/all, light/dark, mobile, keyboard focus, and screen-reader feedback.
+                  </li>
+                  <li>
+                    <span class="req-id">OPS-01</span>Verify a deployed HTTPS request through Caddy
+                    → nginx → Express, Authorization preservation, no-store issuance, shared quotas,
+                    immediate revocation across processes, and token-safe logs/audits.
+                  </li>
+                </ul>
+                <p>
+                  <strong>Existing repository gates remain:</strong> lint, typecheck, and unit tests
+                  in both workspaces; backend integration coverage ≥90% lines; frontend build; and
+                  100% green desktop Chromium E2E with one worker against the designated development
+                  test setup. Extend gates to the new workspaces; preserve the project’s 100%
+                  authorization/validation targets.
+                </p>
+                <p class="small muted">
+                  This review added a documentation artifact only. It does not certify these future
+                  acceptance checks as passed; they belong to the implementation PRs.
+                </p>
+              </div>
+            </details>
+          </section>
+
+          <section id="decisions" aria-labelledby="decisions-title">
+            <div class="section-top">
+              <span class="section-num">08</span
+              ><span class="label">Recommended defaults &amp; open choices</span>
+            </div>
+            <h2 id="decisions-title">A few decisions before coding.</h2>
+            <ul class="decision-list">
+              <li>
+                <strong>Which agent clients will people use?</strong>Confirm whether they can
+                execute a CLI, launch local stdio MCP, or only connect to hosted HTTP MCP. This
+                determines the adapter priority.
+              </li>
+              <li>
+                <strong>What is the token policy?</strong>Recommended: 90-day default, hard 365-day
+                maximum, 10 active tokens per person, recent password verification, and no PAT
+                renewal endpoint.
+              </li>
+              <li>
+                <strong>Who can delegate team-wide writes?</strong>Recommended: all users may manage
+                their own PTO; lead/admin team scopes require explicit selection. No blanket “act as
+                admin” token.
+              </li>
+              <li>
+                <strong>Should the agent see private notes?</strong>Recommended: off by default,
+                explicit scope, existing owner/lead authorization, and an approved AI-provider data
+                policy.
+              </li>
+              <li>
+                <strong>How strong must approval be?</strong>Recommended: trusted host confirmations
+                and read-only-by-default tokens. If server-enforced human consent is required,
+                budget a distinct approval mechanism.
+              </li>
+              <li>
+                <strong>Is create-on-behalf required?</strong>Not needed for the requested personal
+                CRUD workflow. Supporting it requires a new owner-selection contract and explicit
+                permission/audit rules; do not sneak it into this change.
+              </li>
+            </ul>
+            <div class="callout">
+              <p>
+                <strong>Bottom line:</strong> yes, this project can support the requested experience
+                without replacing its authentication or PTO domain. Add self-service PATs and scoped
+                bearer access, harden automated writes, then expose the same API through a CLI
+                and/or local MCP server.
+              </p>
+            </div>
+          </section>
+
+          <section id="evidence" aria-labelledby="evidence-title">
+            <div class="section-top">
+              <span class="section-num">09</span><span class="label">Traceable findings</span>
+            </div>
+            <h2 id="evidence-title">Sources, not assumptions.</h2>
+            <p class="lede">
+              Findings come from the checked-out code at <code>fc6b7d7</code>. Requirements, routes,
+              commands, packages, scopes, and UI concepts labeled “proposed” do not exist yet.
+            </p>
+            <ol class="evidence">
+              <li id="source-pto">
+                <strong>PTO behavior &amp; validation.</strong>
+                <a href="../backend/src/routes/pto.ts"><code>backend/src/routes/pto.ts</code></a>
+                (16–69);
+                <a href="../backend/src/services/pto/PTOService.ts"><code>PTOService.ts</code></a>
+                (91–195);
+                <a href="../backend/src/services/pto/schemas.ts"><code>schemas.ts</code></a
+                >; <a href="../backend/src/services/pto/validation.ts"><code>validation.ts</code></a
+                >. CRUD, owner-derived create, full PUT, audit gaps, note normalization, and overlap
+                race.
+              </li>
+              <li id="source-calendar">
+                <strong>Query bounds &amp; redaction.</strong>
+                <a href="../backend/src/services/calendar/range.ts"
+                  ><code>backend/src/services/calendar/range.ts</code></a
+                >
+                (4–5, 46–58);
+                <a href="../backend/src/services/calendar/CalendarQuery.ts"
+                  ><code>CalendarQuery.ts</code></a
+                >
+                (33–50). 366-day inclusive limit, 1,000-row cap, no owner filter or pagination, list
+                notes null.
+              </li>
+              <li id="source-permissions">
+                <strong>Authorization.</strong>
+                <a href="../backend/src/services/authorization/AuthorizationService.ts"
+                  ><code>backend/src/services/authorization/AuthorizationService.ts</code></a
+                >
+                (12–17);
+                <a href="../backend/tests/integration/pto-edit-delete.test.ts"
+                  ><code>backend/tests/integration/pto-edit-delete.test.ts</code></a
+                >. Owner/lead/admin writes and note access.
+              </li>
+              <li>
+                <strong>Authentication &amp; credential invalidation.</strong>
+                <a href="../backend/src/middleware/requireAuth.ts"><code>requireAuth.ts</code></a>
+                (23–40, 47–77),
+                <a href="../backend/src/middleware/cookieSession.ts"
+                  ><code>cookieSession.ts</code></a
+                >, <a href="../backend/src/routes/auth.ts"><code>routes/auth.ts</code></a
+                >, <a href="../backend/src/config/env.ts"><code>config/env.ts</code></a> (55, 80),
+                and
+                <a href="../backend/src/services/users/UserService.ts"
+                  ><code>UserService.ts</code></a
+                >
+                (47–60, 123–196). Cookie-only auth, role cache, version checks, hashed setup tokens,
+                and password-reset lifecycle.
+              </li>
+              <li>
+                <strong>Data model.</strong>
+                <a href="../backend/prisma/schema.prisma"
+                  ><code>backend/prisma/schema.prisma</code></a
+                >. Roles include admin; no PATs, approval status, team model, disabled flag, or PTO
+                version.
+              </li>
+              <li>
+                <strong>Security, audit &amp; runtime.</strong>
+                <a href="../backend/src/server.ts"><code>server.ts</code></a> (46–56),
+                <a href="../backend/src/middleware/csrf.ts"><code>csrf.ts</code></a
+                >, <a href="../backend/src/lib/rateLimit.ts"><code>lib/rateLimit.ts</code></a
+                >, <a href="../backend/src/lib/logger.ts"><code>logger.ts</code></a
+                >, <a href="../backend/src/lib/logSanitizers.ts"><code>logSanitizers.ts</code></a
+                >,
+                <a href="../backend/src/services/audit/AuditLogService.ts"
+                  ><code>AuditLogService.ts</code></a
+                >, and <a href="../frontend/nginx.conf"><code>frontend/nginx.conf</code></a
+                >. Middleware ordering, origin rules, IP quotas, redaction, audit types, and REST
+                proxy paths.
+              </li>
+              <li>
+                <strong>Frontend &amp; API contract.</strong>
+                <a href="../frontend/src/routes/AppRoutes.tsx"><code>AppRoutes.tsx</code></a
+                >, <a href="../frontend/src/api/client.ts"><code>api/client.ts</code></a
+                >, <a href="../frontend/src/types/api.ts"><code>types/api.ts</code></a> (45–56),
+                <a href="openapi.yaml"><code>docs/openapi.yaml</code></a
+                >, and workspace package files. No token page; cookie/Vite-bound client and
+                optional-update type mismatch.
+              </li>
+              <li>
+                <strong>Design &amp; release policy.</strong>
+                <a href="../frontend/src/index.css"><code>frontend/src/index.css</code></a> (6–40),
+                <a href="../frontend/src/fonts.css"><code>fonts.css</code></a
+                >, <a href="../AGENTS.md"><code>AGENTS.md</code></a
+                >, <a href="testing-strategy.md"><code>docs/testing-strategy.md</code></a
+                >, and <a href="../README.md"><code>README.md</code></a> (230–241). App
+                palette/fonts, project gates, and explicit “no approval workflow” decision.
+              </li>
+              <li>
+                <strong>Current MCP protocol guidance.</strong> Official
+                <a
+                  href="https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization"
+                  >authorization</a
+                >,
+                <a
+                  href="https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/authorization-server-discovery"
+                  >discovery</a
+                >,
+                <a
+                  href="https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/security-considerations"
+                  >audience/security</a
+                >, and
+                <a href="https://modelcontextprotocol.io/specification/2026-07-28/server/tools"
+                  >tools</a
+                >
+                documentation, fetched via Context7 during this review. Validate the chosen
+                SDK/client versions at implementation time.
+              </li>
+            </ol>
+            <p class="small muted">
+              Review scope: static inspection of application source, schema, route/service tests,
+              API specification, deployment proxy, and design tokens. No production probing,
+              credential creation, database changes, package implementation, or full application
+              test run. Relative source/font links work when this HTML stays in the repository;
+              portable system/serif fallbacks work if the file is shared alone. Styles and
+              interactions need no external libraries or internet connection.
+            </p>
+            <div class="swatches" aria-label="Application palette used in this report">
+              <span class="swatch"
+                ><i style="--swatch: #fbf8f1" aria-hidden="true"></i>Cream #FBF8F1</span
+              >
+              <span class="swatch"
+                ><i style="--swatch: #b5533a" aria-hidden="true"></i>Terracotta #B5533A</span
+              >
+              <span class="swatch"
+                ><i style="--swatch: #1f1b16" aria-hidden="true"></i>Ink #1F1B16</span
+              >
+              <span class="swatch"
+                ><i style="--swatch: #6b8e4e" aria-hidden="true"></i>Sage #6B8E4E</span
+              >
+              <span class="swatch"
+                ><i style="--swatch: #e8dfd0" aria-hidden="true"></i>Border #E8DFD0</span
+              >
+            </div>
+          </section>
+        </main>
+      </div>
+      <footer>
+        <p>PTO Calendar · AI agent access assessment · November 2026</p>
+        <p>Built with the app’s warm-editorial palette. <a href="#top">Back to top ↑</a></p>
+      </footer>
+    </div>
+    <script>
+      (() => {
+        const root = document.documentElement;
+        const themeButton = document.getElementById('theme-toggle');
+        const printButton = document.getElementById('print-report');
+        const preference = window.matchMedia('(prefers-color-scheme: dark)');
+        let manualTheme = false;
+        const setTheme = (dark) => {
+          root.dataset.theme = dark ? 'dark' : 'light';
+          themeButton.setAttribute('aria-pressed', String(dark));
+        };
+        setTheme(preference.matches);
+        themeButton.hidden = false;
+        printButton.hidden = false;
+        themeButton.addEventListener('click', () => {
+          manualTheme = true;
+          setTheme(root.dataset.theme !== 'dark');
+        });
+        preference.addEventListener('change', (event) => {
+          if (!manualTheme) setTheme(event.matches);
+        });
+        const details = [...document.querySelectorAll('details')];
+        let originalOpen = null;
+        window.addEventListener('beforeprint', () => {
+          if (originalOpen !== null) return;
+          originalOpen = details.map((item) => item.open);
+          details.forEach((item) => {
+            item.open = true;
+          });
+        });
+        window.addEventListener('afterprint', () => {
+          if (originalOpen === null) return;
+          details.forEach((item, index) => {
+            item.open = originalOpen[index];
+          });
+          originalOpen = null;
+        });
+        printButton.addEventListener('click', () => window.print());
+        const links = [...document.querySelectorAll('.contents a')];
+        if ('IntersectionObserver' in window) {
+          const observer = new IntersectionObserver(
+            (entries) => {
+              const visible = entries.filter((entry) => entry.isIntersecting);
+              if (!visible.length) return;
+              const id = visible[0].target.id;
+              links.forEach((link) => {
+                if (link.hash === '#' + id) link.setAttribute('aria-current', 'location');
+                else link.removeAttribute('aria-current');
+              });
+            },
+            { rootMargin: '-5% 0px -65% 0px', threshold: 0 },
+          );
+          document.querySelectorAll('main > section').forEach((item) => observer.observe(item));
+        }
+      })();
+    </script>
+  </body>
+</html>
