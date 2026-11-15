@@ -44,6 +44,7 @@ All project documentation lives under [`docs/`](docs/).
 
 - **File:** `docs/testing-strategy.md`
 - **Purpose:** Tooling matrix, test pyramid, coverage targets (≥80% on critical services, ≥90% on `PTOService`, 100% on authorization, validation, schemas, middleware, and lifecycle), GitHub Actions CI pipeline, ephemeral Postgres for integration tests, Playwright E2E scope (desktop + mobile-chrome projects), pre-commit hooks, and merge policy.
+- **Image policy:** [Temporary risk acceptance (#273)](docs/image-risk-acceptance.md) expires 2026-12-15; accepted risk, **not remediation**. Permanent #247 remains open at high priority.
 
 ### 7. Deployment and Backup Runbooks
 

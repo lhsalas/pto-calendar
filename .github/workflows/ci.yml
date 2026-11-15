@@ -240,22 +240,18 @@ jobs:
       - name: Audit the locked npm dependency graphs
         run: node infra/security/audit.mjs
       - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.76.2
       - name: Scan the pinned production base images
-        run: |
-          set -euo pipefail
-          while read -r image; do
-            [ -n "${image}" ] || continue
-            echo "::group::Scanning ${image}"
-            trivy image \
-              --platform linux/arm64 \
-              --severity HIGH,CRITICAL \
-              --ignore-unfixed \
-              --ignorefile .trivyignore.yaml \
-              --exit-code 1 \
-              --no-progress \
-              "${image}"
-            echo "::endgroup::"
-          done < <(node infra/security/production-images.mjs)
+        run: node infra/security/scan-production-images.mjs
+      - name: Retain unfiltered image scans and accepted-risk evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: production-image-security
+          path: security-reports/
+          if-no-files-found: error
+          retention-days: 30
 
   e2e:
     name: E2E (Playwright)
