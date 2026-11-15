@@ -18,6 +18,8 @@ const files = {
   genericRestore: resolve(root, 'bin/restore-backup.mjs'),
   auditScript: resolve(root, 'infra/security/audit.mjs'),
   productionImagesScript: resolve(root, 'infra/security/production-images.mjs'),
+  imageScanScript: resolve(root, 'infra/security/scan-production-images.mjs'),
+  imageRiskTests: resolve(root, 'infra/tests/image-risk.test.mjs'),
   ciWorkflow: resolve(root, '.github/workflows/ci.yml'),
   deployWorkflow: resolve(root, '.github/workflows/deploy-oci.yml'),
   dependabotConfig: resolve(root, '.github/dependabot.yml'),
@@ -127,14 +129,29 @@ check('runtime scripts do not sudo back into deploy', !/sudo -u deploy/.test(`${
 console.log('\nVulnerability scan contract:');
 check('npm audit script exists', existsSync(files.auditScript));
 check('production image script exists', existsSync(files.productionImagesScript));
+check('production image scan runner exists', existsSync(files.imageScanScript));
+if (existsSync(files.imageScanScript)) {
+  const scan = readFileSync(files.imageScanScript, 'utf8');
+  check('runner enumerates production images', /infra\/security\/production-images\.mjs/.test(scan));
+  check('runner targets the production platform', /'--platform',\s*'linux\/arm64'/.test(scan));
+}
 if (existsSync(files.ciWorkflow)) {
   const ci = readFileSync(files.ciWorkflow, 'utf8');
   check('CI runs a security job', /^ {2}security:$/m.test(ci));
   check('CI security job audits the npm graphs', /infra\/security\/audit\.mjs/.test(ci));
-  check('CI security job scans the production images', /infra\/security\/production-images\.mjs/.test(ci));
-  check('CI security job targets the production platform', /--platform linux\/arm64/.test(ci));
+  check('CI security job scans the production images', /infra\/security\/scan-production-images\.mjs/.test(ci));
+  check('CI retains unfiltered reports even after failure',
+    /name: Retain unfiltered image scans[\s\S]*?if: always\(\)[\s\S]*?path: security-reports\//.test(ci));
   check('CI is scheduled so advisories are noticed without a commit', /^ {2}schedule:$/m.test(ci));
 }
+check('daemon-free image risk regressions pass', (() => {
+  try {
+    execFileSync(process.execPath, ['--test', '--test-reporter=spec', files.imageRiskTests], { stdio: 'inherit' });
+    return true;
+  } catch {
+    return false;
+  }
+})());
 if (existsSync(files.deployWorkflow)) {
   const deployWorkflow = readFileSync(files.deployWorkflow, 'utf8');
   check('the OCI deployment waits for the security job', /'Security scan'/.test(deployWorkflow));
