@@ -168,7 +168,8 @@ function PTOViewModalContent({
               <dd
                 ref={noteContentRef}
                 tabIndex={-1}
-                aria-labelledby="pto-note-label"
+                data-testid="pto-note-content"
+                aria-describedby="pto-note-label"
                 className="max-w-xs rounded-sm text-right text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:text-ink-dark dark:focus-visible:ring-offset-surface-dark"
               >
                 {noteState.status === 'loaded' ? (

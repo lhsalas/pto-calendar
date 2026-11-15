@@ -45,8 +45,12 @@ test('loading an empty PTO note removes the load button for this opening', async
       .click();
     const dialog = page.getByRole('dialog', { name: /pto details/i });
     const loadNote = dialog.getByRole('button', { name: /^load note$/i });
-    const noteContent = dialog.getByRole('definition', { name: 'Note', exact: true });
+    // Native definitions have no accessible name; assert focus on the exact persistent target.
+    const noteContent = dialog.getByTestId('pto-note-content');
     const noNote = dialog.getByText('(no note)', { exact: true });
+    await expect(noteContent).toHaveCount(1);
+    await expect(noteContent).toHaveAttribute('tabindex', '-1');
+    await expect(noteContent).toHaveAccessibleDescription('Note');
     await expect(loadNote).toBeVisible();
     await expect(noNote).toHaveClass(/text-ink-muted\/70/);
 

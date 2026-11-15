@@ -266,7 +266,10 @@ describe('PTOViewModal', () => {
       const requestDetail = vi.spyOn(api, 'apiRequest').mockReturnValue(response.promise);
       renderModal();
       const button = screen.getByRole('button', { name: /load note/i });
-      const noteContent = button.closest('dd')!;
+      const noteContent = screen.getByTestId('pto-note-content');
+      expect(noteContent.tagName).toBe('DD');
+      expect(noteContent).toHaveAccessibleDescription('Note');
+      expect(noteContent).not.toHaveAttribute('aria-labelledby');
       button.focus();
       await user.keyboard('{Enter}');
       expect(screen.getByRole('status')).toHaveTextContent('Loading note…');
@@ -291,7 +294,7 @@ describe('PTOViewModal', () => {
       .mockReturnValueOnce(retry.promise);
     renderModal();
     const button = screen.getByRole('button', { name: /load note/i });
-    const noteContent = button.closest('dd')!;
+    const noteContent = screen.getByTestId('pto-note-content');
     button.focus();
     await user.keyboard('{Enter}');
     expect(noteContent).toHaveFocus();
@@ -320,7 +323,7 @@ describe('PTOViewModal', () => {
       vi.spyOn(api, 'apiRequest').mockReturnValue(response.promise);
       renderModal();
       const button = screen.getByRole('button', { name: /load note/i });
-      const noteContent = button.closest('dd')!;
+      const noteContent = screen.getByTestId('pto-note-content');
       button.focus();
       await user.keyboard('{Enter}');
       expect(noteContent).toHaveFocus();
