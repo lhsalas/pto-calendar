@@ -88,7 +88,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run prisma:generate
-      - run: npx prisma migrate deploy --schema=backend/prisma/schema.prisma
+      - run: npx prisma migrate deploy --config=backend/prisma.config.ts
       - name: Install postgresql-client (for backupRestore roundtrip test)
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: npm run test:integration:coverage -w backend
@@ -286,7 +286,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run prisma:generate
-      - run: npx prisma migrate deploy --schema=backend/prisma/schema.prisma
+      - run: npx prisma migrate deploy --config=backend/prisma.config.ts
       - run: PGPASSWORD=pto psql -h localhost -U pto -d pto_test -c "TRUNCATE pto_requests, audit_logs RESTART IDENTITY CASCADE;"
       - run: npm run db:seed -w backend
       - name: Start backend in the background

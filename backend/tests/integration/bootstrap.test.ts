@@ -39,8 +39,8 @@ const REQUIRED_DB = {
 const SEED_EMAILS = ['lead@example.com', 'dev1@example.com', 'dev2@example.com'];
 
 async function setLeadPassword(email: string, hash: string): Promise<void> {
-  const { PrismaClient } = await import('@prisma/client');
-  const prisma = new PrismaClient();
+  const { createPrismaClient } = await import('../../src/lib/prismaClient.js');
+  const prisma = createPrismaClient(REQUIRED_DB.DATABASE_URL);
   try {
     await prisma.user.update({
       where: { email },
@@ -52,8 +52,8 @@ async function setLeadPassword(email: string, hash: string): Promise<void> {
 }
 
 async function deleteLead(email: string): Promise<void> {
-  const { PrismaClient } = await import('@prisma/client');
-  const prisma = new PrismaClient();
+  const { createPrismaClient } = await import('../../src/lib/prismaClient.js');
+  const prisma = createPrismaClient(REQUIRED_DB.DATABASE_URL);
   try {
     await prisma.user.deleteMany({ where: { email: { notIn: SEED_EMAILS } } });
     void email;

@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../../src/lib/prismaClient.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SEED_HOLIDAYS_PATH = path.resolve(here, '..', '..', 'prisma', 'seedHolidays.ts');
@@ -37,7 +37,9 @@ const REQUIRED_DB = {
   LEAD_EMAIL,
 };
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient(
+  process.env.DATABASE_URL ?? 'postgresql://pto:pto@localhost:5432/pto_test?schema=public',
+);
 
 async function createLead(): Promise<void> {
   await prisma.user.create({

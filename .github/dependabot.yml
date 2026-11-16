@@ -46,16 +46,6 @@ updates:
       - dependency-name: typescript
         versions:
           - '>=7'
-      # Prisma 7 moves the connection URL out of the schema into
-      # prisma.config.ts, so the schema, the client and the migration
-      # scripts all change. Remove this rule when the Prisma 7 migration is
-      # planned.
-      - dependency-name: prisma
-        update-types:
-          - version-update:semver-major
-      - dependency-name: '@prisma/client'
-        update-types:
-          - version-update:semver-major
       # ESLint 10 needs eslint-plugin-react-hooks 7, whose recommended
       # config adds the React Compiler rules and the current code does not
       # satisfy them yet. Remove this rule when the React Hooks rules are

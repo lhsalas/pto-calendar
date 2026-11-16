@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { z } from 'zod';
-import { PrismaClient, Role } from '@prisma/client';
+import { Role } from '@prisma/client';
+import { prisma } from '../src/lib/prisma.js';
 import { parseBootstrapArgs } from '../scripts/args.js';
 import {
   createUser,
@@ -36,7 +37,6 @@ async function main(): Promise<void> {
   const args = parseBootstrapArgs(process.argv.slice(2));
   const baseUrl = (args.baseUrl ?? env.APP_PUBLIC_BASE_URL).replace(/\/$/, '');
 
-  const prisma = new PrismaClient();
   try {
     const email = env.LEAD_EMAIL.toLowerCase();
     const existing = await prisma.user.findUnique({ where: { email } });
@@ -84,9 +84,8 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  // eslint-disable-next-line no-console
   console.error('db:bootstrap failed:', err);
-  process.exit(1);
+  process.exitCode = 1;
 });
 
 // hashSetupToken is re-exported from UserService; importing it here keeps

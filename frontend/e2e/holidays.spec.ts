@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../../backend/src/lib/prismaClient';
 
 const SEED = {
   lead: { email: 'lead@example.com', password: 'lead-dev-password' },
@@ -35,7 +35,7 @@ async function loginAsLead(page: Page): Promise<void> {
 async function cleanupCreatedHolidays(): Promise<void> {
   const url =
     process.env.DATABASE_URL ?? 'postgresql://pto:pto@localhost:5432/pto_test?schema=public';
-  const prisma = new PrismaClient({ datasourceUrl: url });
+  const prisma = createPrismaClient(url);
   try {
     await prisma.holiday.deleteMany({
       where: { name: { startsWith: E2E_HOLIDAY_PREFIX } },
