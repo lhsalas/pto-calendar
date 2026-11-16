@@ -37,22 +37,8 @@ updates:
       - dependency-name: typescript
         versions:
           - '>=7'
-      # ESLint 10 needs eslint-plugin-react-hooks 7, whose recommended
-      # config adds the React Compiler rules and the current code does not
-      # satisfy them yet. Remove this rule when the React Hooks rules are
-      # adopted.
-      - dependency-name: eslint
-        update-types:
-          - version-update:semver-major
-      # js-yaml is not imported anywhere in the repository. The version in
-      # the tree comes from ESLint's own legacy configuration support.
+      # Keep the existing major-update policy if js-yaml re-enters the graph.
       - dependency-name: js-yaml
-        update-types:
-          - version-update:semver-major
-      # eslint-plugin-react-hooks 7 adds the React Compiler rules to its
-      # recommended config, and the current components do not satisfy them
-      # yet. Remove this rule when those rules are adopted.
-      - dependency-name: eslint-plugin-react-hooks
         update-types:
           - version-update:semver-major
       # The Node.js type definitions have to match the runtime major, and the
@@ -64,11 +50,6 @@ updates:
       - dependency-name: '@types/node'
         versions:
           - '>=25'
-      # @eslint/js has to match the ESLint major, and ESLint majors are
-      # ignored above. Remove this rule when ESLint 10 is adopted.
-      - dependency-name: '@eslint/js'
-        update-types:
-          - version-update:semver-major
 
   - package-ecosystem: docker
     directory: '/backend'

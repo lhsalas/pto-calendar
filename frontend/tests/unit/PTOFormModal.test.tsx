@@ -50,6 +50,55 @@ async function setDate(
 }
 
 describe('PTOFormModal', () => {
+  it('resets edits on reopen and when the edit source changes', () => {
+    const onClose = vi.fn();
+    const onSubmit = vi.fn();
+    const first = { ...STUB_PTO, note: 'first note' };
+    const second = { ...STUB_PTO, id: 'other', note: 'second note' };
+    const { rerender } = render(
+      <PTOFormModal
+        open
+        initialPto={first}
+        initialNoteLoaded
+        onClose={onClose}
+        onSubmit={onSubmit}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/note \(optional\)/i), { target: { value: 'draft' } });
+    rerender(
+      <PTOFormModal
+        open={false}
+        initialPto={first}
+        initialNoteLoaded
+        onClose={onClose}
+        onSubmit={onSubmit}
+      />,
+    );
+    rerender(
+      <PTOFormModal
+        open
+        initialPto={first}
+        initialNoteLoaded
+        onClose={onClose}
+        onSubmit={onSubmit}
+      />,
+    );
+    expect(screen.getByLabelText(/note \(optional\)/i)).toHaveValue('first note');
+    fireEvent.change(screen.getByLabelText(/note \(optional\)/i), {
+      target: { value: 'new draft' },
+    });
+    rerender(
+      <PTOFormModal
+        open
+        initialPto={second}
+        initialNoteLoaded
+        onClose={onClose}
+        onSubmit={onSubmit}
+      />,
+    );
+    expect(screen.getByLabelText(/note \(optional\)/i)).toHaveValue('second note');
+  });
+
   it.each(['programmatic', 'keyboard'])(
     'rejects an unknown/redacted edit source on %s submit',
     async (action) => {

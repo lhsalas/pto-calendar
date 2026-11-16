@@ -64,7 +64,12 @@ tracked in #270; no thresholds, exclusions or tests were weakened.
 
 The test toolchain is pinned to a supported, patched line: `vitest` and
 `@vitest/coverage-v8` are on the matching 5.1.x line, `vite` is on the patched 8.3.x
-line, and `concurrently`, `lint-staged` and `js-yaml` are on patched releases.
+line, and `concurrently` and `lint-staged` are on patched releases.
+
+ESLint 10 runs the stable React Hooks 7 recommended rules, including compiler
+diagnostics. The frontend keeps the previous core recommended-rule baseline;
+the three unrelated core additions in ESLint 10 are not enabled by this
+migration. Both workspaces use one ESLint version.
 
 Both workspaces declare TypeScript `~6.0.3`, resolving one 6.0.x compiler.
 This stays inside the existing typescript-eslint 8.72 peer range

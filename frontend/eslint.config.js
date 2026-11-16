@@ -22,6 +22,12 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // Preserve the ESLint 9 core recommended baseline for #232; these
+      // three core rules were added by @eslint/js 10, not Hooks.
+      'no-unassigned-vars': 'off',
+      'no-useless-assignment': 'off',
+      'preserve-caught-error': 'off',
+      'no-shadow-restricted-names': ['error', { reportGlobalThis: false }],
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       '@typescript-eslint/no-unused-vars': [
         'error',
