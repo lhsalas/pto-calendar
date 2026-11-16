@@ -60,6 +60,17 @@ The test toolchain is pinned to a supported, patched line: `vitest` and
 `@vitest/coverage-v8` are on the matching 5.1.x line, `vite` is on the patched 8.3.x
 line, and `concurrently`, `lint-staged` and `js-yaml` are on patched releases.
 
+Both workspaces declare TypeScript `~6.0.3`, resolving one 6.0.x compiler.
+This stays inside the existing typescript-eslint 8.72 peer range
+(`>=4.8.4 <6.1.0`); TypeScript 7 remains blocked by Dependabot's `>=7`
+ignore rule. Keep the strict compiler settings, NodeNext/backend and
+Bundler/frontend module resolution, explicit global types, and backend build
+`rootDir` unchanged. Do not suppress migration errors with `ignoreDeprecations`
+or broaden `skipLibCheck`; the matcher declaration regression below must also
+typecheck with `skipLibCheck: false`. See the
+[TypeScript 6.0 release notes](https://www.typescriptlang.org/docs/handbook/release-notes/typescript-6-0.html)
+for the changed compiler defaults.
+
 Both the root and each workspace declare the runner and coverage provider.
 Keep their versions aligned: `npm ls vitest @vitest/coverage-v8` must show a
 single resolved version of each, with exactly matching runner/provider versions.
@@ -233,7 +244,7 @@ unhandled API rejection and override reset; calendar tests retain the 42-cell
 render and PTO/holiday navigation-range assertions.
 
 The installed MSW 3.0.6 metadata requires Node >=22.12 and optional TypeScript
->=5.9/Vite >=6 peers, met by Node 24.22.3, TypeScript 5.9.3 and Vite 8.3.4.
+>=5.9/Vite >=6 peers, met by Node 24.22.3, TypeScript 6.0.3 and Vite 8.3.4.
 Vitest's 5.1.0 mocker accepts MSW `^2.4.9 || ^3.0.0`; React remains 18.
 Root `http`/`HttpResponse` exports are still present in published 3.0.6, so this
 migration preserves those imports and existing handler bodies/set. No Vite
