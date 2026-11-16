@@ -94,7 +94,7 @@ export function PTOFormModal({
         startDate,
         endDate,
         ...(isSingleDay ? { dayPart } : {}),
-        ...(note.length > 0 ? { note } : {}),
+        ...(initialPto || note.length > 0 ? { note } : {}),
       };
       await onSubmit(payload);
     } catch (err) {

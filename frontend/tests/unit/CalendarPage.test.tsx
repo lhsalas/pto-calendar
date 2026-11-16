@@ -364,7 +364,7 @@ describe('CalendarPage', () => {
     });
   });
 
-  it('opens the edit form when Edit is clicked in the view modal', async () => {
+  it('opens the edit form with the authorized detail note when Edit is clicked', async () => {
     const today = firstWeekdayInCurrentMonth();
     const localPto = { ...STUB_PTO, startDate: today, endDate: today };
     server.use(
@@ -396,6 +396,7 @@ describe('CalendarPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/edit pto/i)).toBeInTheDocument();
     });
+    expect(screen.getByLabelText(/note/i)).toHaveValue('Doctor');
   });
 
   it('deletes a PTO and shows the success toast', async () => {

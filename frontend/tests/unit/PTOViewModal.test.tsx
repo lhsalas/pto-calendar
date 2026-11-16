@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { StrictMode } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -76,6 +77,7 @@ describe('PTOViewModal', () => {
 
   it('never loads a note for a member who cannot modify the PTO', async () => {
     const user = userEvent.setup();
+    const onEdit = vi.fn();
     const requestDetail = vi.fn(() => HttpResponse.json(PTO_DETAIL));
     server.use(http.get('/pto/:id', requestDetail));
     const otherMember = {
@@ -88,6 +90,7 @@ describe('PTOViewModal', () => {
     renderModal({
       pto: { ...STUB_PTO, user: { ...STUB_PTO.user, id: 'not-this-user' } },
       currentUser: otherMember,
+      onEdit,
     });
     expect(screen.queryByRole('button', { name: /edit/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
@@ -99,6 +102,7 @@ describe('PTOViewModal', () => {
     await user.click(screen.getByText('Note'));
     await user.click(screen.getByRole('button', { name: /^close$/i }));
     expect(requestDetail).not.toHaveBeenCalled();
+    expect(onEdit).not.toHaveBeenCalled();
   });
 
   it.each(['team_lead', 'admin'] as const)(
@@ -121,12 +125,233 @@ describe('PTOViewModal', () => {
     },
   );
 
-  it('calls onEdit when Edit is clicked', async () => {
+  it.each([
+    { role: 'member' as const, id: STUB_USER.id },
+    { role: 'team_lead' as const, id: 'other-lead-id' },
+    { role: 'admin' as const, id: 'admin-id' },
+  ])('loads the authorized detail note before editing as $role', async ({ role, id }) => {
     const user = userEvent.setup();
+    const response = deferred<PTO>();
+    const requestDetail = vi.spyOn(api, 'apiRequest').mockReturnValue(response.promise);
+    const onEdit = vi.fn();
+    renderModal({ onEdit, currentUser: { ...STUB_USER, id, role } });
+    const editButton = screen.getByRole('button', { name: /^edit$/i });
+    editButton.focus();
+    await user.keyboard('{Enter}');
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(requestDetail).toHaveBeenCalledExactlyOnceWith(`/pto/${STUB_PTO.id}`);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading note…');
+    expect(editButton).toHaveAttribute('aria-disabled', 'true');
+    expect(editButton).toHaveFocus();
+
+    await act(async () => response.resolve({ ...PTO_DETAIL, note: 'Doctor' }));
+    expect(onEdit).toHaveBeenCalledExactlyOnceWith({ ...STUB_PTO, note: 'Doctor' });
+  });
+
+  it.each([null, 'Loaded private note'])(
+    'hands off the cached note %s without fetching again',
+    async (note) => {
+      const user = userEvent.setup();
+      const requestDetail = vi.spyOn(api, 'apiRequest').mockResolvedValue({ ...PTO_DETAIL, note });
+      const onEdit = vi.fn();
+      renderModal({ onEdit });
+      await user.click(screen.getByRole('button', { name: /load note/i }));
+      await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+      expect(screen.queryByRole('button', { name: /load note/i })).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /^edit$/i }));
+      expect(onEdit).toHaveBeenCalledExactlyOnceWith({ ...STUB_PTO, note });
+      expect(requestDetail).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('hands off note text already supplied to the modal without a detail request', async () => {
+    const user = userEvent.setup();
+    const requestDetail = vi.spyOn(api, 'apiRequest');
+    const onEdit = vi.fn();
+    const pto = { ...STUB_PTO, note: 'Known private note' };
+    renderModal({ pto, onEdit });
+    await user.click(screen.getByRole('button', { name: /^edit$/i }));
+    expect(onEdit).toHaveBeenCalledExactlyOnceWith(pto);
+    expect(requestDetail).not.toHaveBeenCalled();
+  });
+
+  it('joins an in-flight note load and deduplicates rapid edit requests', async () => {
+    const user = userEvent.setup();
+    const response = deferred<PTO>();
+    const requestDetail = vi.spyOn(api, 'apiRequest').mockReturnValue(response.promise);
     const onEdit = vi.fn();
     renderModal({ onEdit });
-    await user.click(screen.getByRole('button', { name: /edit/i }));
-    expect(onEdit).toHaveBeenCalledWith(STUB_PTO);
+    await user.click(screen.getByRole('button', { name: /load note/i }));
+    const editButton = screen.getByRole('button', { name: /^edit$/i });
+    act(() => {
+      editButton.click();
+      editButton.click();
+    });
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(requestDetail).toHaveBeenCalledTimes(1);
+
+    await act(async () => response.resolve({ ...PTO_DETAIL, note: 'Shared detail note' }));
+    expect(onEdit).toHaveBeenCalledExactlyOnceWith({ ...STUB_PTO, note: 'Shared detail note' });
+    expect(requestDetail).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps failed edit preparation closed, focused, and retryable without a blank fallback', async () => {
+    const user = userEvent.setup();
+    const response = deferred<PTO>();
+    const retry = deferred<PTO>();
+    const requestDetail = vi
+      .spyOn(api, 'apiRequest')
+      .mockReturnValueOnce(response.promise)
+      .mockReturnValueOnce(retry.promise);
+    const onEdit = vi.fn();
+    renderModal({ onEdit });
+    const editButton = screen.getByRole('button', { name: /^edit$/i });
+    await user.click(editButton);
+    await act(async () => {
+      response.reject(new Error('Cannot load the private note'));
+      await response.promise.catch(() => undefined);
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('Cannot load the private note');
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(editButton).toHaveTextContent('Edit');
+    expect(editButton).toHaveAttribute('aria-disabled', 'false');
+    expect(editButton).toHaveFocus();
+    expect(screen.getByRole('button', { name: /load note/i })).toBeInTheDocument();
+
+    await user.keyboard('{Enter}');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(onEdit).not.toHaveBeenCalled();
+    await act(async () => retry.resolve({ ...PTO_DETAIL, note: 'Preserved after retry' }));
+    expect(onEdit).toHaveBeenCalledExactlyOnceWith({ ...STUB_PTO, note: 'Preserved after retry' });
+    expect(requestDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not treat a missing detail note as a known empty note', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(api, 'apiRequest').mockResolvedValueOnce({ ...PTO_DETAIL, note: undefined });
+    const onEdit = vi.fn();
+    renderModal({ onEdit });
+    await user.click(screen.getByRole('button', { name: /^edit$/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load PTO details.');
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /^edit$/i })).toHaveAttribute(
+      'aria-disabled',
+      'false',
+    );
+  });
+
+  it.each(['Close', 'Dismiss', 'backdrop', 'Escape'])(
+    'cancels a pending edit handoff on %s even before the parent unmounts',
+    async (action) => {
+      const user = userEvent.setup();
+      const response = deferred<PTO>();
+      vi.spyOn(api, 'apiRequest').mockReturnValue(response.promise);
+      const onEdit = vi.fn();
+      const onClose = vi.fn();
+      renderModal({ onEdit, onClose });
+      await user.click(screen.getByRole('button', { name: /^edit$/i }));
+      if (action === 'Escape') await user.keyboard('{Escape}');
+      else if (action === 'backdrop') await user.click(screen.getByRole('dialog'));
+      else await user.click(screen.getByRole('button', { name: action }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+      await act(async () => response.resolve({ ...PTO_DETAIL, note: 'Late private note' }));
+      expect(onEdit).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not reuse a pending edit from a previous opening of the same PTO', async () => {
+    const user = userEvent.setup();
+    const oldResponse = deferred<PTO>();
+    const newResponse = deferred<PTO>();
+    const requestDetail = vi
+      .spyOn(api, 'apiRequest')
+      .mockReturnValueOnce(oldResponse.promise)
+      .mockReturnValueOnce(newResponse.promise);
+    const oldEdit = vi.fn();
+    const newEdit = vi.fn();
+    const { unmount } = renderModal({ onEdit: oldEdit });
+    await user.click(screen.getByRole('button', { name: /^edit$/i }));
+    unmount();
+    renderModal({ onEdit: newEdit });
+    await user.click(screen.getByRole('button', { name: /^edit$/i }));
+    expect(requestDetail).toHaveBeenCalledTimes(2);
+    await act(async () => oldResponse.resolve({ ...PTO_DETAIL, note: 'Old note' }));
+    expect(oldEdit).not.toHaveBeenCalled();
+    expect(newEdit).not.toHaveBeenCalled();
+    await act(async () => newResponse.resolve({ ...PTO_DETAIL, note: 'Current note' }));
+    expect(newEdit).toHaveBeenCalledExactlyOnceWith({ ...STUB_PTO, note: 'Current note' });
+  });
+
+  it.each(['success', 'failure'])(
+    'ignores an old edit preparation %s after the PTO changes',
+    async (outcome) => {
+      const user = userEvent.setup();
+      const oldResponse = deferred<PTO>();
+      const otherPto = { ...STUB_PTO, id: 'other-pto-id' };
+      vi.spyOn(api, 'apiRequest')
+        .mockReturnValueOnce(oldResponse.promise)
+        .mockResolvedValueOnce({ ...PTO_DETAIL, id: otherPto.id, note: 'Other note' });
+      const onEdit = vi.fn();
+      const { rerenderModal } = renderModal({ onEdit });
+      await user.click(screen.getByRole('button', { name: /^edit$/i }));
+      rerenderModal({ pto: otherPto });
+      await user.click(screen.getByRole('button', { name: /^edit$/i }));
+      expect(onEdit).toHaveBeenCalledExactlyOnceWith({ ...otherPto, note: 'Other note' });
+      await act(async () => {
+        if (outcome === 'success') oldResponse.resolve({ ...PTO_DETAIL, note: 'Old note' });
+        else oldResponse.reject(new Error('Old detail error'));
+        await oldResponse.promise.catch(() => undefined);
+      });
+      expect(onEdit).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    },
+  );
+
+  it.each([
+    { id: STUB_USER.id, role: 'member' as const },
+    { id: 'different-viewer-id', role: 'team_lead' as const },
+  ])(
+    'discards an old private-note handoff when the viewer changes to $id/$role',
+    async (currentUser) => {
+      const user = userEvent.setup();
+      const response = deferred<PTO>();
+      vi.spyOn(api, 'apiRequest').mockReturnValue(response.promise);
+      const onEdit = vi.fn();
+      const { rerenderModal } = renderModal({
+        onEdit,
+        pto: { ...STUB_PTO, user: { ...STUB_PTO.user, id: 'other-owner-id' } },
+      });
+      await user.click(screen.getByRole('button', { name: /^edit$/i }));
+      rerenderModal({
+        pto: { ...STUB_PTO, user: { ...STUB_PTO.user, id: 'other-owner-id' } },
+        currentUser: { ...STUB_USER, ...currentUser },
+      });
+      await act(async () =>
+        response.resolve({ ...PTO_DETAIL, note: 'Previous viewer private note' }),
+      );
+      expect(onEdit).not.toHaveBeenCalled();
+      expect(screen.queryByText('Previous viewer private note')).not.toBeInTheDocument();
+      expect(screen.getByText('(no note)')).toHaveClass('text-ink-muted/70');
+    },
+  );
+
+  it('prepares the edit note under StrictMode lifecycle replay', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(api, 'apiRequest').mockResolvedValue({ ...PTO_DETAIL, note: 'Doctor' });
+    const onEdit = vi.fn();
+    render(
+      <StrictMode>
+        <PTOViewModal
+          pto={STUB_PTO}
+          currentUser={STUB_USER}
+          onClose={vi.fn()}
+          onEdit={onEdit}
+          onDelete={vi.fn(async () => {})}
+        />
+      </StrictMode>,
+    );
+    await user.click(screen.getByRole('button', { name: /^edit$/i }));
+    expect(onEdit).toHaveBeenCalledExactlyOnceWith({ ...STUB_PTO, note: 'Doctor' });
   });
 
   it('asks for confirmation before calling onDelete', async () => {

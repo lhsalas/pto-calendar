@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { DayPart, PTO, PTOWithUser, User } from '../../types/api';
 import { canModifyPto } from '../../lib/permissions';
@@ -15,8 +15,8 @@ export interface PTOViewModalProps {
   onDelete: (pto: PTOWithUser) => Promise<void>;
 }
 
-type NoteState =
-  { status: 'unknown' } | { status: 'loading' } | { status: 'loaded'; note: string | null };
+type LoadedNote = { status: 'loaded'; note: string | null };
+type NoteState = { status: 'unknown' } | { status: 'loading' } | LoadedNote;
 
 function dayPartLabel(dp: DayPart): string {
   if (dp === 'morning') return 'Morning (AM)';
@@ -25,8 +25,13 @@ function dayPartLabel(dp: DayPart): string {
 }
 
 export function PTOViewModal(props: PTOViewModalProps): JSX.Element {
-  // A different PTO starts a new modal session, isolated from any pending load.
-  return <PTOViewModalContent key={props.pto.id} {...props} />;
+  // A different PTO or viewer starts a session isolated from pending private-note work.
+  return (
+    <PTOViewModalContent
+      key={`${props.pto.id}:${props.currentUser.id}:${props.currentUser.role}`}
+      {...props}
+    />
+  );
 }
 
 function PTOViewModalContent({
@@ -38,11 +43,24 @@ function PTOViewModalContent({
 }: PTOViewModalProps): JSX.Element {
   const [confirming, setConfirming] = useState<boolean>(false);
   const [busy, setBusy] = useState<boolean>(false);
+  const [openingEdit, setOpeningEdit] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [noteState, setNoteState] = useState<NoteState>(() =>
-    pto.note === null ? { status: 'unknown' } : { status: 'loaded', note: pto.note },
+    typeof pto.note === 'string' ? { status: 'loaded', note: pto.note } : { status: 'unknown' },
   );
-  const noteRequest = useRef<Promise<void> | null>(null);
+  const noteRequest = useRef<Promise<LoadedNote | undefined> | null>(null);
+  const editStarted = useRef(false);
+  const sessionActive = useRef(true);
+  useLayoutEffect(() => {
+    sessionActive.current = true;
+    return () => {
+      sessionActive.current = false;
+    };
+  }, []);
+  const closeModal = useCallback((): void => {
+    sessionActive.current = false;
+    onClose();
+  }, [onClose]);
   const noteContentRef = useRef<HTMLElement>(null);
   const focusRetryButton = useCallback((button: HTMLButtonElement | null): void => {
     // Restore retry focus only if the user has stayed on the note while waiting.
@@ -54,21 +72,30 @@ function PTOViewModalContent({
     { userId: pto.user.id },
   );
 
-  function loadDetail(): Promise<void> {
-    if (!canModify || noteState.status === 'loaded') return Promise.resolve();
+  function loadDetail(): Promise<LoadedNote | undefined> {
+    if (!canModify || !sessionActive.current) return Promise.resolve(undefined);
+    if (noteState.status === 'loaded') return Promise.resolve(noteState);
     if (noteRequest.current) return noteRequest.current;
 
     setError(null);
     setNoteState({ status: 'loading' });
-    const request = (async (): Promise<void> => {
+    const request = (async (): Promise<LoadedNote | undefined> => {
       try {
         const detail = await apiRequest<PTO>(`/pto/${encodeURIComponent(pto.id)}`);
-        setNoteState({ status: 'loaded', note: detail.note });
+        if (detail.note !== null && typeof detail.note !== 'string') {
+          throw new Error('Could not load PTO details.');
+        }
+        const loaded: LoadedNote = { status: 'loaded', note: detail.note };
+        if (sessionActive.current) setNoteState(loaded);
+        return loaded;
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not load PTO details.');
-        setNoteState({ status: 'unknown' });
+        if (sessionActive.current) {
+          setError(err instanceof Error ? err.message : 'Could not load PTO details.');
+          setNoteState({ status: 'unknown' });
+        }
         // Only failed loads may be retried in this modal session.
         noteRequest.current = null;
+        return undefined;
       }
     })();
     noteRequest.current = request;
@@ -79,6 +106,20 @@ function PTOViewModalContent({
     // This element persists when the focused button is replaced by loading/result text.
     if (document.activeElement === event.currentTarget) noteContentRef.current?.focus();
     void loadDetail();
+  }
+
+  async function handleEdit(): Promise<void> {
+    if (!canModify || !sessionActive.current || editStarted.current) return;
+    editStarted.current = true;
+    setOpeningEdit(true);
+    const loaded = await loadDetail();
+    if (!sessionActive.current) return;
+    if (!loaded) {
+      editStarted.current = false;
+      setOpeningEdit(false);
+      return;
+    }
+    onEdit({ ...pto, note: loaded.note });
   }
 
   async function handleDelete(): Promise<void> {
@@ -92,10 +133,10 @@ function PTOViewModalContent({
     }
   }
 
-  const cardRef = useModalA11y(true, onClose);
+  const cardRef = useModalA11y(true, closeModal);
 
   function handleBackdropClick(event: React.MouseEvent<HTMLDivElement>): void {
-    if (event.target === event.currentTarget) onClose();
+    if (event.target === event.currentTarget) closeModal();
   }
 
   return (
@@ -129,7 +170,7 @@ function PTOViewModalContent({
             </h2>
             <button
               type="button"
-              onClick={onClose}
+              onClick={closeModal}
               aria-label="Dismiss"
               className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:text-ink-muted-dark dark:hover:bg-surface-dark-2 dark:hover:text-ink-dark dark:focus-visible:ring-offset-surface-dark"
             >
@@ -231,24 +272,30 @@ function PTOViewModalContent({
             <div className="flex justify-end gap-2">
               <button
                 type="button"
-                onClick={onClose}
+                onClick={closeModal}
                 className="min-h-11 rounded border border-border px-3 py-2 text-sm text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
               >
                 Close
               </button>
               {canModify ? (
                 <>
+                  {/* Keep focus during preparation; handleEdit guards repeat activation. */}
                   <button
                     type="button"
-                    onClick={() => onEdit(pto)}
-                    className="min-h-11 rounded bg-accent px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:focus-visible:ring-offset-surface-dark"
+                    onClick={() => void handleEdit()}
+                    aria-disabled={openingEdit}
+                    aria-busy={openingEdit}
+                    className="min-h-11 rounded bg-accent px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface aria-disabled:opacity-60 dark:focus-visible:ring-offset-surface-dark"
                   >
-                    Edit
+                    {openingEdit ? 'Opening edit…' : 'Edit'}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setConfirming(true)}
-                    className="min-h-11 rounded bg-danger px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:opacity-90"
+                    onClick={() => {
+                      if (!editStarted.current) setConfirming(true);
+                    }}
+                    disabled={openingEdit}
+                    className="min-h-11 rounded bg-danger px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:opacity-90 disabled:opacity-60"
                   >
                     Delete
                   </button>

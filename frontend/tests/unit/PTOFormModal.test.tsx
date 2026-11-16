@@ -173,6 +173,43 @@ describe('PTOFormModal', () => {
     });
   });
 
+  it.each(['day part', 'dates'])(
+    'preserves the loaded note in a %s-only edit payload',
+    async (field) => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      renderModal({ initialPto: { ...STUB_PTO, note: 'Doctor' }, onSubmit });
+      expect(screen.getByLabelText(/note/i)).toHaveValue('Doctor');
+      if (field === 'day part')
+        await user.selectOptions(screen.getByLabelText(/day part/i), 'evening');
+      else await setDate(/start date/i, '2026-05-12', user);
+      await user.click(screen.getByRole('button', { name: /save pto/i }));
+      expect(onSubmit).toHaveBeenCalledExactlyOnceWith({
+        startDate: field === 'dates' ? '2026-05-12' : STUB_PTO.startDate,
+        endDate: field === 'dates' ? '2026-05-12' : STUB_PTO.endDate,
+        dayPart: field === 'day part' ? 'evening' : STUB_PTO.dayPart,
+        note: 'Doctor',
+      });
+    },
+  );
+
+  it.each([null, 'Doctor'])(
+    'always sends an explicit empty note on update after initial note %s',
+    async (initialNote) => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      renderModal({ initialPto: { ...STUB_PTO, note: initialNote }, onSubmit });
+      await user.clear(screen.getByLabelText(/note/i));
+      await user.click(screen.getByRole('button', { name: /save pto/i }));
+      expect(onSubmit).toHaveBeenCalledExactlyOnceWith({
+        startDate: STUB_PTO.startDate,
+        endDate: STUB_PTO.endDate,
+        dayPart: STUB_PTO.dayPart,
+        note: '',
+      });
+    },
+  );
+
   it('surfaces server errors via the alert', async () => {
     const user = userEvent.setup();
     server.use(
