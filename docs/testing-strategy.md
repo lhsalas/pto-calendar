@@ -39,7 +39,22 @@ This document defines the testing and automation strategy for the PTO calendar M
 
 ## 5. Coverage Targets
 
-Coverage is enforced on PRs via CI. Thresholds are set in `vitest.config.ts`.
+Coverage targets are declared in `vitest.config.ts`. CI currently executes backend
+integration and frontend coverage, but its backend unit job runs `npm test -w backend`
+**without coverage**, so declared backend unit thresholds are not enforced there.
+[#270](https://github.com/lhsalas/pto-calendar/issues/270) owns closing this gap;
+the configured targets below remain unchanged.
+
+**Known baseline diagnostic (2026-11-15):** the coordinator reproduced
+`npm run test:coverage -w backend` failure on unchanged master `156cc6f` and the
+documentation-only #246 candidate, with no backend/frontend/package/CI source
+diffs. All **269 unit tests pass**, but authorization has **66.66% lines / 60%
+branches**, user services **85.24% lines / 87.5% branches**, and `requireAuth`
+**90% branches**, below declared 100% targets (other metrics also fail).
+This is an additional diagnostic failure, **not a #235/#246 regression** or proof
+that existing CI runs backend unit coverage. Passing integration/aggregate coverage
+does not substitute for these per-path targets. Evidence and remediation are
+tracked in #270; no thresholds, exclusions or tests were weakened.
 
 The test toolchain is pinned to a supported, patched line: `vitest` and
 `@vitest/coverage-v8` are on the 4.1.x line, `vite` is on the patched 7.3.x
@@ -84,7 +99,8 @@ Note: `lib/rateLimit.ts` is excluded from coverage entirely (factory wrapper aro
 
 > **Coverage partition (single source of truth).** Each backend source file is gated by exactly one coverage config. Service-layer files (`lib/lifecycle.ts`, `services/pto/**`, `services/audit/**`, `services/calendar/**`) are measured by the **unit** run (`backend/vitest.config.ts`) and excluded from the integration config because their branches (SIGTERM/SIGINT handlers, Zod validation, audit `listForEntity`, calendar SQL) are either unsafe to exercise via real HTTP requests or duplicated by the unit suite. HTTP routes + `lib/rateLimit.ts` are measured by the **integration** run (`backend/vitest.integration.config.ts`) and excluded from the unit config because they require a live Prisma + Express stack to exercise meaningfully. The PR-comment coverage summary aggregates only the integration partition; per-file thresholds inside each config are the real gate.
 
-A PR fails if coverage on a **blocking** path drops below its threshold.
+A coverage run fails if a **blocking** path falls below its threshold; the backend
+unit CI enforcement gap above remains explicitly open until #270 is delivered.
 
 ## 6. Backend Test Conventions
 
@@ -195,6 +211,16 @@ Additional shipped journeys (frontend enhancements #18–#26):
 - MSW handlers mirror `openapi.yaml` response shapes.
 - Reuse handlers between component tests and Storybook (post-MVP).
 
+### 9.4 Parallel issue work: exclusive disposable-test lease
+
+For the [approved #246 execution plan](agent-access-delivery-plan.md), worktrees
+do **not** isolate DBs, ports, Compose container names or volumes. Shared-service
+integration/E2E/Docker gates and any migrations/truncation/teardown need an
+exclusive coordinator-issued disposable-test lease: holder, commit/worktree,
+verified non-production DB/service targets, reset scope and cleanup/release.
+Never infer the target from a default `.env` or a test script's DB fallback.
+Static/unit checks without shared services may run in isolated worktrees.
+
 ## 10. CI/CD Automation (GitHub Actions)
 
 ### 10.1 Pipeline layout
@@ -275,8 +301,9 @@ PostgreSQL backup roundtrip integration test remains the real database check.
 
 ### 10.4 Required status checks
 `lint`, `typecheck`, `test-backend-unit`, `test-backend-integration`,
-`test-frontend`, `deployment-config`, `security`, `e2e`, `docker-smoke`, and
-`coverage-gate` must all pass before merge to `master`. The OCI deployment
+`test-frontend`, `build`, `deployment-config`, `security`, `e2e`, `docker-smoke`, and
+`coverage-gate` must all pass before merge to `master` — **all current 11 checks**,
+not the stale count of eight in older instructions. The OCI deployment
 workflow lists the same job names, so a release cannot be tagged around a
 failing check.
 
@@ -457,3 +484,36 @@ assessment, an owner and an expiry date.
 ## 16. Open Decisions
 
 - None for MVP. All tooling choices above are confirmed.
+
+## 17. Planned agent-access acceptance (#246)
+
+**#246 integration checkpoint (2026-11-15):** master `2a4ed0f` includes #273
+via PR #276, #248 via PR #274 (Node 24.22.3), and #235 via PR #272.
+The [landed policy/runbook](image-risk-acceptance.md) and note regressions are
+retained unchanged. See the
+[dated owner decision and baseline sequence](agent-access-delivery-plan.md#baseline-repair-and-every-pre-existing-issue)
+for orchestration while #247 stays open/high priority.
+Accepted risk is not a raw-clean scan; all current CI, npm audit and coverage
+requirements still apply. The integrated #246 candidate needs fresh validation;
+policy delivery did not ship token/API/CLI/MCP features.
+
+The [delivery contract and release gates](agent-access-delivery-plan.md) are
+approved requirements, **not tests implemented or passed by this documentation**.
+Keep existing per-path floors and backend integration All files lines >=90%;
+new authentication/authorization/scope/validation code requires 100% unit coverage
+across metrics. Other new agent packages target >=90% lines/statements/functions
+and >=80% branches; wire each workspace into existing CI/security gates.
+
+Revalidate #270 after #227, deliver it after all 11 original backlog issues and
+before #249/#251. Future token/auth verification must include
+`npm run test:coverage -w backend` with fake test-only environment values (no DB
+or services), not only passing unit tests; #270 must first restore those targets.
+
+Owning stories add expiry/cap/reset/revoke and role/scope/owner/note matrices,
+cookie/PAT/CSRF isolation, atomic audit/overlap/idempotency, complete queries,
+412 stale/428 missing preconditions versus 409 business conflicts, secret-safe
+adapter process tests, clean packed installs and actual OpenCode V2/Claude
+Code/VS Code Copilot approve/reject evidence. Preserve #235–#237 browser note
+regressions. Manual permission checks supplement automation; plausible chat output
+or tool annotations are not consent evidence. #269 owns dated staging go/no-go;
+production rollout/mutations still require explicit maintainer approval.
