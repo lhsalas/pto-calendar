@@ -28,6 +28,7 @@ test-results/
 .pnpm-store/
 
 /backend/coverage/
+/backend/coverage-unit/
 /backend/dist/
 /frontend/coverage/
 /frontend/dist/

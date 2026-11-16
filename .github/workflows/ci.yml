@@ -58,7 +58,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run prisma:generate
-      - run: npm run test -w backend
+      - run: npm run test:coverage -w backend
+      - name: Verify backend unit reports
+        run: test -f backend/coverage-unit/lcov.info && test -f backend/coverage-unit/coverage-summary.json
+      - name: Upload backend unit coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-unit-coverage
+          path: backend/coverage-unit
+          if-no-files-found: error
 
   test-backend-integration:
     name: Backend integration tests

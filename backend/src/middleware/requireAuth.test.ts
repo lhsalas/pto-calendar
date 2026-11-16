@@ -128,6 +128,35 @@ describe('requireAuth', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it('rejects if the user disappears during the session-version lookup', async () => {
+    findUniqueMock.mockResolvedValueOnce({ id: 'u1', role: 'member' }).mockResolvedValueOnce(null);
+    const req = {
+      session: { user: { id: 'u1', role: 'member', sessionVersion: 0 } },
+    } as unknown as Request;
+    const res = makeRes();
+    const next = vi.fn() as unknown as NextFunction;
+    await requireAuth(req, res, next);
+    expect(req.session).toBeNull();
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('does not write back to a session removed while lookups are in flight', async () => {
+    const session = { user: { id: 'u1', role: 'member', sessionVersion: 0 } };
+    const req = { session } as unknown as Request;
+    findUniqueMock
+      .mockResolvedValueOnce({ id: 'u1', role: 'member' })
+      .mockImplementationOnce(() => {
+        req.session = null;
+        return Promise.resolve({ sessionVersion: 0 });
+      });
+    const next = vi.fn() as unknown as NextFunction;
+    await requireAuth(req, makeRes(), next);
+    expect(req.session).toBeNull();
+    expect(req.user).toEqual({ id: 'u1', role: 'member', sessionVersion: 0 });
+    expect(next).toHaveBeenCalledWith();
+  });
+
   it('reflects a role change in req.user after cache expiry', async () => {
     process.env.AUTH_USER_CACHE_TTL_MS = '1';
     const { resetEnvForTests, loadEnv } = await import('../config/env.js');

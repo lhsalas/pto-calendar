@@ -45,11 +45,13 @@ Mode, including cleanup of timers on unmount.
 
 ## 5. Coverage Targets
 
-Coverage targets are declared in `vitest.config.ts`. CI currently executes backend
-integration and frontend coverage, but its backend unit job runs `npm test -w backend`
-**without coverage**, so declared backend unit thresholds are not enforced there.
-[#270](https://github.com/lhsalas/pto-calendar/issues/270) owns closing this gap;
-the configured targets below remain unchanged.
+Coverage targets are declared in `vitest.config.ts`. The backend unit CI job runs
+`npm run test:coverage -w backend` and enforces its configured thresholds. Its
+`backend-unit-coverage` artifact comes from `backend/coverage-unit`, separate
+from integration's `backend-coverage` (`backend/coverage`) and frontend's
+`frontend-coverage`. For local security changes, run that direct unit coverage
+command with a fake test-only environment; a plain `npm test` does not enforce
+the coverage thresholds.
 
 **Known baseline diagnostic (2026-11-15):** the coordinator reproduced
 `npm run test:coverage -w backend` failure on unchanged master `156cc6f` and the
@@ -57,10 +59,9 @@ documentation-only #246 candidate, with no backend/frontend/package/CI source
 diffs. All **269 unit tests pass**, but authorization has **66.66% lines / 60%
 branches**, user services **85.24% lines / 87.5% branches**, and `requireAuth`
 **90% branches**, below declared 100% targets (other metrics also fail).
-This is an additional diagnostic failure, **not a #235/#246 regression** or proof
-that existing CI runs backend unit coverage. Passing integration/aggregate coverage
-does not substitute for these per-path targets. Evidence and remediation are
-tracked in #270; no thresholds, exclusions or tests were weakened.
+This was an additional diagnostic failure, **not a #235/#246 regression**.
+#270 adds behavioral coverage and enables the unit coverage command in CI.
+Passing integration/aggregate coverage does not substitute for unit thresholds.
 
 The test toolchain is pinned to a supported, patched line: `vitest` and
 `@vitest/coverage-v8` are on the matching 5.1.x line, `vite` is on the patched 8.3.x
@@ -119,7 +120,7 @@ non-`Error` fallback by mocking the API boundary, and the `AuthContext` and
 | `src/middleware/requireAuth.ts` | 100% | 100% | 100% | 100% | Auth gate |
 | `src/middleware/cookieSession.ts` | 80% | 80% | 80% | 80% | Cookie-session factory |
 | `src/middleware/errorHandler.ts` | 80% | 80% | 80% | 80% | Centralized error formatter |
-| `src/lib/lifecycle.ts` | 100% | 100% | 100% | 100% | Graceful shutdown (signal handlers + drain + force-exit) |
+| `src/lib/lifecycle.ts` | tracked | tracked | tracked | tracked | Tested directly; no explicit unit threshold is currently configured |
 | `src/services/pto/PTOService.ts` | 90% | 80% | 90% | 90% | CRUD + overlap checks; create/overlap paths have direct unit coverage |
 | `src/services/calendar/CalendarQuery.ts` | 80% | 80% | 80% | 80% | Overlap SQL + expansion |
 | `src/services/audit/AuditLogService.ts` | 80% | 80% | 80% | 80% | Required for audit correctness |
@@ -132,10 +133,12 @@ non-`Error` fallback by mocking the API boundary, and the `AuthContext` and
 command tests that exercise the actual limiter and store without a Redis service.
 These tests do not certify behavior against a real Redis deployment.
 
-> **Coverage partition (single source of truth).** Each backend source file is gated by exactly one coverage config. Service-layer files (`lib/lifecycle.ts`, `services/pto/**`, `services/audit/**`, `services/calendar/**`) are measured by the **unit** run (`backend/vitest.config.ts`) and excluded from the integration config because their branches (SIGTERM/SIGINT handlers, Zod validation, audit `listForEntity`, calendar SQL) are either unsafe to exercise via real HTTP requests or duplicated by the unit suite. HTTP routes + `lib/rateLimit.ts` are measured by the **integration** run (`backend/vitest.integration.config.ts`) and excluded from the unit config because they require a live Prisma + Express stack to exercise meaningfully. The PR-comment coverage summary aggregates only the integration partition; per-file thresholds inside each config are the real gate.
+> **Coverage partition.** Service-layer files (`lib/lifecycle.ts`, `services/pto/**`, `services/audit/**`, `services/calendar/**`) are measured by the **unit** run (`backend/vitest.config.ts`) and excluded from integration. HTTP routes + `lib/rateLimit.ts` are measured by the **integration** run (`backend/vitest.integration.config.ts`) and excluded from unit coverage. The sets are not strictly disjoint: for example, `lib/prismaClient.ts` and holiday services can appear in both reports. The PR-comment backend summary uses integration coverage only; configured path thresholds in each run are separate gates.
 
-A coverage run fails if a **blocking** path falls below its threshold; the backend
-unit CI enforcement gap above remains explicitly open until #270 is delivered.
+A coverage run fails if a **blocking** path falls below its configured threshold.
+The local integration requirement remains All files lines ≥90%; the CI coverage
+summary job currently checks report existence and publishes totals, not that
+aggregate floor. Integration route thresholds remain enforced by its Vitest run.
 
 ## 6. Backend Test Conventions
 
@@ -318,7 +321,7 @@ Jobs (run in order, with `needs:` dependencies):
 |---|---|---|---|---|
 | 1 | `lint` | ubuntu-latest | — | install, eslint, prettier check |
 | 2 | `typecheck` | ubuntu-latest | — | install, `tsc --noEmit` (backend + frontend) |
-| 3 | `test-backend-unit` | ubuntu-latest | — | vitest run backend unit suite |
+| 3 | `test-backend-unit` | ubuntu-latest | — | backend unit suite with coverage and separate unit artifact |
 | 4 | `test-backend-integration` | ubuntu-latest + postgres service | — | vitest run backend integration suite, coverage |
 | 5 | `test-frontend` | ubuntu-latest | — | vitest run frontend, coverage |
 | 6 | `build` | ubuntu-latest | lint, typecheck | build backend + frontend |
@@ -326,7 +329,7 @@ Jobs (run in order, with `needs:` dependencies):
 | 8 | `security` | ubuntu-latest | — | audit the locked npm graphs, scan the pinned production base images for OS and runtime vulnerabilities |
 | 9 | `e2e` | ubuntu-latest + postgres service | build | playwright install, playwright test, upload trace/video on failure |
 | 10 | `docker-smoke` | ubuntu-latest | build | start the all-in-one compose stack, poll `/health`, assert the images run the supported Node.js baseline, login + validate auto-seeded holidays + validate the seed endpoint, tear down with `-v` |
-| 11 | `coverage-gate` | ubuntu-latest | 4, 5 | enforce thresholds; post coverage diff as PR comment |
+| 11 | `coverage-gate` | ubuntu-latest | 3, 4, 5 | check integration/frontend reports exist; post coverage summary as PR comment |
 
 ### 10.1a Node.js runtime baseline
 
@@ -583,10 +586,9 @@ new authentication/authorization/scope/validation code requires 100% unit covera
 across metrics. Other new agent packages target >=90% lines/statements/functions
 and >=80% branches; wire each workspace into existing CI/security gates.
 
-Revalidate #270 after #227, deliver it after all 11 original backlog issues and
-before #249/#251. Future token/auth verification must include
+Deliver #270 after all 11 original backlog issues and before #249/#251. Future token/auth verification must include
 `npm run test:coverage -w backend` with fake test-only environment values (no DB
-or services), not only passing unit tests; #270 must first restore those targets.
+or services), not only passing unit tests; preserve the existing configured targets.
 
 Owning stories add expiry/cap/reset/revoke and role/scope/owner/note matrices,
 cookie/PAT/CSRF isolation, atomic audit/overlap/idempotency, complete queries,
