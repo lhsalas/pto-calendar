@@ -80,6 +80,8 @@ describe('PTO routes', () => {
       expect(res.body).toHaveProperty('id');
       expect(res.body).toHaveProperty('createdAt');
       expect(res.body).toHaveProperty('updatedAt');
+      const stored = await prisma.pTORequest.findUniqueOrThrow({ where: { id: res.body.id } });
+      expect(stored.note).toBe('Doctor');
     });
 
     it('normalizes a multi-day PTO to all_day', async () => {
@@ -93,6 +95,23 @@ describe('PTO routes', () => {
       expect(res.status).toBe(201);
       expect(res.body.dayPart).toBe('all_day');
       expect(res.body.note).toBeNull();
+      const stored = await prisma.pTORequest.findUniqueOrThrow({ where: { id: res.body.id } });
+      expect(stored.note).toBeNull();
+    });
+
+    it('still stores null when creating with an explicit empty note', async () => {
+      const agent = request.agent(app);
+      await login(agent, SEED.dev1.email, SEED.dev1.password);
+      const res = await agent.post('/pto').send({
+        startDate: '2026-05-11',
+        endDate: '2026-05-11',
+        dayPart: 'morning',
+        note: '',
+      });
+      expect(res.status).toBe(201);
+      expect(res.body.note).toBeNull();
+      const stored = await prisma.pTORequest.findUniqueOrThrow({ where: { id: res.body.id } });
+      expect(stored.note).toBeNull();
     });
 
     it('allows multi-day PTO that spans a weekend', async () => {
