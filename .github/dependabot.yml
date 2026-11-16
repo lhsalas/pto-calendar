@@ -44,8 +44,8 @@ updates:
       # rules would run against an unsupported compiler. Remove this rule
       # when typescript-eslint supports TypeScript 7.
       - dependency-name: typescript
-        update-types:
-          - version-update:semver-major
+        versions:
+          - '>=7'
       # Express 5 changes the route parameter types, so the request handlers
       # need source changes. Remove this rule when the Express 5 migration is
       # planned.
