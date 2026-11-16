@@ -29,6 +29,38 @@ describe('CreatePtoSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('preserves the distinction between an absent note and an own undefined note', () => {
+    const dates = { startDate: '2026-05-11', endDate: '2026-05-11' };
+    const omitted = CreatePtoSchema.parse(dates);
+    const explicit = CreatePtoSchema.parse({ ...dates, note: undefined });
+    expect(Object.hasOwn(omitted, 'note')).toBe(false);
+    expect(Object.hasOwn(explicit, 'note')).toBe(true);
+    expect(explicit.note).toBeUndefined();
+  });
+
+  it.each([null, 0, false, [], {}])('rejects a non-string note %j', (note) => {
+    expect(
+      CreatePtoSchema.safeParse({
+        startDate: '2026-05-11',
+        endDate: '2026-05-11',
+        note,
+      }).success,
+    ).toBe(false);
+  });
+
+  it.each([
+    { label: 'empty', note: '' },
+    { label: 'whitespace', note: '  ' },
+    { label: '500-character', note: 'x'.repeat(500) },
+  ])('accepts an $label string note unchanged', ({ note }) => {
+    const result = CreatePtoSchema.parse({
+      startDate: '2026-05-11',
+      endDate: '2026-05-11',
+      note,
+    });
+    expect(result.note).toBe(note);
+  });
+
   it('rejects a date that does not match ISO_DATE format', () => {
     const result = CreatePtoSchema.safeParse({
       startDate: '05/11/2026',
@@ -60,6 +92,10 @@ describe('CreatePtoSchema', () => {
       endDate: '2026-05-11',
     });
     expect(result.success).toBe(false);
+  });
+
+  it('rejects missing endDate', () => {
+    expect(CreatePtoSchema.safeParse({ startDate: '2026-05-11' }).success).toBe(false);
   });
 });
 

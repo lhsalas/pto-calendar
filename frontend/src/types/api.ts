@@ -50,8 +50,8 @@ export interface CreatePTORequest {
 }
 
 export interface UpdatePTORequest {
-  startDate?: string;
-  endDate?: string;
+  startDate: string;
+  endDate: string;
   dayPart?: DayPart;
   note?: string;
 }
