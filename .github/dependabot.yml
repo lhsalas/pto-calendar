@@ -106,11 +106,6 @@ updates:
       - dependency-name: '@eslint/js'
         update-types:
           - version-update:semver-major
-      # MSW 3 removes the onUnhandledRequest setup option the frontend test
-      # setup uses. Remove this rule when the test setup is migrated.
-      - dependency-name: msw
-        update-types:
-          - version-update:semver-major
 
   - package-ecosystem: docker
     directory: '/backend'

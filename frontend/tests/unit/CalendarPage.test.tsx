@@ -225,6 +225,45 @@ describe('CalendarPage', () => {
     });
   });
 
+  it('loads matching PTO and holiday ranges before and after month navigation', async () => {
+    const ranges: Record<string, Array<{ start: string | null; end: string | null }>> = {
+      '/pto': [],
+      '/holidays': [],
+    };
+    const recordRange = ({ request }: { request: Request }): void => {
+      const url = new URL(request.url);
+      ranges[url.pathname]?.push({
+        start: url.searchParams.get('start'),
+        end: url.searchParams.get('end'),
+      });
+    };
+    server.events.on('request:match', recordRange);
+
+    try {
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => {
+        expect(ranges['/pto']).toEqual([{ start: '2026-06-01', end: '2026-07-12' }]);
+        expect(ranges['/holidays']).toEqual([{ start: '2026-06-01', end: '2026-07-12' }]);
+        expect(screen.getAllByTestId(/^day-cell-/)).toHaveLength(42);
+      });
+
+      await user.click(screen.getByRole('button', { name: /^next$/i }));
+      await waitFor(() => {
+        const expectedRanges = [
+          { start: '2026-06-01', end: '2026-07-12' },
+          { start: '2026-06-29', end: '2026-08-09' },
+        ];
+        expect(ranges['/pto']).toEqual(expectedRanges);
+        expect(ranges['/holidays']).toEqual(expectedRanges);
+        expect(screen.getAllByTestId(/^day-cell-/)).toHaveLength(42);
+        expect(screen.getByTestId('header-label')).toHaveTextContent('July 2026');
+      });
+    } finally {
+      server.events.removeListener('request:match', recordRange);
+    }
+  });
+
   it('returns to the current month when the Today button is clicked from another month', async () => {
     server.use(http.get('/pto', () => HttpResponse.json([])));
     const user = userEvent.setup();
