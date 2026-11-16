@@ -26,6 +26,11 @@ source of truth for the container base image, the CI runtime, and the
 `engines.node` floor. `backend/Dockerfile` and `frontend/Dockerfile` reference
 `node:<version>-alpine` by digest.
 
+The [temporary image-risk policy (#273)](image-risk-acceptance.md) expires
+2026-12-15; it is accepted risk, **not remediation**, and #247 remains
+open/high priority. Any replacement digest, including #248's Node patch,
+requires its own scan and explicit policy review rather than inheriting acceptance.
+
 When a new Node.js 24.x security release ships, update together:
 
 1. `.nvmrc`.
