@@ -296,6 +296,110 @@ describe('server', () => {
     expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
+  describe('JSON parser compatibility', () => {
+    it.each([
+      ['missing body', undefined, undefined, 400, 'VALIDATION_ERROR'],
+      ['empty JSON object', 'application/json', '{}', 400, 'VALIDATION_ERROR'],
+      ['unsupported content type', 'text/plain', 'not JSON', 400, 'VALIDATION_ERROR'],
+      ['malformed JSON', 'application/json', '{', 500, 'INTERNAL_ERROR'],
+      [
+        'oversized JSON',
+        'application/json',
+        JSON.stringify({ padding: 'x'.repeat(102_400) }),
+        500,
+        'INTERNAL_ERROR',
+      ],
+    ])('preserves the existing response for %s', async (_name, contentType, body, status, code) => {
+      const app = createApp();
+      const req = request(app).post('/auth/login');
+      if (contentType) req.set('Content-Type', contentType);
+      if (body !== undefined) req.send(body);
+      const response = await req;
+      expect(response.status).toBe(status);
+      expect(response.body.error.code).toBe(code);
+      expect(response.headers['content-type']).toMatch(/application\/json/);
+      if (status === 500) {
+        expect(response.body).toEqual({
+          error: { code: 'INTERNAL_ERROR', message: 'Internal server error.' },
+        });
+        // The existing parser runs before request-ID logging; this migration does not reorder it.
+        expect(response.headers['x-request-id']).toBeUndefined();
+      } else {
+        expect(response.headers['x-request-id']).toMatch(UUID_REGEX);
+      }
+    });
+  });
+
+  describe('calendar query compatibility', () => {
+    it.each([
+      ['start=2026-06-01&end=2026-06-30', 200],
+      ['end=2026-06-30&start=2026-06-01', 200],
+      ['start=2026-01-01&end=2027-01-01', 200],
+      ['start=2026-01-01&end=2027-01-02', 400],
+      ['start=2026-06-01&start=2026-06-02&end=2026-06-30', 400],
+      ['start[value]=2026-06-01&end=2026-06-30', 400],
+      ['start=2026-06-01', 400],
+      ['start=2026-02-30&end=2026-03-01', 400],
+    ])('validates the unchanged range contract for %s', async (query, status) => {
+      const express = (await import('express')).default;
+      const { CalendarRangeSchema } = await import('./services/calendar/range.js');
+      const { errorHandler } = await import('./middleware/errorHandler.js');
+      const app = express();
+      app.get('/range', (req, res, next) => {
+        try {
+          res.json(CalendarRangeSchema.parse(req.query));
+        } catch (err) {
+          next(err);
+        }
+      });
+      app.use(errorHandler);
+      const response = await request(app).get(`/range?${query}`);
+      expect(response.status).toBe(status);
+      if (status === 200) {
+        const params = new URLSearchParams(query);
+        expect(response.body).toEqual({ start: params.get('start'), end: params.get('end') });
+      } else {
+        expect(response.body.error.code).toBe('VALIDATION_ERROR');
+      }
+    });
+  });
+
+  it.each(['caught rejection', 'automatic rejection'])(
+    'forwards an async %s exactly once to the JSON error handler',
+    async (mode) => {
+      const express = (await import('express')).default;
+      const { errorHandler } = await import('./middleware/errorHandler.js');
+      const app = express();
+      const forwarded = vi.fn(errorHandler);
+      const failure = new Error('async route failure');
+      app.get('/async-error', async (_req, _res, next) => {
+        if (mode === 'caught rejection') {
+          try {
+            await Promise.reject(failure);
+          } catch (err) {
+            next(err);
+          }
+        } else {
+          throw failure;
+        }
+      });
+      app.use(forwarded);
+      const logStart = capturedLogs.lines.length;
+      const response = await request(app).get('/async-error');
+      expect(response.status).toBe(500);
+      expect(response.body).toEqual({
+        error: { code: 'INTERNAL_ERROR', message: 'Internal server error.' },
+      });
+      expect(forwarded).toHaveBeenCalledTimes(1);
+      expect(forwarded.mock.calls[0]![0]).toBe(failure);
+      const errorLogs = capturedLogs.lines
+        .slice(logStart)
+        .map((line) => JSON.parse(line) as ParsedLogLine)
+        .filter((line) => line.msg === 'Unhandled error');
+      expect(errorLogs).toHaveLength(1);
+    },
+  );
+
   it('applies helmet security headers to responses', async () => {
     const app = createApp();
     const res = await request(app).get('/health');

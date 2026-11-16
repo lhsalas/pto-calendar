@@ -46,12 +46,6 @@ updates:
       - dependency-name: typescript
         versions:
           - '>=7'
-      # Express 5 changes the route parameter types, so the request handlers
-      # need source changes. Remove this rule when the Express 5 migration is
-      # planned.
-      - dependency-name: express
-        update-types:
-          - version-update:semver-major
       # Prisma 7 moves the connection URL out of the schema into
       # prisma.config.ts, so the schema, the client and the migration
       # scripts all change. Remove this rule when the Prisma 7 migration is
@@ -60,12 +54,6 @@ updates:
         update-types:
           - version-update:semver-major
       - dependency-name: '@prisma/client'
-        update-types:
-          - version-update:semver-major
-      # Express 4 requires body-parser 1.x, so the 2.x line belongs to
-      # Express 5. The application does not import body-parser itself, it
-      # uses express.json(). Remove this rule when Express 5 is planned.
-      - dependency-name: body-parser
         update-types:
           - version-update:semver-major
       # ESLint 10 needs eslint-plugin-react-hooks 7, whose recommended
