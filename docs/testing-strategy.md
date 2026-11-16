@@ -31,7 +31,7 @@ This document defines the testing and automation strategy for the PTO calendar M
 | Frontend unit/component | Vitest + React Testing Library | `@testing-library/user-event` for interactions |
 | API mocking in component tests | MSW | Reuses OpenAPI schemas where possible |
 | E2E | Playwright | Strong cookie/session support, trace viewer, cross-browser |
-| Coverage | c8 (via Vitest) | `text`, `lcov`, `json-summary` reporters |
+| Coverage | `@vitest/coverage-v8` | `text`, `lcov`, `json-summary` reporters |
 | Lint | ESLint | TypeScript + React plugins |
 | Format | Prettier | Hooked via lint-staged |
 | Type check | `tsc --noEmit` | Backend and frontend in CI |
@@ -57,9 +57,20 @@ does not substitute for these per-path targets. Evidence and remediation are
 tracked in #270; no thresholds, exclusions or tests were weakened.
 
 The test toolchain is pinned to a supported, patched line: `vitest` and
-`@vitest/coverage-v8` are on the 4.1.x line, `vite` is on the patched 7.3.x
+`@vitest/coverage-v8` are on the matching 5.1.x line, `vite` is on the patched 8.3.x
 line, and `concurrently`, `lint-staged` and `js-yaml` are on patched releases.
-`npm audit` reports `0 vulnerabilities` for the whole graph.
+
+Both the root and each workspace declare the runner and coverage provider.
+Keep their versions aligned: `npm ls vitest @vitest/coverage-v8` must show a
+single resolved version of each, with exactly matching runner/provider versions.
+The root declarations keep the provider resolvable from the hoisted runner and
+prevent a second Vitest copy from receiving the frontend's matcher augmentation.
+`frontend/tests/setup.ts` registers the standalone jest-dom matchers with
+`expect.extend`. `frontend/tests/vitest.d.ts` augments Vitest 5's `Matchers<R, T>`
+interface because jest-dom 7.0.1's bundled adapter still uses the old
+`Assertion<T>` interface. The frontend typecheck includes this declaration and
+`vitestMatchers.test.ts`, which checks both synchronous (`void`) and asynchronous
+(`Promise<void>`) matcher return types without loading the Jest-global types.
 
 Vitest 4 removed `poolOptions`, so the integration suite uses the top-level
 `fileParallelism: false` and `isolate: true` instead of the old
