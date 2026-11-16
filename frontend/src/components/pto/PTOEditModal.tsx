@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PTOWithUser, User } from '../../types/api';
 import { editViewerKey, isPreparedPto, loadPtoForEdit, type PreparedPto } from '../../lib/ptoEdit';
 import { useModalA11y } from '../../hooks/useModalA11y';
@@ -20,6 +20,11 @@ function EditSession({ pto, currentUser, onSubmit, onClose }: Props): JSX.Elemen
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const request = useRef<Promise<PreparedPto> | null>(null);
+  const preparationTitleRef = useRef<HTMLHeadingElement>(null);
+  const focusRetryButton = useCallback((button: HTMLButtonElement | null): void => {
+    // Leave a user's new focus location alone when a retry fails.
+    if (button && document.activeElement === preparationTitleRef.current) button.focus();
+  }, []);
   const cardRef = useModalA11y(ready === null, onClose);
   useEffect(() => {
     if (isPreparedPto(pto, currentUser)) return;
@@ -63,7 +68,12 @@ function EditSession({ pto, currentUser, onSubmit, onClose }: Props): JSX.Elemen
         ref={cardRef}
         className="w-full max-w-md rounded-lg border border-border bg-surface-3 p-6 text-ink shadow-lg dark:border-border-dark dark:bg-surface-dark-3 dark:text-ink-dark"
       >
-        <h2 id="pto-edit-loading-title" className="mb-4 font-display text-xl font-semibold">
+        <h2
+          ref={preparationTitleRef}
+          id="pto-edit-loading-title"
+          tabIndex={-1}
+          className="mb-4 rounded-sm font-display text-xl font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500"
+        >
           Prepare PTO edit
         </h2>
         {error ? (
@@ -85,8 +95,13 @@ function EditSession({ pto, currentUser, onSubmit, onClose }: Props): JSX.Elemen
           </button>
           {error ? (
             <button
+              ref={focusRetryButton}
               type="button"
-              onClick={() => {
+              onClick={(event) => {
+                // The heading persists when the focused Retry button is removed.
+                if (document.activeElement === event.currentTarget) {
+                  preparationTitleRef.current?.focus();
+                }
                 setError(null);
                 setAttempt((n) => n + 1);
               }}

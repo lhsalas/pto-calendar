@@ -10,12 +10,109 @@ import { STUB_PTO, STUB_USER } from '../mocks/handlers';
 afterEach(() => vi.restoreAllMocks());
 function deferred() {
   let resolve!: (value: unknown) => void;
-  const promise = new Promise<unknown>((r) => {
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<unknown>((r, j) => {
     resolve = r;
+    reject = j;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 describe('PTOEditModal', () => {
+  it('keeps keyboard retry focus inside preparation and restores Retry after another failure', async () => {
+    const user = userEvent.setup();
+    const retry = deferred();
+    const request = vi
+      .spyOn(api, 'apiRequest')
+      .mockRejectedValueOnce(new Error('First failure'))
+      .mockReturnValueOnce(retry.promise);
+    render(
+      <PTOEditModal pto={STUB_PTO} currentUser={STUB_USER} onSubmit={vi.fn()} onClose={vi.fn()} />,
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('First failure');
+    screen.getByRole('button', { name: /^retry$/i }).focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('status')).toBeInTheDocument();
+    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+    expect(screen.getByRole('heading', { name: /prepare pto edit/i })).toHaveFocus();
+    await act(async () => {
+      retry.reject(new Error('Second failure'));
+      await retry.promise.catch(() => undefined);
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('Second failure');
+    expect(screen.getByRole('button', { name: /^retry$/i })).toHaveFocus();
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reclaim retry focus after the user moves to Cancel while waiting', async () => {
+    const user = userEvent.setup();
+    const retry = deferred();
+    vi.spyOn(api, 'apiRequest')
+      .mockRejectedValueOnce(new Error('First failure'))
+      .mockReturnValueOnce(retry.promise);
+    render(
+      <PTOEditModal pto={STUB_PTO} currentUser={STUB_USER} onSubmit={vi.fn()} onClose={vi.fn()} />,
+    );
+    await screen.findByRole('alert');
+    screen.getByRole('button', { name: /^retry$/i }).focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('heading', { name: /prepare pto edit/i })).toHaveFocus();
+    await user.tab();
+    const cancel = screen.getByRole('button', { name: /^cancel$/i });
+    expect(cancel).toHaveFocus();
+    await act(async () => {
+      retry.reject(new Error('Second failure'));
+      await retry.promise.catch(() => undefined);
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('Second failure');
+    expect(cancel).toHaveFocus();
+  });
+
+  it('does not move focus for an unfocused retry activation', async () => {
+    const retry = deferred();
+    vi.spyOn(api, 'apiRequest')
+      .mockRejectedValueOnce(new Error('First failure'))
+      .mockReturnValueOnce(retry.promise);
+    render(
+      <PTOEditModal pto={STUB_PTO} currentUser={STUB_USER} onSubmit={vi.fn()} onClose={vi.fn()} />,
+    );
+    await screen.findByRole('alert');
+    const cancel = screen.getByRole('button', { name: /^cancel$/i });
+    expect(cancel).toHaveFocus();
+    act(() => screen.getByRole('button', { name: /^retry$/i }).click());
+    expect(cancel).toHaveFocus();
+    await act(async () => {
+      retry.reject(new Error('Second failure'));
+      await retry.promise.catch(() => undefined);
+    });
+    expect(cancel).toHaveFocus();
+  });
+
+  it('does not restore stale retry focus after a PTO session change', async () => {
+    const user = userEvent.setup();
+    const retry = deferred();
+    const current = deferred();
+    vi.spyOn(api, 'apiRequest')
+      .mockRejectedValueOnce(new Error('First failure'))
+      .mockReturnValueOnce(retry.promise)
+      .mockReturnValueOnce(current.promise);
+    const props = { currentUser: STUB_USER, onSubmit: vi.fn(), onClose: vi.fn() };
+    const { rerender } = render(<PTOEditModal {...props} pto={STUB_PTO} />);
+    await screen.findByRole('alert');
+    screen.getByRole('button', { name: /^retry$/i }).focus();
+    await user.keyboard('{Enter}');
+    rerender(<PTOEditModal {...props} pto={{ ...STUB_PTO, id: 'new-session' }} />);
+    const cancel = screen.getByRole('button', { name: /^cancel$/i });
+    expect(cancel).toHaveFocus();
+    await act(async () => {
+      retry.reject(new Error('Stale failure'));
+      await retry.promise.catch(() => undefined);
+    });
+    expect(cancel).toHaveFocus();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await act(async () => current.resolve({ note: 'Current note' }));
+    expect(screen.getByLabelText(/note \(optional\)/i)).toHaveValue('Current note');
+  });
+
   it('does not open a form after pending preparation is unmounted', async () => {
     const response = deferred();
     vi.spyOn(api, 'apiRequest').mockReturnValue(response.promise);
