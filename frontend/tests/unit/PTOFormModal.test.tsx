@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
@@ -15,6 +15,7 @@ interface RenderArgs {
   onClose?: CloseSpy;
   open?: boolean;
   initialPto?: typeof STUB_PTO;
+  initialNoteLoaded?: boolean;
   defaultStartDate?: string;
 }
 
@@ -23,6 +24,7 @@ function renderModal({
   onClose = vi.fn<CloseSpy>(),
   open = true,
   initialPto,
+  initialNoteLoaded = initialPto !== undefined,
   defaultStartDate,
 }: RenderArgs = {}): void {
   render(
@@ -30,6 +32,7 @@ function renderModal({
       open={open}
       onSubmit={onSubmit}
       onClose={onClose}
+      initialNoteLoaded={initialNoteLoaded}
       {...(initialPto ? { initialPto } : {})}
       {...(defaultStartDate ? { defaultStartDate } : {})}
     />,
@@ -47,6 +50,26 @@ async function setDate(
 }
 
 describe('PTOFormModal', () => {
+  it.each(['programmatic', 'keyboard'])(
+    'rejects an unknown/redacted edit source on %s submit',
+    async (action) => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn();
+      const onClose = vi.fn();
+      renderModal({ initialPto: STUB_PTO, initialNoteLoaded: false, onSubmit, onClose });
+      expect(screen.getByLabelText(/note \(optional\)/i)).toBeDisabled();
+      expect(screen.getByRole('button', { name: /save pto/i })).toBeDisabled();
+      if (action === 'programmatic')
+        fireEvent.submit(screen.getByRole('button', { name: /save pto/i }).closest('form')!);
+      else {
+        screen.getByRole('button', { name: /save pto/i }).focus();
+        await user.keyboard('{Enter}');
+      }
+      expect(onSubmit).not.toHaveBeenCalled();
+      await user.click(screen.getByRole('button', { name: /cancel/i }));
+      expect(onClose).toHaveBeenCalled();
+    },
+  );
   it('renders nothing when closed', () => {
     renderModal({ open: false });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -172,6 +195,43 @@ describe('PTOFormModal', () => {
       });
     });
   });
+
+  it.each(['day part', 'dates'])(
+    'preserves the loaded note in a %s-only edit payload',
+    async (field) => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      renderModal({ initialPto: { ...STUB_PTO, note: 'Doctor' }, onSubmit });
+      expect(screen.getByLabelText(/note/i)).toHaveValue('Doctor');
+      if (field === 'day part')
+        await user.selectOptions(screen.getByLabelText(/day part/i), 'evening');
+      else await setDate(/start date/i, '2026-05-12', user);
+      await user.click(screen.getByRole('button', { name: /save pto/i }));
+      expect(onSubmit).toHaveBeenCalledExactlyOnceWith({
+        startDate: field === 'dates' ? '2026-05-12' : STUB_PTO.startDate,
+        endDate: field === 'dates' ? '2026-05-12' : STUB_PTO.endDate,
+        dayPart: field === 'day part' ? 'evening' : STUB_PTO.dayPart,
+        note: 'Doctor',
+      });
+    },
+  );
+
+  it.each([null, 'Doctor'])(
+    'always sends an explicit empty note on update after initial note %s',
+    async (initialNote) => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      renderModal({ initialPto: { ...STUB_PTO, note: initialNote }, onSubmit });
+      await user.clear(screen.getByLabelText(/note/i));
+      await user.click(screen.getByRole('button', { name: /save pto/i }));
+      expect(onSubmit).toHaveBeenCalledExactlyOnceWith({
+        startDate: STUB_PTO.startDate,
+        endDate: STUB_PTO.endDate,
+        dayPart: STUB_PTO.dayPart,
+        note: '',
+      });
+    },
+  );
 
   it('surfaces server errors via the alert', async () => {
     const user = userEvent.setup();

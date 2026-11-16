@@ -6,6 +6,7 @@ import { useHolidays } from '../hooks/useHolidays';
 import { useToast } from '../hooks/useToast';
 import { PTOFormModal } from '../components/pto/PTOFormModal';
 import { PTOViewModal } from '../components/pto/PTOViewModal';
+import { PTOEditModal } from '../components/pto/PTOEditModal';
 import { UpcomingPtoList } from '../components/pto/UpcomingPtoList';
 import { CalendarHeader } from '../components/calendar/CalendarHeader';
 import { MonthGrid } from '../components/calendar/MonthGrid';
@@ -256,12 +257,14 @@ export function CalendarPage(): JSX.Element {
           setCreateDayStartDate(undefined);
         }}
       />
-      <PTOFormModal
-        open={editing !== null}
-        initialPto={editing ?? undefined}
-        onSubmit={handleUpdate}
-        onClose={() => setEditing(null)}
-      />
+      {editing ? (
+        <PTOEditModal
+          pto={editing}
+          currentUser={user}
+          onSubmit={handleUpdate}
+          onClose={() => setEditing(null)}
+        />
+      ) : null}
       {viewing ? (
         <PTOViewModal
           pto={viewing}
