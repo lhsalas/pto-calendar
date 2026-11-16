@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HttpError } from '../../middleware/errorHandler.js';
+import type { CreatePtoInput } from './schemas.js';
 import {
   createPto,
   deletePto,
@@ -139,6 +140,9 @@ describe('PTOService extended', () => {
 
       expect(result).toBe(UPDATED_ROW);
       expect(mockUpdate).toHaveBeenCalledTimes(1);
+      expect(mockUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ note: 'Edited' }) }),
+      );
       expect(mockAuditCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
@@ -146,10 +150,96 @@ describe('PTOService extended', () => {
             action: 'update_pto',
             entityType: 'pto_request',
             entityId: PTO_ID,
+            details: expect.objectContaining({ note: 'Edited' }),
           }),
         }),
       );
       expect(mockTx).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['Doctor', null])(
+      'omits the note column and audits the returned note %s when the key is absent',
+      async (note) => {
+        mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+        mockFindFirst.mockResolvedValueOnce(null);
+        const persisted = { ...UPDATED_ROW, note };
+        mockUpdate.mockResolvedValueOnce(persisted);
+
+        const result = await updatePto(ACTOR_MEMBER, PTO_ID, {
+          startDate: '2026-05-12',
+          endDate: '2026-05-12',
+          dayPart: 'morning',
+        });
+
+        expect(result).toBe(persisted);
+        expect(mockFindUnique).toHaveBeenCalledExactlyOnceWith({
+          where: { id: PTO_ID },
+          select: { id: true, userId: true },
+        });
+        const update = mockUpdate.mock.calls[0]![0] as { data: Record<string, unknown> };
+        expect(update.data).not.toHaveProperty('note');
+        expect(mockAuditCreate).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ details: expect.objectContaining({ note }) }),
+          }),
+        );
+        expect(mockTx).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it.each([
+      { label: 'empty string', note: '', stored: null },
+      { label: 'whitespace', note: '  ', stored: '  ' },
+      { label: '500 characters', note: 'x'.repeat(500), stored: 'x'.repeat(500) },
+    ])('writes and audits an explicit $label note', async ({ note, stored }) => {
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      mockFindFirst.mockResolvedValueOnce(null);
+      mockUpdate.mockResolvedValueOnce({ ...UPDATED_ROW, note: stored });
+
+      const result = await updatePto(ACTOR_MEMBER, PTO_ID, {
+        startDate: '2026-05-12',
+        endDate: '2026-05-12',
+        dayPart: 'morning',
+        note,
+      });
+
+      expect(result.note).toBe(stored);
+      expect(mockUpdate).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ data: expect.objectContaining({ note: stored }) }),
+      );
+      expect(mockAuditCreate).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ details: expect.objectContaining({ note: stored }) }),
+        }),
+      );
+    });
+
+    it.each([
+      { label: 'own undefined', note: undefined },
+      { label: 'null', note: null },
+      { label: 'number', note: 0 },
+      { label: 'boolean', note: false },
+      { label: 'array', note: [] },
+      { label: 'object', note: {} },
+      { label: '501 characters', note: 'x'.repeat(501) },
+    ])('rejects an explicit $label note before mutation or audit', async ({ note }) => {
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      const input = {
+        startDate: '2026-05-12',
+        endDate: '2026-05-12',
+        dayPart: 'morning',
+        note,
+      } as CreatePtoInput;
+      expect(Object.hasOwn(input, 'note')).toBe(true);
+
+      await expect(updatePto(ACTOR_MEMBER, PTO_ID, input)).rejects.toMatchObject({
+        status: 400,
+        code: 'VALIDATION_ERROR',
+      });
+      expect(mockFindFirst).not.toHaveBeenCalled();
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+      expect(mockTx).not.toHaveBeenCalled();
     });
 
     it('lets a team lead update another user PTO and audits the action', async () => {
@@ -180,6 +270,8 @@ describe('PTOService extended', () => {
         }),
       ).rejects.toMatchObject({ status: 409, code: 'CONFLICT' });
       expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+      expect(mockTx).not.toHaveBeenCalled();
     });
 
     it('re-runs validation and rejects weekend edits', async () => {
@@ -398,6 +490,7 @@ describe('PTOService extended', () => {
       expect(mockCreate).toHaveBeenCalledTimes(1);
       const createArg = mockCreate.mock.calls[0]![0] as { data: Record<string, unknown> };
       expect(createArg.data['dayPart']).toBe('all_day');
+      expect(createArg.data['note']).toBeNull();
     });
 
     it('stores null note when note is empty string', async () => {

@@ -125,6 +125,11 @@ export async function updatePto(
   if (!canModifyPTO(actor, existing)) {
     throw new HttpError(403, 'FORBIDDEN', 'You are not allowed to modify this PTO entry.');
   }
+  // Capture presence before shared create validation normalizes missing notes to null.
+  const noteProvided = Object.hasOwn(input, 'note');
+  if (noteProvided && typeof input.note !== 'string') {
+    throw new HttpError(400, 'VALIDATION_ERROR', 'note must be a string when provided.');
+  }
   const validated: ValidatedPto = validatePtoPayload(input);
   const overlap = await findOverlapping(
     existing.userId,
@@ -146,7 +151,7 @@ export async function updatePto(
         startDate: toDateOnly(validated.startDate),
         endDate: toDateOnly(validated.endDate),
         dayPart: validated.dayPart,
-        note: validated.note,
+        ...(noteProvided ? { note: validated.note } : {}),
       },
       select: PUBLIC_PTO_SELECT,
     });
@@ -160,7 +165,7 @@ export async function updatePto(
           startDate: validated.startDate,
           endDate: validated.endDate,
           dayPart: validated.dayPart,
-          note: validated.note,
+          note: row.note,
         },
       },
       tx,
