@@ -4,15 +4,17 @@
 
 The [#246 delivery plan / ADR](agent-access-delivery-plan.md) records the complete
 serial order, prerequisites and approved parallel waves. **Owner update
-(2026-11-15):** #273 landed via PR #276 at master `ada8e0b`; #248 is the pending
-next baseline step under bounded image-risk acceptance. Permanent remediation
+(2026-11-15):** master `2a4ed0f` includes #273 via PR #276, #248 via PR #274
+(Node 24.22.3), and #235 via PR #272. #227 remains draft PR #275; #236 is under
+implementation, not merged; #237 and the other original issues remain pending.
+Permanent remediation
 #247 stays open/high priority. All 11 existing #227–#237 deliverables plus #270
 still precede #249–#269 agent work.
 The older MVP epics below are not the scheduling authority for this initiative.
 Each issue is one deliverable/PR; closing without delivering does not clear the
 backlog gate. Update the roadmap with merged PR/commit and acceptance evidence on
 delivery, or record explicit owner-approved deferral/supersession without claiming
-it was implemented. This documentation marks no new feature complete.
+it was implemented. This documentation marks no new agent feature complete.
 
 ## 1. Epics
 - Epic 1: Authentication and user management

@@ -278,7 +278,14 @@ The coordinator verified all 11 policy-PR and master CI checks green; this is no
 validation of the refreshed #246 candidate. The
 [landed runbook](image-risk-acceptance.md) records **40 temporary + 79 legacy
 matches**: accepted risk, not clean images.
-#248, #227 and #235 remain pending; token/API/CLI/MCP features remain proposals.
+**Current integration checkpoint — 2026-11-15:** master
+[`2a4ed0f`](https://github.com/lhsalas/pto-calendar/commit/2a4ed0f8b01a22a9620420732e791e00b92a3f0a)
+also includes #235 via [PR #272](https://github.com/lhsalas/pto-calendar/pull/272)
+and #248 via [PR #274](https://github.com/lhsalas/pto-calendar/pull/274), with the
+Node 24.22.3 baseline retained. #227 is pending in draft PR #275; #236 is under
+implementation, not merged; #237 and the other original backlog issues remain
+pending. All 11 original deliverables (including delivered #235) plus #270 still
+precede token work; token/API/CLI/MCP features remain proposals.
 
 The current baseline lane is **#273 -> #248**. #248 aligns Node 24
 runtime/image/engine pins; each new digest needs a fresh raw scan and explicit
