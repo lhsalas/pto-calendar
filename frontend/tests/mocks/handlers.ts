@@ -191,7 +191,7 @@ export const holidaysSeedOk = http.post('/holidays/seed', () =>
   HttpResponse.json({ inserted: 14, skipped: 0, errors: [] }),
 );
 
-export const holidaysRange = http.get(/\/holidays\?/, () => HttpResponse.json([]));
+export const holidaysRange = http.get('/holidays', () => HttpResponse.json([]));
 
 export const handlers = [
   unauthenticated,

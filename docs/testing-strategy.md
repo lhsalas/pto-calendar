@@ -222,6 +222,24 @@ Additional shipped journeys (frontend enhancements #18–#26):
 - MSW handlers mirror `openapi.yaml` response shapes.
 - Reuse handlers between component tests and Storybook (post-MVP).
 
+MSW is on **3.0.6** (#228), following the
+[official v3 migration guide](https://mswjs.io/docs/migrations/2.x-to-3.x).
+The shared Node interceptor uses `onUnhandledFrame: 'error'`; do not replace it
+with warnings, bypasses or catch-all responses. Match `/holidays` exactly,
+without its query string, and read `new URL(request.url).searchParams` to verify
+both range bounds independently of query ordering. `/holidays/all` remains a
+separate administration route. `mswSetup.test.ts` covers default matching,
+unhandled API rejection and override reset; calendar tests retain the 42-cell
+render and PTO/holiday navigation-range assertions.
+
+The installed MSW 3.0.6 metadata requires Node >=22.12 and optional TypeScript
+>=5.9/Vite >=6 peers, met by Node 24.22.3, TypeScript 5.9.3 and Vite 8.3.4.
+Vitest's 5.1.0 mocker accepts MSW `^2.4.9 || ^3.0.0`; React remains 18.
+Root `http`/`HttpResponse` exports are still present in published 3.0.6, so this
+migration preserves those imports and existing handler bodies/set. No Vite
+plugin or browser worker is introduced; keep #227's matcher setup and coverage
+targets unchanged.
+
 ### 9.4 Parallel issue work: exclusive disposable-test lease
 
 For the [approved #246 execution plan](agent-access-delivery-plan.md), worktrees

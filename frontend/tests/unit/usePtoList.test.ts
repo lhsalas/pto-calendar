@@ -7,9 +7,14 @@ import { STUB_PTO } from '../mocks/handlers';
 
 describe('usePtoList', () => {
   it('fetches the list for the given range on mount', async () => {
+    const ranges: Array<{ start: string | null; end: string | null }> = [];
     server.use(
       http.get('/pto', ({ request }) => {
         const url = new URL(request.url);
+        ranges.push({
+          start: url.searchParams.get('start'),
+          end: url.searchParams.get('end'),
+        });
         return HttpResponse.json([
           { ...STUB_PTO, startDate: url.searchParams.get('start') ?? STUB_PTO.startDate },
         ]);
@@ -22,6 +27,7 @@ describe('usePtoList', () => {
     });
     expect(result.current.items).toHaveLength(1);
     expect(result.current.items[0]?.startDate).toBe('2026-05-01');
+    expect(ranges).toEqual([{ start: '2026-05-01', end: '2026-05-31' }]);
     expect(result.current.error).toBeNull();
   });
 
