@@ -85,7 +85,8 @@ export function createUsersRouter(): Router {
     try {
       const actor = req.user!;
       requireTeamLead(actor);
-      const id = req.params.id;
+      const rawId = req.params.id;
+      const id = Array.isArray(rawId) ? rawId[0] : rawId;
       if (!id) {
         throw new HttpError(400, 'VALIDATION_ERROR', 'User id is required.');
       }

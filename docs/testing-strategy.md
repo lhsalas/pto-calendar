@@ -126,6 +126,32 @@ unit CI enforcement gap above remains explicitly open until #270 is delivered.
 
 ## 6. Backend Test Conventions
 
+### Express 5 migration baseline (#229)
+
+Express **5.3.0**, body-parser **2.4.0** and Express types **5.0.6** replace the
+4.x runtime/types together. The direct body-parser declaration stays aligned
+with Express's compatible 2.x dependency; `express.json({ limit: '100kb' })`
+remains the application's parser. No route paths, payloads, query-parser setting,
+limiter versions or middleware order change. See the
+[official migration guide](https://expressjs.com/en/guide/migrating-5.html).
+
+`server.test.ts` characterizes the same HTTP outcomes before/after the upgrade:
+missing/unsupported bodies produce 400 validation errors; malformed/oversized
+JSON retains the existing generic 500 envelope without a request ID because
+parsing precedes logging. This documents the baseline, not a new parser-error
+policy. Scalar/reordered range queries retain bounds/date validation; duplicate
+and bracket-form required parameters remain invalid despite the framework's
+simple query-parser default. Async rejection tests cover explicit `next(err)`
+and Express 5 automatic forwarding with one JSON response and one error log.
+
+`index.test.ts` invokes a mocked listen callback, never a real occupied port:
+successful binding logs readiness; bind errors are rethrown into the already
+installed fatal exception lifecycle and cannot log false readiness. Existing
+lifecycle tests retain the nonzero fatal-exit contract. Password-reset integration
+tests retain member/other-lead/sole-lead/self/unknown-user permissions, session
+invalidation and audit coverage. The #237 note omission/clear/set and browser
+regressions, #281 readiness tests, and all coverage thresholds remain unchanged.
+
 ### 6.1 Unit tests
 - Cover pure functions and helpers: `validatePtoPayload`, `canModifyPTO`, `canViewNote` (note-visibility helper that delegates to `canModifyPTO`), `createPto`, `findOverlapping`, `expandPTOToDates`, `isWeekend`, `normalizeDayPart`.
 - Cover every shared Zod schema in `services/pto/schemas.ts` and `services/auth/schemas.ts` with accept/reject path tests (schemas are the contract between routes and the validation layer).
