@@ -35,12 +35,13 @@
     "prepare": "husky || true"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^4.1.12",
+    "@vitest/coverage-v8": "^5.1.0",
     "concurrently": "^10.0.6",
     "husky": "^9.1.7",
     "js-yaml": "^4.3.2",
     "lint-staged": "^17.6.0",
-    "prettier": "^3.9.10"
+    "prettier": "^3.9.10",
+    "vitest": "^5.1.0"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx,json,md,yml,yaml,css}": [
