@@ -12,6 +12,10 @@ import type { PTO } from '../../src/types/api';
 
 type ModalProps = React.ComponentProps<typeof PTOViewModal>;
 
+function preparedExpected(pto: ModalProps['pto'], viewer = STUB_USER) {
+  return { ...pto, noteLoadedFor: `${viewer.id}:${viewer.role}` };
+}
+
 const PTO_DETAIL: PTO = {
   id: STUB_PTO.id,
   userId: STUB_USER.id,
@@ -145,7 +149,9 @@ describe('PTOViewModal', () => {
     expect(editButton).toHaveFocus();
 
     await act(async () => response.resolve({ ...PTO_DETAIL, note: 'Doctor' }));
-    expect(onEdit).toHaveBeenCalledExactlyOnceWith({ ...STUB_PTO, note: 'Doctor' });
+    expect(onEdit).toHaveBeenCalledExactlyOnceWith(
+      preparedExpected({ ...STUB_PTO, note: 'Doctor' }, { ...STUB_USER, id, role }),
+    );
   });
 
   it.each([null, 'Loaded private note'])(
@@ -159,7 +165,7 @@ describe('PTOViewModal', () => {
       await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
       expect(screen.queryByRole('button', { name: /load note/i })).not.toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: /^edit$/i }));
-      expect(onEdit).toHaveBeenCalledExactlyOnceWith({ ...STUB_PTO, note });
+      expect(onEdit).toHaveBeenCalledExactlyOnceWith(preparedExpected({ ...STUB_PTO, note }));
       expect(requestDetail).toHaveBeenCalledTimes(1);
     },
   );
@@ -171,7 +177,7 @@ describe('PTOViewModal', () => {
     const pto = { ...STUB_PTO, note: 'Known private note' };
     renderModal({ pto, onEdit });
     await user.click(screen.getByRole('button', { name: /^edit$/i }));
-    expect(onEdit).toHaveBeenCalledExactlyOnceWith(pto);
+    expect(onEdit).toHaveBeenCalledExactlyOnceWith(preparedExpected(pto));
     expect(requestDetail).not.toHaveBeenCalled();
   });
 
@@ -191,7 +197,9 @@ describe('PTOViewModal', () => {
     expect(requestDetail).toHaveBeenCalledTimes(1);
 
     await act(async () => response.resolve({ ...PTO_DETAIL, note: 'Shared detail note' }));
-    expect(onEdit).toHaveBeenCalledExactlyOnceWith({ ...STUB_PTO, note: 'Shared detail note' });
+    expect(onEdit).toHaveBeenCalledExactlyOnceWith(
+      preparedExpected({ ...STUB_PTO, note: 'Shared detail note' }),
+    );
     expect(requestDetail).toHaveBeenCalledTimes(1);
   });
 
@@ -222,7 +230,9 @@ describe('PTOViewModal', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(onEdit).not.toHaveBeenCalled();
     await act(async () => retry.resolve({ ...PTO_DETAIL, note: 'Preserved after retry' }));
-    expect(onEdit).toHaveBeenCalledExactlyOnceWith({ ...STUB_PTO, note: 'Preserved after retry' });
+    expect(onEdit).toHaveBeenCalledExactlyOnceWith(
+      preparedExpected({ ...STUB_PTO, note: 'Preserved after retry' }),
+    );
     expect(requestDetail).toHaveBeenCalledTimes(2);
   });
 
@@ -279,7 +289,9 @@ describe('PTOViewModal', () => {
     expect(oldEdit).not.toHaveBeenCalled();
     expect(newEdit).not.toHaveBeenCalled();
     await act(async () => newResponse.resolve({ ...PTO_DETAIL, note: 'Current note' }));
-    expect(newEdit).toHaveBeenCalledExactlyOnceWith({ ...STUB_PTO, note: 'Current note' });
+    expect(newEdit).toHaveBeenCalledExactlyOnceWith(
+      preparedExpected({ ...STUB_PTO, note: 'Current note' }),
+    );
   });
 
   it.each(['success', 'failure'])(
@@ -296,7 +308,9 @@ describe('PTOViewModal', () => {
       await user.click(screen.getByRole('button', { name: /^edit$/i }));
       rerenderModal({ pto: otherPto });
       await user.click(screen.getByRole('button', { name: /^edit$/i }));
-      expect(onEdit).toHaveBeenCalledExactlyOnceWith({ ...otherPto, note: 'Other note' });
+      expect(onEdit).toHaveBeenCalledExactlyOnceWith(
+        preparedExpected({ ...otherPto, note: 'Other note' }),
+      );
       await act(async () => {
         if (outcome === 'success') oldResponse.resolve({ ...PTO_DETAIL, note: 'Old note' });
         else oldResponse.reject(new Error('Old detail error'));
@@ -351,7 +365,9 @@ describe('PTOViewModal', () => {
       </StrictMode>,
     );
     await user.click(screen.getByRole('button', { name: /^edit$/i }));
-    expect(onEdit).toHaveBeenCalledExactlyOnceWith({ ...STUB_PTO, note: 'Doctor' });
+    expect(onEdit).toHaveBeenCalledExactlyOnceWith(
+      preparedExpected({ ...STUB_PTO, note: 'Doctor' }),
+    );
   });
 
   it('asks for confirmation before calling onDelete', async () => {

@@ -1,9 +1,9 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import type { DayPart, PTO, PTOWithUser, User } from '../../types/api';
+import type { DayPart, PTOWithUser, User } from '../../types/api';
 import { canModifyPto } from '../../lib/permissions';
 import { formatRangeLabel } from '../../lib/calendar';
-import { apiRequest } from '../../api/client';
+import { loadPtoForEdit, preparePtoForEdit } from '../../lib/ptoEdit';
 import { X } from '../icons';
 import { useModalA11y } from '../../hooks/useModalA11y';
 
@@ -81,10 +81,7 @@ function PTOViewModalContent({
     setNoteState({ status: 'loading' });
     const request = (async (): Promise<LoadedNote | undefined> => {
       try {
-        const detail = await apiRequest<PTO>(`/pto/${encodeURIComponent(pto.id)}`);
-        if (detail.note !== null && typeof detail.note !== 'string') {
-          throw new Error('Could not load PTO details.');
-        }
+        const detail = await loadPtoForEdit(pto, currentUser);
         const loaded: LoadedNote = { status: 'loaded', note: detail.note };
         if (sessionActive.current) setNoteState(loaded);
         return loaded;
@@ -119,7 +116,7 @@ function PTOViewModalContent({
       setOpeningEdit(false);
       return;
     }
-    onEdit({ ...pto, note: loaded.note });
+    onEdit(preparePtoForEdit(pto, currentUser, loaded.note));
   }
 
   async function handleDelete(): Promise<void> {

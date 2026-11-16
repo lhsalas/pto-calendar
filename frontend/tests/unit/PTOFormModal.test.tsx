@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
@@ -15,6 +15,7 @@ interface RenderArgs {
   onClose?: CloseSpy;
   open?: boolean;
   initialPto?: typeof STUB_PTO;
+  initialNoteLoaded?: boolean;
   defaultStartDate?: string;
 }
 
@@ -23,6 +24,7 @@ function renderModal({
   onClose = vi.fn<CloseSpy>(),
   open = true,
   initialPto,
+  initialNoteLoaded = initialPto !== undefined,
   defaultStartDate,
 }: RenderArgs = {}): void {
   render(
@@ -30,6 +32,7 @@ function renderModal({
       open={open}
       onSubmit={onSubmit}
       onClose={onClose}
+      initialNoteLoaded={initialNoteLoaded}
       {...(initialPto ? { initialPto } : {})}
       {...(defaultStartDate ? { defaultStartDate } : {})}
     />,
@@ -47,6 +50,26 @@ async function setDate(
 }
 
 describe('PTOFormModal', () => {
+  it.each(['programmatic', 'keyboard'])(
+    'rejects an unknown/redacted edit source on %s submit',
+    async (action) => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn();
+      const onClose = vi.fn();
+      renderModal({ initialPto: STUB_PTO, initialNoteLoaded: false, onSubmit, onClose });
+      expect(screen.getByLabelText(/note \(optional\)/i)).toBeDisabled();
+      expect(screen.getByRole('button', { name: /save pto/i })).toBeDisabled();
+      if (action === 'programmatic')
+        fireEvent.submit(screen.getByRole('button', { name: /save pto/i }).closest('form')!);
+      else {
+        screen.getByRole('button', { name: /save pto/i }).focus();
+        await user.keyboard('{Enter}');
+      }
+      expect(onSubmit).not.toHaveBeenCalled();
+      await user.click(screen.getByRole('button', { name: /cancel/i }));
+      expect(onClose).toHaveBeenCalled();
+    },
+  );
   it('renders nothing when closed', () => {
     renderModal({ open: false });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

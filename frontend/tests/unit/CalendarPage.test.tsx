@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -63,6 +63,71 @@ function renderPage(): ReturnType<typeof render> {
 }
 
 describe('CalendarPage', () => {
+  it('keeps failed direct-list preparation non-editable and retries without a blank fallback', async () => {
+    const user = userEvent.setup();
+    const localPto = { ...STUB_PTO, startDate: '2026-06-15', endDate: '2026-06-15' };
+    const detail = vi
+      .fn()
+      .mockImplementationOnce(() =>
+        HttpResponse.json(
+          { error: { code: 'UNAVAILABLE', message: 'Private detail unavailable' } },
+          { status: 503 },
+        ),
+      )
+      .mockImplementationOnce(() => HttpResponse.json({ ...localPto, note: 'Doctor' }));
+    server.use(
+      http.get('/pto', () => HttpResponse.json([localPto])),
+      http.get('/pto/:id', detail),
+    );
+    renderPage();
+    await user.click(await screen.findByRole('radio', { name: /show upcoming pto list/i }));
+    const row = await screen.findByTestId(`upcoming-row-${localPto.id}`);
+    await user.click(within(row).getByRole('button', { name: /^edit$/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Private detail unavailable');
+    expect(screen.queryByLabelText(/note \(optional\)/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save pto/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^retry$/i }));
+    expect(await screen.findByLabelText(/note \(optional\)/i)).toHaveValue('Doctor');
+    expect(detail).toHaveBeenCalledTimes(2);
+  });
+  it.each(['day part', 'dates'])(
+    'prepares a direct list edit and preserves the stored note in a %s-only PUT',
+    async (field) => {
+      const user = userEvent.setup();
+      const localPto = { ...STUB_PTO, startDate: '2026-06-15', endDate: '2026-06-15' };
+      const detail = vi.fn(() =>
+        HttpResponse.json({ ...localPto, userId: localPto.user.id, note: 'Doctor' }),
+      );
+      let storedNote: string | null = 'Doctor';
+      const put = vi.fn(async ({ request }: { request: Request }) => {
+        const payload = (await request.json()) as { note?: string };
+        storedNote = payload.note || null;
+        return HttpResponse.json({ ...localPto, note: storedNote });
+      });
+      server.use(
+        http.get('/pto', () => HttpResponse.json([localPto])),
+        http.get('/pto/:id', detail),
+        http.put('/pto/:id', put),
+      );
+      renderPage();
+      await user.click(await screen.findByRole('radio', { name: /show upcoming pto list/i }));
+      const row = await screen.findByTestId(`upcoming-row-${localPto.id}`);
+      await user.click(within(row).getByRole('button', { name: /^edit$/i }));
+      expect(await screen.findByLabelText(/note \(optional\)/i)).toHaveValue('Doctor');
+      expect(detail).toHaveBeenCalledTimes(1);
+      if (field === 'day part')
+        await user.selectOptions(screen.getByLabelText(/day part/i), 'evening');
+      else {
+        const start = screen.getByLabelText(/start date/i);
+        await user.clear(start);
+        await user.type(start, '2026-06-16');
+      }
+      await user.click(screen.getByRole('button', { name: /save pto/i }));
+      await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+      expect(storedNote).toBe('Doctor');
+    },
+  );
+
   beforeEach(() => {
     server.use(authenticated);
     vi.useFakeTimers({ toFake: ['Date'] });

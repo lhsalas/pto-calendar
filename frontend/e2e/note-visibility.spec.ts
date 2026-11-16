@@ -14,6 +14,71 @@ function nthWeekdayInCurrentMonth(n: number): string {
   throw new Error(`No weekday #${n} in the current month`);
 }
 
+for (const field of ['day part', 'dates'] as const) {
+  test(`direct 90-day list Edit preserves the stored note when changing only ${field}`, async ({
+    page,
+  }) => {
+    const start = new Date();
+    start.setUTCDate(start.getUTCDate() + (field === 'dates' ? 55 : 45));
+    while (start.getUTCDay() === 0 || start.getUTCDay() === 6)
+      start.setUTCDate(start.getUTCDate() + 1);
+    const later = new Date(start);
+    later.setUTCDate(later.getUTCDate() + 1);
+    while (later.getUTCDay() === 0 || later.getUTCDay() === 6)
+      later.setUTCDate(later.getUTCDate() + 1);
+    const startDate = start.toISOString().slice(0, 10);
+    const editedDate = field === 'dates' ? later.toISOString().slice(0, 10) : startDate;
+    await page.goto('/');
+    await page.getByLabel(/email/i).fill('dev2@example.com');
+    await page.getByLabel(/password/i).fill('dev2-dev-password');
+    await page.getByRole('button', { name: /sign in/i }).click();
+    await expect(page.getByRole('heading', { name: /calendar/i })).toBeVisible();
+    await page.getByRole('button', { name: /^add pto$/i }).click();
+    await page.getByLabel(/start date/i).fill(startDate);
+    await page.getByLabel(/end date/i).fill(startDate);
+    await page.getByLabel(/day part/i).selectOption('morning');
+    await page.getByLabel(/note \(optional\)/i).fill('Doctor');
+    const createdResponse = page.waitForResponse(
+      (r) => new URL(r.url()).pathname === '/pto' && r.request().method() === 'POST',
+    );
+    await page.getByRole('button', { name: /save pto/i }).click();
+    const created = await createdResponse;
+    expect(created.status()).toBe(201);
+    const pto = (await created.json()) as PTO;
+    try {
+      await expect(page.getByRole('dialog')).not.toBeVisible();
+      await page.getByRole('radio', { name: /show upcoming pto list/i }).click();
+      const row = page.getByTestId(`upcoming-row-${pto.id}`);
+      const detail = page.waitForResponse(
+        (r) => new URL(r.url()).pathname === `/pto/${pto.id}` && r.request().method() === 'GET',
+      );
+      await row.getByRole('button', { name: /^edit$/i }).click();
+      expect((await detail).status()).toBe(200);
+      const form = page.getByRole('dialog', { name: /^edit pto$/i });
+      await expect(form.getByLabel(/note \(optional\)/i)).toHaveValue('Doctor');
+      if (field === 'dates') await form.getByLabel(/start date/i).fill(editedDate);
+      else await form.getByLabel(/day part/i).selectOption('evening');
+      const savedResponse = page.waitForResponse(
+        (r) => new URL(r.url()).pathname === `/pto/${pto.id}` && r.request().method() === 'PUT',
+      );
+      await form.getByRole('button', { name: /save pto/i }).click();
+      const saved = await savedResponse;
+      expect(saved.status()).toBe(200);
+      expect(saved.request().postDataJSON()).toEqual({
+        startDate: editedDate,
+        endDate: editedDate,
+        dayPart: field === 'dates' ? 'morning' : 'evening',
+        note: 'Doctor',
+      });
+      await expect(form).not.toBeVisible();
+      await row.getByRole('button', { name: /^edit$/i }).click();
+      await expect(form.getByLabel(/note \(optional\)/i)).toHaveValue('Doctor');
+    } finally {
+      expect((await page.request.delete(`/pto/${pto.id}`)).status()).toBe(204);
+    }
+  });
+}
+
 test('loading an empty PTO note removes the load button for this opening', async ({ page }) => {
   // The other dev2 journey reserves the second weekday; clean up our own PTO
   // so this regression can also be repeated without resetting shared data.
