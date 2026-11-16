@@ -26,7 +26,7 @@ services:
     command:
       - sh
       - -c
-      - 'npx prisma migrate deploy --schema=backend/prisma/schema.prisma && npx tsx backend/prisma/seed.ts && npx tsx backend/prisma/seedHolidays.ts --all'
+      - 'npx prisma migrate deploy --config=backend/prisma.config.ts && npx tsx backend/prisma/seed.ts && npx tsx backend/prisma/seedHolidays.ts --all'
     environment:
       NODE_ENV: development
       DATABASE_URL: postgresql://pto:pto@db:5432/pto?schema=public

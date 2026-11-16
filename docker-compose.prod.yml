@@ -42,7 +42,7 @@ services:
       - prisma
       - migrate
       - deploy
-      - --schema=backend/prisma/schema.prisma
+      - --config=backend/prisma.config.ts
     restart: 'no'
     networks:
       - internal

@@ -1,6 +1,8 @@
 import 'dotenv/config';
-import { PrismaClient, Role } from '@prisma/client';
+import { Role } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { createPrismaClient } from '../src/lib/prismaClient.js';
 
 const SEED_USERS = [
   {
@@ -51,18 +53,19 @@ export async function runSeed(prisma: PrismaClient): Promise<void> {
 
 const isCli = process.argv[1]?.endsWith('seed.ts') ?? false;
 if (isCli) {
-  const prisma = new PrismaClient();
-  runSeed(prisma)
-    .then(() => {
+  async function main(): Promise<void> {
+    const prisma = createPrismaClient(process.env.DATABASE_URL ?? '');
+    try {
+      await runSeed(prisma);
       for (const u of SEED_USERS) {
         console.log(`Seeded ${u.role} ${u.email} (password: ${u.password})`);
       }
-    })
-    .catch((err) => {
-      console.error(err);
-      process.exit(1);
-    })
-    .finally(async () => {
+    } finally {
       await prisma.$disconnect();
-    });
+    }
+  }
+  main().catch((err: unknown) => {
+    console.error(err);
+    process.exitCode = 1;
+  });
 }

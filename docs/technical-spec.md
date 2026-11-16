@@ -28,7 +28,11 @@ Confirmed architecture:
 - **Frontend**: React + TypeScript using Vite
 - **Styling**: Tailwind CSS
 - **Backend**: Node.js + Express + TypeScript
-- **Database**: PostgreSQL with Prisma
+- **Database**: PostgreSQL with Prisma 7 and the `@prisma/adapter-pg` driver adapter.
+  CLI configuration and migration paths live in `backend/prisma.config.ts`;
+  it loads dotenv explicitly and uses `DATABASE_URL` when supplied. Generate
+  the client after installing dependencies. The adapter creates its own
+  PostgreSQL pool, which is disposed by `prisma.$disconnect()`.
 - **Authentication**: Email/password authentication for manually seeded users with bcrypt password hashing and HTTP-only cookie sessions
 
 ### 3.2 Core modules

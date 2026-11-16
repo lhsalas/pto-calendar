@@ -2,14 +2,16 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import request from 'supertest';
 import bcrypt from 'bcryptjs';
 import type { Express } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../../src/lib/prismaClient.js';
 import { createApp } from '../../src/server.js';
 import { resetEnvForTests } from '../../src/config/env.js';
 import { prisma as appPrisma } from '../../src/lib/prisma.js';
 import { __resetAuthUserCacheForTests } from '../../src/middleware/requireAuth.js';
 import { runSeed } from '../../prisma/seed.js';
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient(
+  process.env.DATABASE_URL ?? 'postgresql://pto:pto@localhost:5432/pto_test?schema=public',
+);
 
 const SEED = {
   lead: { email: 'lead@example.com', password: 'lead-dev-password' },

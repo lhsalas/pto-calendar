@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { z } from 'zod';
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
+import { prisma } from '../src/lib/prisma.js';
 import { parseSeedHolidaysArgs } from '../scripts/args.js';
 import { seedDefaults } from '../src/services/holidays/HolidayService.js';
 import {
@@ -74,7 +75,6 @@ async function main(): Promise<void> {
     targets = [cc as SupportedCountryCode];
   }
 
-  const prisma = new PrismaClient();
   try {
     const actor = parsed.data.LEAD_EMAIL
       ? await prisma.user.findUnique({ where: { email: parsed.data.LEAD_EMAIL.toLowerCase() } })
@@ -109,5 +109,5 @@ async function main(): Promise<void> {
 
 main().catch((err: unknown) => {
   console.error('db:seed-holidays failed:', err);
-  process.exit(1);
+  process.exitCode = 1;
 });

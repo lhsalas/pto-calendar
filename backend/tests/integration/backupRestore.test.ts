@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../../src/lib/prismaClient.js';
 
 const repoRoot = join(import.meta.dirname, '..', '..', '..');
 const SCHEMA_SANITIZER = join(repoRoot, 'infra/deploy/sql-sanitize-schema.sed');
@@ -266,7 +266,7 @@ function decrypt(ciphertextPath: string, plaintextPath: string, passphrase: stri
 }
 
 async function selectCount(url: string, table: string): Promise<number> {
-  const client = new PrismaClient({ datasources: { db: { url } } });
+  const client = createPrismaClient(url);
   const rows = await client.$queryRawUnsafe<{ count: bigint }[]>(
     `SELECT COUNT(*)::bigint AS count FROM "${table}"`,
   );
@@ -275,7 +275,7 @@ async function selectCount(url: string, table: string): Promise<number> {
   return Number(count);
 }
 
-const sourcePrisma = new PrismaClient({ datasources: { db: { url: SOURCE_URL } } });
+const sourcePrisma = createPrismaClient(SOURCE_URL);
 const runner = detectRunner();
 const testOrSkip = runner === 'none' ? it.skip : it;
 
@@ -287,7 +287,7 @@ const testOrSkip = runner === 'none' ? it.skip : it;
 const FIXTURE_EMAIL = `backup-restore-${process.pid}@example.test`;
 
 async function createSourceFixture(): Promise<void> {
-  const client = new PrismaClient({ datasources: { db: { url: SOURCE_URL } } });
+  const client = createPrismaClient(SOURCE_URL);
   try {
     const user = await client.user.create({
       data: {
@@ -322,7 +322,7 @@ async function createSourceFixture(): Promise<void> {
 }
 
 async function removeSourceFixture(): Promise<void> {
-  const client = new PrismaClient({ datasources: { db: { url: SOURCE_URL } } });
+  const client = createPrismaClient(SOURCE_URL);
   try {
     await client.auditLog.deleteMany({ where: { actor: { email: FIXTURE_EMAIL } } });
     await client.user.deleteMany({ where: { email: FIXTURE_EMAIL } });
