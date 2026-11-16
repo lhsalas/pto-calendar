@@ -12,15 +12,18 @@ images are clean, safe, patched, or runtime-validated.
 is the reviewed inventory. It accepts only the listed image reference
 including its SHA-256 digest, advisory, package, installed version, severity,
 target and literal path. No wildcard, tag-only, future-digest or future-CVE
-acceptance is implied. Runtime pins, topology and the Node baseline are unchanged.
+acceptance is implied. #273 itself changed no runtime pins or topology; the
+separately reviewed #248 update now aligns the Node baseline to 24.22.3.
 
-The 2026-11-15 `linux/arm64` revalidation with Trivy **0.76.2** found:
+The reviewed 2026-11-15 `linux/arm64` evidence with Trivy **0.76.2** gives the
+current inventory below. #248's Node row uses its explicit subsequent
+fixed-DB review, not an automatic transfer from #273's original 24.22.1 pin:
 
 | Current image (full digest is in the manifest) | New temporary matches | Unchanged legacy matches | Raw fixable HIGH/CRITICAL |
 | ---------------------------------------------- | --------------------: | -----------------------: | ------------------------: |
 | Caddy `2-alpine`, `eb4d35b7452d…`              |                     5 |                        5 |                        10 |
 | nginx `1.29-alpine`, `5616878291a2…`           |                    13 |                       45 |                        58 |
-| Node `24.22.1-alpine`, `06d7adf3e0ef…`         |                     3 |                        3 |                         6 |
+| Node `24.22.3-alpine`, `116b800c3754…`         |                     3 |                        3 |                         6 |
 | PostgreSQL `16-alpine`, `f46107955874…`        |                    19 |                       26 |                        45 |
 | **Total**                                      |                **40** |                   **79** |                   **119** |
 
@@ -120,9 +123,30 @@ policy change with rationale and a bounded deadline, never an automated refresh.
 ## Explicit new-digest review (#248 and later PRs)
 
 Changing a pin deliberately blocks this policy until that PR reviews the new
-digest. #273 does **not** pre-authorize Node 24.22.3 or any other replacement.
-Use fresh raw/legacy scans of the candidate, retain evidence and obtain explicit
-review of every additional accepted tuple before editing the manifest.
+digest. Historical #273 did **not** pre-authorize Node 24.22.3. On 2026-11-15,
+after #273 merged, the coordinator explicitly authorized #248's independently
+reviewed replacement entry, SHA-256
+`1588794398fe9fe68ecf76e90d91d9a973c56a146094303f528f057f9dc8bdf8`.
+All six exact tuples were reviewed: three unchanged legacy suppressions
+(brace-expansion CVE-2026-102276/CVE-2026-102278, undici CVE-2026-19534) and
+three temporary undici matches (CVE-2026-109383/CVE-2026-109869/CVE-2026-87018).
+The obsolete Node entry is replaced, never retained as a future-wide allowance.
+
+The [#248 review](node-security-review-2026-11-15.md) records the exact digest
+chain and full raw/converted packet under
+`/tmp/opencode/pto-issue-248-node-baseline-20261115/policy-review/`.
+This was a controlled repeat with the DB identity above, **not a fresh-advisory
+check**: all 19 OS/146 Node packages, 20 vulnerabilities (1 LOW/13 MEDIUM/6 HIGH)
+and zero detected secrets remain visible, including three legacy-suppressed
+rows in conversion. Global approval/expiry/legacy hash and all other image
+entries are unchanged; the deadline remains 2026-12-15 at 00:00 UTC.
+Node internal undici 7.30.2 and the independent 24.22.3 HTTP/2/TLS fixes do not
+remediate npm's bundled undici 6.28.0 findings. Fresh CI still updates its DB.
+
+Future replacement digests remain unauthorized until their own explicit review.
+Retain complete raw/legacy scans and obtain review of every additional accepted
+tuple before editing the manifest; no tag, target or prior acceptance transfers
+automatically.
 
 The JSON schema is:
 
