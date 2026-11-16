@@ -254,6 +254,7 @@ requests.
 - Public holidays are out of scope for MVP ~~(shipped in #112)~~
 - PTO notes are visible only in the `PTOViewModal` (the calendar list and the day chips never display the note body); the detail endpoint returns the note for the owner or a team lead
 - Owners, team leads, and admins can load a note once per PTO details opening, including an empty note; a failed load shows an inline error and can be retried
+- Editing from either PTO details or a 90-day list row loads the authorized note before enabling the form, so date/day-part changes preserve it and explicitly clearing the textarea removes it; a failed detail load keeps the editable form closed and can be retried
 - Multiple team leads are supported
 - Audit logging is included in MVP and stored internally only
 - Calendar PTO data is fetched for the full visible grid range, including adjacent-month days

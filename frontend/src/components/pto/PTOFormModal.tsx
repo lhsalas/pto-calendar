@@ -10,6 +10,8 @@ const DAY_PARTS: DayPart[] = ['morning', 'evening', 'all_day'];
 export interface PTOFormModalProps {
   open: boolean;
   initialPto?: PTOWithUser;
+  /** Only a detail-prepared edit source may enable editing/clearing. */
+  initialNoteLoaded?: boolean;
   defaultStartDate?: string;
   onSubmit: (payload: CreatePTORequest) => Promise<void> | void;
   onClose: () => void;
@@ -26,6 +28,7 @@ function isWeekend(dateStr: string): boolean {
 export function PTOFormModal({
   open,
   initialPto,
+  initialNoteLoaded = false,
   defaultStartDate,
   onSubmit,
   onClose,
@@ -39,6 +42,7 @@ export function PTOFormModal({
   const [note, setNote] = useState<string>(initialPto?.note ?? '');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
+  const unknownNote = initialPto !== undefined && !initialNoteLoaded;
 
   // Capture the date when the modal opens so the reset effect below doesn't
   // re-fire on every re-render. Previously `today` was in the dependency
@@ -74,6 +78,7 @@ export function PTOFormModal({
   }
 
   function validate(): string | null {
+    if (unknownNote) return 'Load the PTO note before editing.';
     if (endDate < startDate) return 'End date cannot be before start date.';
     if (isWeekend(startDate)) return 'Start date cannot fall on a weekend.';
     if (isWeekend(endDate)) return 'End date cannot fall on a weekend.';
@@ -94,7 +99,7 @@ export function PTOFormModal({
         startDate,
         endDate,
         ...(isSingleDay ? { dayPart } : {}),
-        ...(note.length > 0 ? { note } : {}),
+        ...(initialPto || note.length > 0 ? { note } : {}),
       };
       await onSubmit(payload);
     } catch (err) {
@@ -135,71 +140,73 @@ export function PTOFormModal({
               {initialPto ? 'Edit PTO' : 'Add PTO'}
             </h2>
 
-            <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <label className="block text-sm font-medium text-ink dark:text-ink-dark">
-                Start date
-                <input
-                  type="date"
-                  required
-                  value={startDate}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                    handleStartDateChange(e.target.value)
-                  }
-                  data-testid="pto-form-start-date"
-                  className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm tabular-nums text-ink [color-scheme:light] focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark dark:[color-scheme:dark]"
-                />
-              </label>
-              <label className="block text-sm font-medium text-ink dark:text-ink-dark">
-                End date
-                <input
-                  type="date"
-                  required
-                  value={endDate}
-                  min={startDate}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setEndDate(e.target.value)}
-                  data-testid="pto-form-end-date"
-                  className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm tabular-nums text-ink [color-scheme:light] focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark dark:[color-scheme:dark]"
-                />
-              </label>
-            </div>
+            <fieldset disabled={unknownNote}>
+              <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="block text-sm font-medium text-ink dark:text-ink-dark">
+                  Start date
+                  <input
+                    type="date"
+                    required
+                    value={startDate}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                      handleStartDateChange(e.target.value)
+                    }
+                    data-testid="pto-form-start-date"
+                    className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm tabular-nums text-ink [color-scheme:light] focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark dark:[color-scheme:dark]"
+                  />
+                </label>
+                <label className="block text-sm font-medium text-ink dark:text-ink-dark">
+                  End date
+                  <input
+                    type="date"
+                    required
+                    value={endDate}
+                    min={startDate}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setEndDate(e.target.value)}
+                    data-testid="pto-form-end-date"
+                    className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm tabular-nums text-ink [color-scheme:light] focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark dark:[color-scheme:dark]"
+                  />
+                </label>
+              </div>
 
-            {isSingleDay ? (
-              <label className="mb-3 block text-sm font-medium text-ink dark:text-ink-dark">
-                Day part
-                <select
-                  required
-                  value={dayPart}
-                  onChange={(e: ChangeEvent<HTMLSelectElement>) =>
-                    setDayPart(e.target.value as DayPart)
-                  }
+              {isSingleDay ? (
+                <label className="mb-3 block text-sm font-medium text-ink dark:text-ink-dark">
+                  Day part
+                  <select
+                    required
+                    value={dayPart}
+                    onChange={(e: ChangeEvent<HTMLSelectElement>) =>
+                      setDayPart(e.target.value as DayPart)
+                    }
+                    className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 text-sm text-ink focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
+                  >
+                    {DAY_PARTS.map((dp) => (
+                      <option key={dp} value={dp}>
+                        {dp === 'all_day' ? 'All day' : dp === 'morning' ? 'Morning' : 'Evening'}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+
+              <label className="mb-4 block text-sm font-medium text-ink dark:text-ink-dark">
+                Note (optional)
+                <textarea
+                  value={note}
+                  onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setNote(e.target.value)}
+                  maxLength={NOTE_MAX}
+                  rows={3}
                   className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 text-sm text-ink focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
-                >
-                  {DAY_PARTS.map((dp) => (
-                    <option key={dp} value={dp}>
-                      {dp === 'all_day' ? 'All day' : dp === 'morning' ? 'Morning' : 'Evening'}
-                    </option>
-                  ))}
-                </select>
+                />
+                <span className="mt-1 block text-right font-mono text-xs tabular-nums text-ink-muted dark:text-ink-muted-dark">
+                  {note.length}/{NOTE_MAX}
+                </span>
               </label>
-            ) : null}
+            </fieldset>
 
-            <label className="mb-4 block text-sm font-medium text-ink dark:text-ink-dark">
-              Note (optional)
-              <textarea
-                value={note}
-                onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setNote(e.target.value)}
-                maxLength={NOTE_MAX}
-                rows={3}
-                className="mt-1 block w-full rounded border border-border bg-surface-2 px-3 py-2 text-sm text-ink focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 dark:border-border-dark dark:bg-surface-dark-2 dark:text-ink-dark"
-              />
-              <span className="mt-1 block text-right font-mono text-xs tabular-nums text-ink-muted dark:text-ink-muted-dark">
-                {note.length}/{NOTE_MAX}
-              </span>
-            </label>
-
-            {error ? (
+            {error || unknownNote ? (
               <p role="alert" className="mb-3 text-sm text-danger">
-                {error}
+                {error ?? 'Load the PTO note before editing.'}
               </p>
             ) : null}
 
@@ -214,7 +221,7 @@ export function PTOFormModal({
               </button>
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || unknownNote}
                 className="min-h-11 rounded bg-accent px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60 dark:focus-visible:ring-offset-surface-dark"
               >
                 {submitting ? 'Saving…' : 'Save PTO'}
