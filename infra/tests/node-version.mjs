@@ -9,11 +9,11 @@
 //   - the documented `engines.node` floor.
 //
 // `MINIMUM_SUPPORTED_VERSION` is the last Node.js 24.x release that contains
-// the October 2026 security fixes. Bump it (and `.nvmrc`) when a newer 24.x
-// security release ships, so a rebuild can never silently fall back to an
-// unpatched runtime.
+// the November 2026 HTTP/2 and TLS security fixes. Bump it (and `.nvmrc`) when
+// a newer 24.x security release ships, so a rebuild can never silently fall
+// back to an unpatched runtime.
 
-export const MINIMUM_SUPPORTED_VERSION = '24.22.1';
+export const MINIMUM_SUPPORTED_VERSION = '24.22.3';
 export const SUPPORTED_MAJOR = 24;
 export const VERSION_FILE = '.nvmrc';
 

@@ -327,6 +327,22 @@ jobs:
     needs: [build]
     steps:
       - uses: actions/checkout@v7
+      - name: Verify every actual Node build and runtime stage
+        run: |
+          set -euo pipefail
+          floor="$(cat .nvmrc)"
+          # The final frontend image is nginx, not Node. Export and execute its
+          # actual builder instead. Backend build also serves app migrations
+          # and production bootstrap; runtime serves production migrations/API.
+          for target in backend:build frontend:build backend:runtime; do
+            component="${target%%:*}"
+            stage="${target##*:}"
+            image="pto-node-baseline-${component}-${stage}:${GITHUB_SHA}"
+            docker build --file "${component}/Dockerfile" --target "${stage}" --tag "${image}" .
+            actual="$(docker run --rm --network none --entrypoint node "${image}" -p 'process.version')"
+            echo "${target} reports Node.js ${actual}"
+            node infra/tests/node-runtime-check.mjs --actual "${actual}" --floor "${floor}"
+          done
       - name: Build and start all-in-one compose
         run: |
           docker compose -f docker-compose.app.yml up --build -d

@@ -53,6 +53,8 @@ if (pinnedVersion) {
 }
 
 const digestPattern = /@sha256:[0-9a-f]{64}/;
+const nodeImages = new Set();
+const nodeTargets = new Set();
 for (const dockerfile of ['backend/Dockerfile', 'frontend/Dockerfile']) {
   const content = read(dockerfile);
   const fromLines = content
@@ -61,6 +63,10 @@ for (const dockerfile of ['backend/Dockerfile', 'frontend/Dockerfile']) {
     .filter((line) => line.startsWith('FROM node:'));
   check(`${dockerfile} declares at least one Node base image`, fromLines.length > 0);
   for (const line of fromLines) {
+    nodeImages.add(line.split(/\s+/)[1]);
+    const stage = /\sAS\s+(\S+)$/i.exec(line)?.[1];
+    check(`${dockerfile} names its Node stage for executable CI checks`, Boolean(stage));
+    if (stage) nodeTargets.add(`${dockerfile.split('/')[0]}:${stage}`);
     check(
       `${dockerfile} pins an immutable digest (${line.split(' ')[1] ?? line})`,
       digestPattern.test(line),
@@ -71,10 +77,19 @@ for (const dockerfile of ['backend/Dockerfile', 'frontend/Dockerfile']) {
     );
   }
 }
+check('all Node stages use the same immutable image', nodeImages.size === 1);
+const checkedTargets = new Set(
+  (/for target in ([^\n;]+); do/.exec(read('.github/workflows/ci.yml'))?.[1] ?? '')
+    .split(/\s+/)
+    .filter(Boolean),
+);
+for (const target of nodeTargets) {
+  check(`Docker smoke executes the actual ${target} Node stage`, checkedTargets.has(target));
+}
 
 const rootPackage = JSON.parse(read('package.json'));
 const enginesFloor = String(rootPackage.engines?.node ?? '');
-const floorMatch = />=\s*(\d+\.\d+\.\d+)/.exec(enginesFloor);
+const floorMatch = /^>=\s*(\d+\.\d+\.\d+)$/.exec(enginesFloor);
 check(`root package.json declares an engines.node floor (${enginesFloor})`, Boolean(floorMatch));
 if (floorMatch) {
   check(
@@ -82,10 +97,15 @@ if (floorMatch) {
     compareVersions(floorMatch[1], MINIMUM_SUPPORTED_VERSION) >= 0,
   );
   check(
-    `engines.node floor is at least the .nvmrc version (${pinned})`,
-    compareVersions(floorMatch[1], pinned) >= 0,
+    `engines.node floor equals the .nvmrc version (${pinned})`,
+    compareVersions(floorMatch[1], pinned) === 0,
   );
 }
+const lockfile = JSON.parse(read('package-lock.json'));
+check(
+  'package-lock.json root Node engine matches package.json',
+  lockfile.packages?.['']?.engines?.node === enginesFloor,
+);
 
 const workflowDir = resolve(root, '.github/workflows');
 const workflows = readdirSync(workflowDir)
