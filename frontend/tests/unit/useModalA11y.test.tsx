@@ -1,7 +1,6 @@
 import type { JSX } from 'react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
-import type { RefObject } from 'react';
+import { render, renderHook, screen, fireEvent, act } from '@testing-library/react';
 import { useModalA11y } from '../../src/hooks/useModalA11y';
 
 function TestModal({ open, onClose }: { open: boolean; onClose: () => void }): JSX.Element {
@@ -124,14 +123,9 @@ describe('useModalA11y', () => {
   });
 
   it('returns a stable ref object', () => {
-    const refHolder: { current: RefObject<HTMLDivElement | null> | null } = { current: null };
-    function Probe({ open }: { open: boolean }): null {
-      refHolder.current = useModalA11y<HTMLDivElement>(open, () => {});
-      return null;
-    }
-    const { rerender } = render(<Probe open />);
-    const first = refHolder.current;
-    rerender(<Probe open />);
-    expect(refHolder.current).toBe(first);
+    const { result, rerender } = renderHook(() => useModalA11y<HTMLDivElement>(true, () => {}));
+    const first = result.current;
+    rerender();
+    expect(result.current).toBe(first);
   });
 });

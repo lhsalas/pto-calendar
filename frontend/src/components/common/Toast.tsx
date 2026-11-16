@@ -52,7 +52,6 @@ export function Toast({ toast, onDismiss }: ToastProps): JSX.Element {
 
   useEffect(() => {
     if (prefersReducedMotion) {
-      setProgress(0);
       return;
     }
     rafRef.current = window.requestAnimationFrame(tick);
@@ -102,7 +101,8 @@ export function Toast({ toast, onDismiss }: ToastProps): JSX.Element {
   }, [hovered, focusWithin, toast.durationMs]);
 
   const paused = hovered || focusWithin;
-  const remainingMs = Math.max(0, toast.durationMs * progress);
+  const displayProgress = prefersReducedMotion ? 0 : progress;
+  const remainingMs = Math.max(0, toast.durationMs * displayProgress);
 
   return (
     <motion.li
@@ -181,9 +181,9 @@ export function Toast({ toast, onDismiss }: ToastProps): JSX.Element {
         data-testid="toast-progress"
         data-paused={paused ? 'true' : 'false'}
         data-duration-ms={toast.durationMs}
-        data-progress={progress.toFixed(3)}
+        data-progress={displayProgress.toFixed(3)}
         className="absolute inset-x-0 bottom-0 h-[2px] origin-left bg-accent/40"
-        style={{ transform: `scaleX(${progress})` }}
+        style={{ transform: `scaleX(${displayProgress})` }}
       >
         <span className="sr-only">
           Auto-dismiss in {formatDuration(remainingMs)}
