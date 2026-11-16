@@ -39,7 +39,9 @@ This document defines the testing and automation strategy for the PTO calendar M
 
 React and React DOM use the same 19.x runtime line in the frontend and root
 test dependency graph. Their type packages also share the 19.x line; component
-tests must not resolve a second React runtime.
+tests must not resolve a second React runtime. Toast provider tests exercise
+batched pushes, duplicate refresh, dismissal, eviction and expiry under Strict
+Mode, including cleanup of timers on unmount.
 
 ## 5. Coverage Targets
 
