@@ -1,5 +1,6 @@
 import type { Request } from 'express';
-import rateLimit, { type RateLimitExceededEventHandler } from 'express-rate-limit';
+import { isIP } from 'node:net';
+import rateLimit, { ipKeyGenerator, type RateLimitExceededEventHandler } from 'express-rate-limit';
 import { Redis } from 'ioredis';
 import { RedisStore, type RedisReply } from 'rate-limit-redis';
 import { loadEnv } from '../config/env.js';
@@ -15,7 +16,10 @@ function buildHandler(message: string): RateLimitExceededEventHandler {
 }
 
 export function clientIpKey(req: Request): string {
-  return req.ip ?? req.socket.remoteAddress ?? 'unknown';
+  const ip = req.ip;
+  if (ip && isIP(ip)) return ipKeyGenerator(ip);
+  const remote = req.socket.remoteAddress;
+  return remote && isIP(remote) ? ipKeyGenerator(remote) : 'unknown';
 }
 
 function sharedStore(prefix: string): RedisStore | undefined {
@@ -27,17 +31,11 @@ function sharedStore(prefix: string): RedisStore | undefined {
     maxRetriesPerRequest: 1,
     connectTimeout: 1_000,
   });
-  const store = new RedisStore({
+  return new RedisStore({
     prefix,
     sendCommand: (command: string, ...args: string[]) =>
       redisClient!.call(command, ...args) as Promise<RedisReply>,
   });
-  // RedisStore preloads its Lua scripts in the constructor. Attach handlers
-  // so an unavailable store is reported by the limiter on request rather than
-  // as an unhandled startup rejection.
-  void store.incrementScriptSha.catch(() => undefined);
-  void store.getScriptSha.catch(() => undefined);
-  return store;
 }
 
 function isProbe(req: Request): boolean {

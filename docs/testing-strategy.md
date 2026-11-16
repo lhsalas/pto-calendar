@@ -117,7 +117,9 @@ non-`Error` fallback by mocking the API boundary, and the `AuthContext` and
 | Frontend critical components (`components/pto/PTOFormModal.tsx`, `components/calendar/DayCell.tsx`) | 80% | tracked | tracked | tracked | Reported and blocking |
 | Other frontend | tracked | tracked | tracked | tracked | Reported, not blocking |
 
-Note: `lib/rateLimit.ts` is excluded from coverage entirely (factory wrapper around `express-rate-limit`; no branching logic to test).
+`lib/rateLimit.ts` is measured by integration coverage, including synthetic Redis
+command tests that exercise the actual limiter and store without a Redis service.
+These tests do not certify behavior against a real Redis deployment.
 
 > **Coverage partition (single source of truth).** Each backend source file is gated by exactly one coverage config. Service-layer files (`lib/lifecycle.ts`, `services/pto/**`, `services/audit/**`, `services/calendar/**`) are measured by the **unit** run (`backend/vitest.config.ts`) and excluded from the integration config because their branches (SIGTERM/SIGINT handlers, Zod validation, audit `listForEntity`, calendar SQL) are either unsafe to exercise via real HTTP requests or duplicated by the unit suite. HTTP routes + `lib/rateLimit.ts` are measured by the **integration** run (`backend/vitest.integration.config.ts`) and excluded from the unit config because they require a live Prisma + Express stack to exercise meaningfully. The PR-comment coverage summary aggregates only the integration partition; per-file thresholds inside each config are the real gate.
 
