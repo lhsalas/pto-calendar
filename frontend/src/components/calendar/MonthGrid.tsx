@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { DayCell } from './DayCell';
 import type { CalendarDay } from '../../lib/calendar';
 import type { Holiday, PTOWithUser } from '../../types/api';

@@ -37,6 +37,12 @@ This document defines the testing and automation strategy for the PTO calendar M
 | Type check | `tsc --noEmit` | Backend and frontend in CI |
 | Mutation (post-MVP) | Stryker | Optional, not enforced for MVP |
 
+React and React DOM use the same 19.x runtime line in the frontend and root
+test dependency graph. Their type packages also share the 19.x line; component
+tests must not resolve a second React runtime. Toast provider tests exercise
+batched pushes, duplicate refresh, dismissal, eviction and expiry under Strict
+Mode, including cleanup of timers on unmount.
+
 ## 5. Coverage Targets
 
 Coverage targets are declared in `vitest.config.ts`. CI currently executes backend

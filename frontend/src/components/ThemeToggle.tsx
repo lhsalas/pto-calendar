@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import type { ReactNode } from 'react';
 import { useTheme } from '../context/useTheme';
 import type { ThemeMode } from '../context/themeContextValue';

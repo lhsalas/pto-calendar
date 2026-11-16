@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ToastContext, type Toast, type ToastContextValue, type ToastInput } from './ToastContext';
 
@@ -28,11 +29,15 @@ function scheduleDismiss(
 
 export function ToastProvider({ children }: { children: ReactNode }): JSX.Element {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // Event callbacks own the current list, including updates not yet rendered.
+  const toastsRef = useRef<Toast[]>([]);
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const idCounterRef = useRef(0);
 
   const dismiss = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+    const next = toastsRef.current.filter((t) => t.id !== id);
+    toastsRef.current = next;
+    setToasts(next);
     const handle = timersRef.current.get(id);
     if (handle !== undefined) {
       clearTimeout(handle);
@@ -40,18 +45,15 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
     }
   }, []);
 
-  const push = useCallback((input: ToastInput): string => {
-    const durationMs = input.durationMs ?? DEFAULT_DURATION_MS;
-    const tone = input.tone;
-    const title = input.title;
-    const createdAt = Date.now();
+  const push = useCallback(
+    (input: ToastInput): string => {
+      const durationMs = input.durationMs ?? DEFAULT_DURATION_MS;
+      const tone = input.tone;
+      const title = input.title;
+      const createdAt = Date.now();
 
-    let assignedId = '';
-    setToasts((prev) => {
-      const existing = prev.find((t) => t.tone === tone && t.title === title);
+      const existing = toastsRef.current.find((t) => t.tone === tone && t.title === title);
       const id = existing?.id ?? `${makeId()}-${++idCounterRef.current}`;
-      assignedId = id;
-
       const next: Toast = {
         id,
         tone,
@@ -61,21 +63,22 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
         durationMs,
         createdAt,
       };
-
-      const without = existing ? prev.filter((t) => t.id !== id) : prev;
-      const ordered = [next, ...without];
-      return ordered.length > MAX_VISIBLE ? ordered.slice(0, MAX_VISIBLE) : ordered;
-    });
-
-    queueMicrotask(() => {
-      if (!assignedId) return;
-      scheduleDismiss(timersRef.current, assignedId, durationMs, () => {
-        setToasts((prev) => prev.filter((t) => t.id !== assignedId));
+      const ordered = [next, ...toastsRef.current.filter((t) => t.id !== id)];
+      for (const evicted of ordered.slice(MAX_VISIBLE)) {
+        const handle = timersRef.current.get(evicted.id);
+        if (handle !== undefined) clearTimeout(handle);
+        timersRef.current.delete(evicted.id);
+      }
+      const visible = ordered.slice(0, MAX_VISIBLE);
+      toastsRef.current = visible;
+      setToasts(visible);
+      scheduleDismiss(timersRef.current, id, durationMs, () => {
+        dismiss(id);
       });
-    });
-
-    return assignedId;
-  }, []);
+      return id;
+    },
+    [dismiss],
+  );
 
   useEffect(() => {
     const timers = timersRef.current;

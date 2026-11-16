@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import type { KeyboardEvent } from 'react';
 import { motion } from 'motion/react';
 import { PTOChip } from '../pto/PTOChip';

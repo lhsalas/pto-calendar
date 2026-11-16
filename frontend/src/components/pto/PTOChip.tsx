@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { dayPartLabel, initials, readableTextOn } from '../../lib/calendar';
 import type { PTOWithUser } from '../../types/api';
 

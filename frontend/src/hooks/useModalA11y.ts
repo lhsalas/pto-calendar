@@ -4,7 +4,7 @@ import type { RefObject } from 'react';
 export function useModalA11y<T extends HTMLElement = HTMLDivElement>(
   open: boolean,
   onClose: () => void,
-): RefObject<T> {
+): RefObject<T | null> {
   const cardRef = useRef<T>(null);
 
   useEffect(() => {

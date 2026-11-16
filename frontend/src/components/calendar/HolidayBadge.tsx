@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { motion } from 'motion/react';
 import type { Holiday } from '../../types/api';
 

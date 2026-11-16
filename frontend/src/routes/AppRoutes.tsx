@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { LoginPage } from '../pages/LoginPage';
 import { SetupAccountPage } from '../pages/SetupAccountPage';
