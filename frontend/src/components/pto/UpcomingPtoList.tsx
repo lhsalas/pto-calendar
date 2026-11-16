@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { useMemo } from 'react';
 import { motion } from 'motion/react';
 import type { DayPart, PTOWithUser, User } from '../../types/api';

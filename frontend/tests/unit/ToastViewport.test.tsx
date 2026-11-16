@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { describe, expect, it } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { ToastProvider } from '../../src/context/ToastProvider';

@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ToastContext, type Toast, type ToastContextValue, type ToastInput } from './ToastContext';
 

@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { ViewToggle, type ViewMode } from './ViewToggle';
 import { ChevronLeft, ChevronRight } from '../icons';
 

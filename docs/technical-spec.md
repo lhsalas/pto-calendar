@@ -25,7 +25,7 @@ The application will support:
 
 ### 3.1 High-level architecture
 Confirmed architecture:
-- **Frontend**: React + TypeScript using Vite
+- **Frontend**: React 19 + TypeScript using Vite
 - **Styling**: Tailwind CSS
 - **Backend**: Node.js + Express + TypeScript
 - **Database**: PostgreSQL with Prisma 7 and the `@prisma/adapter-pg` driver adapter.

@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import type { RefObject } from 'react';
@@ -105,8 +106,25 @@ describe('useModalA11y', () => {
     expect(screen.getByRole('button', { name: 'Only' })).toBeInTheDocument();
   });
 
+  it('restores the listener and focus behavior when reopened', () => {
+    const onClose = vi.fn();
+    const { rerender } = render(<HiddenModal open={false} onClose={onClose} />);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+
+    rerender(<HiddenModal open onClose={onClose} />);
+    expect(screen.getByRole('button', { name: 'Only' })).toHaveFocus();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    rerender(<HiddenModal open={false} onClose={onClose} />);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(document.body.style.overflow).not.toBe('hidden');
+  });
+
   it('returns a stable ref object', () => {
-    const refHolder: { current: RefObject<HTMLDivElement> | null } = { current: null };
+    const refHolder: { current: RefObject<HTMLDivElement | null> | null } = { current: null };
     function Probe({ open }: { open: boolean }): null {
       refHolder.current = useModalA11y<HTMLDivElement>(open, () => {});
       return null;

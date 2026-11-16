@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PTOWithUser, User } from '../../types/api';
 import { editViewerKey, isPreparedPto, loadPtoForEdit, type PreparedPto } from '../../lib/ptoEdit';

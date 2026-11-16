@@ -1,5 +1,6 @@
+import type { JSX } from 'react';
 import { describe, expect, it } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { useState } from 'react';
@@ -95,9 +96,7 @@ describe('AuthContext', () => {
       expect(screen.getByTestId('status').textContent).toBe('unauthenticated');
     });
 
-    await act(async () => {
-      await user.click(screen.getByRole('button', { name: /login/ }));
-    });
+    await user.click(screen.getByRole('button', { name: /login/ }));
 
     await waitFor(() => {
       expect(screen.getByTestId('email').textContent).toBe(STUB_USER.email);
@@ -147,9 +146,7 @@ describe('AuthContext', () => {
       expect(screen.getByTestId('error').textContent).toBe('none');
     });
 
-    await act(async () => {
-      await user.click(screen.getByRole('button', { name: /try/ }));
-    });
+    await user.click(screen.getByRole('button', { name: /try/ }));
 
     await waitFor(() => {
       expect(screen.getByTestId('error').textContent).toBe('Invalid email or password.');
@@ -261,9 +258,7 @@ describe('AuthContext', () => {
       </AuthProvider>,
     );
 
-    await act(async () => {
-      await user.click(screen.getByRole('button', { name: /try/ }));
-    });
+    await user.click(screen.getByRole('button', { name: /try/ }));
 
     await waitFor(() => {
       expect(screen.getByTestId('error').textContent).toBe('Token is invalid.');
@@ -285,9 +280,7 @@ describe('AuthContext', () => {
       expect(screen.getByTestId('status').textContent).toBe('authenticated');
     });
 
-    await act(async () => {
-      await user.click(screen.getByRole('button', { name: /logout/ }));
-    });
+    await user.click(screen.getByRole('button', { name: /logout/ }));
 
     await waitFor(() => {
       expect(screen.getByTestId('status').textContent).toBe('unauthenticated');
