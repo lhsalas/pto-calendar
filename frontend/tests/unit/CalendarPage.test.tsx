@@ -62,6 +62,26 @@ function renderPage(): ReturnType<typeof render> {
   );
 }
 
+// Keep calendar readiness independent of the user header without a timed delay.
+function holdCalendarResponse(): { requested: Promise<void>; release: () => void } {
+  let signalRequested!: () => void;
+  const requested = new Promise<void>((resolve) => {
+    signalRequested = resolve;
+  });
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  server.use(
+    http.get('/pto', async () => {
+      signalRequested();
+      await released;
+      return HttpResponse.json([]);
+    }),
+  );
+  return { requested, release };
+}
+
 describe('CalendarPage', () => {
   it('keeps failed direct-list preparation non-editable and retries without a blank fallback', async () => {
     const user = userEvent.setup();
@@ -601,35 +621,53 @@ describe('CalendarPage', () => {
   });
 
   it('opens the create modal with the clicked weekday as the start date', async () => {
-    server.use(http.get('/pto', () => HttpResponse.json([])));
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
-    });
-    const cell = screen.getByTestId('day-cell-2026-06-15');
-    await user.click(cell);
-    await waitFor(() => {
-      expect(screen.getByRole('dialog', { name: /add pto/i })).toBeVisible();
-    });
-    const startInput = screen.getByLabelText(/start date/i) as HTMLInputElement;
-    const endInput = screen.getByLabelText(/end date/i) as HTMLInputElement;
-    expect(startInput.value).toBe('2026-06-15');
-    expect(endInput.value).toBe('2026-06-15');
+    const calendar = holdCalendarResponse();
+    try {
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => {
+        expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+      });
+      await calendar.requested;
+      expect(screen.queryByTestId('day-cell-2026-06-15')).not.toBeInTheDocument();
+      const cellReady = screen.findByTestId('day-cell-2026-06-15');
+      calendar.release();
+      const cell = await cellReady;
+      await user.click(cell);
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: /add pto/i })).toBeVisible();
+      });
+      const startInput = screen.getByLabelText(/start date/i) as HTMLInputElement;
+      const endInput = screen.getByLabelText(/end date/i) as HTMLInputElement;
+      expect(startInput.value).toBe('2026-06-15');
+      expect(endInput.value).toBe('2026-06-15');
+    } finally {
+      calendar.release();
+    }
   });
 
   it('does not open the create modal when a Saturday cell is clicked', async () => {
-    server.use(http.get('/pto', () => HttpResponse.json([])));
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
-    });
-    const sat = screen.getByTestId('day-cell-2026-06-20');
-    const sun = screen.getByTestId('day-cell-2026-06-21');
-    await user.click(sat);
-    await user.click(sun);
-    expect(screen.queryByRole('dialog', { name: /add pto/i })).not.toBeInTheDocument();
+    const calendar = holdCalendarResponse();
+    try {
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => {
+        expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+      });
+      await calendar.requested;
+      expect(screen.queryByTestId('day-cell-2026-06-20')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('day-cell-2026-06-21')).not.toBeInTheDocument();
+      const saturdayReady = screen.findByTestId('day-cell-2026-06-20');
+      calendar.release();
+      const sat = await saturdayReady;
+      const sun = await screen.findByTestId('day-cell-2026-06-21');
+      await user.click(sat);
+      expect(screen.queryByRole('dialog', { name: /add pto/i })).not.toBeInTheDocument();
+      await user.click(sun);
+      expect(screen.queryByRole('dialog', { name: /add pto/i })).not.toBeInTheDocument();
+    } finally {
+      calendar.release();
+    }
   });
 
   it('does not open the create modal when a chip is clicked (stopPropagation)', async () => {
@@ -664,21 +702,30 @@ describe('CalendarPage', () => {
   });
 
   it('reverts to the default start date after closing a cell-driven modal', async () => {
-    server.use(http.get('/pto', () => HttpResponse.json([])));
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
-    });
-    await user.click(screen.getByTestId('day-cell-2026-06-15'));
-    await waitFor(() => {
-      expect(screen.getByRole('dialog', { name: /add pto/i })).toBeVisible();
-    });
-    await user.click(screen.getByRole('button', { name: /cancel/i }));
-    await user.click(screen.getByRole('button', { name: /^add pto$/i }));
-    const today = new Date().toISOString().slice(0, 10);
-    const startInput = screen.getByLabelText(/start date/i) as HTMLInputElement;
-    expect(startInput.value).toBe(today);
+    const calendar = holdCalendarResponse();
+    try {
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => {
+        expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+      });
+      await calendar.requested;
+      expect(screen.queryByTestId('day-cell-2026-06-15')).not.toBeInTheDocument();
+      const cellReady = screen.findByTestId('day-cell-2026-06-15');
+      calendar.release();
+      const cell = await cellReady;
+      await user.click(cell);
+      await waitFor(() => {
+        expect(screen.getByRole('dialog', { name: /add pto/i })).toBeVisible();
+      });
+      await user.click(screen.getByRole('button', { name: /cancel/i }));
+      await user.click(screen.getByRole('button', { name: /^add pto$/i }));
+      const today = new Date().toISOString().slice(0, 10);
+      const startInput = screen.getByLabelText(/start date/i) as HTMLInputElement;
+      expect(startInput.value).toBe(today);
+    } finally {
+      calendar.release();
+    }
   });
 
   it('shows the loading state while the current user is still being resolved', async () => {
