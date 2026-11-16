@@ -55,12 +55,12 @@ export function useHolidays(start: string, end: string): UseHolidaysResult {
 
   const refetch = useCallback(async (): Promise<void> => {
     const session = activeSession.current;
-    if (!session?.active || session.range !== range) return;
+    if (!session?.active) return;
     const id = ++requestId.current;
     setLoading(true);
     setError(null);
     try {
-      const list = await apiRequest<Holiday[]>(`/holidays?${range}`);
+      const list = await apiRequest<Holiday[]>(`/holidays?${session.range}`);
       if (session.active && id === requestId.current) setItems(list);
     } catch (err) {
       if (session.active && id === requestId.current)
@@ -68,7 +68,7 @@ export function useHolidays(start: string, end: string): UseHolidaysResult {
     } finally {
       if (session.active && id === requestId.current) setLoading(false);
     }
-  }, [range]);
+  }, []);
 
   const create = useCallback(
     async (payload: CreateHolidayRequest): Promise<Holiday> => {

@@ -50,12 +50,12 @@ export function usePtoList(start: string, end: string): UsePtoListResult {
 
   const refetch = useCallback(async (): Promise<void> => {
     const session = activeSession.current;
-    if (!session?.active || session.range !== range) return;
+    if (!session?.active) return;
     const id = ++requestId.current;
     setLoading(true);
     setError(null);
     try {
-      const list = await apiRequest<PTOWithUser[]>(`/pto?${range}`);
+      const list = await apiRequest<PTOWithUser[]>(`/pto?${session.range}`);
       if (session.active && id === requestId.current) setItems(list);
     } catch (err) {
       if (session.active && id === requestId.current)
@@ -63,7 +63,7 @@ export function usePtoList(start: string, end: string): UsePtoListResult {
     } finally {
       if (session.active && id === requestId.current) setLoading(false);
     }
-  }, [range]);
+  }, []);
 
   const create = useCallback(
     async (payload: CreatePTORequest): Promise<PTOWithUser> => {
