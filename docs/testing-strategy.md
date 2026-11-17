@@ -113,6 +113,9 @@ non-`Error` fallback by mocking the API boundary, and the `AuthContext` and
 |---|---|---|---|---|---|
 | `src/services/authorization/**` | 100% | 100% | 100% | 100% | Highest-risk surface; centralized note-visibility + modification logic |
 | `src/services/tokens/**` | 100% | 100% | 100% | 100% | Token parsing, scopes, validity and lifecycle |
+| `src/routes/tokens.ts` | 100% | 100% | 100% | 100% | Session-only credential-management HTTP adapter |
+| `src/middleware/tokenManagement.ts` | 100% | 100% | 100% | 100% | Early no-store/session boundary and safe errors |
+| `src/lib/logSanitizers.ts` | 100% | 100% | 100% | 100% | Correlation IDs and credential-path redaction |
 | `src/services/pto/validation.ts` | 100% | 100% | 100% | 100% | All PTO business rules |
 | `src/services/pto/schemas.ts` | 100% | 100% | 100% | 100% | Shared Zod schemas (route ↔ validation) |
 | `src/services/auth/schemas.ts` | 100% | 100% | 100% | 100% | Shared Zod login schema |
@@ -143,7 +146,14 @@ concurrent issuance, invalidation and UTC round-trips across process timezones;
 these require a separate identity-verified disposable-database run before
 claiming database-backed guarantees.
 
-> **Coverage partition.** Service-layer files (`lib/lifecycle.ts`, `services/pto/**`, `services/audit/**`, `services/calendar/**`) are measured by the **unit** run (`backend/vitest.config.ts`) and excluded from integration. HTTP routes + `lib/rateLimit.ts` are measured by the **integration** run (`backend/vitest.integration.config.ts`) and excluded from unit coverage. The sets are not strictly disjoint: for example, `lib/prismaClient.ts` and holiday services can appear in both reports. The PR-comment backend summary uses integration coverage only; configured path thresholds in each run are separate gates.
+> **Coverage partition.** Service-layer files (`lib/lifecycle.ts`, `services/pto/**`, `services/audit/**`, `services/calendar/**`) are measured by the **unit** run (`backend/vitest.config.ts`) and excluded from integration. Existing auth/PTO/user/health/holiday routes and `lib/rateLimit.ts` are measured by the **integration** run and excluded from unit coverage. The new security-sensitive token router is deliberately included in both runs, with a 100% unit floor; new routes are no longer blanket-excluded from unit instrumentation. The sets are not strictly disjoint: for example, `lib/prismaClient.ts` and holiday services can appear in both reports. The PR-comment backend summary uses integration coverage only; configured path thresholds in each run are separate gates.
+
+Token-management tests exercise all-role ownership, fresh password/version
+proof, failed-auth limiting, bearer/mixed denial, CSRF, no-store and correlation
+headers on parser/auth/limiter failures, show-once metadata/error redaction,
+concurrent HTTP cap enforcement, reset/setup and application-owned pool cleanup.
+Mocked in-process unit transport is separate from the disposable PostgreSQL
+integration suite; written tests alone do not certify a database-backed result.
 
 A coverage run fails if a **blocking** path falls below its configured threshold.
 The local integration requirement remains All files lines ≥90%; the CI coverage

@@ -7,6 +7,7 @@ import {
   revokeAllTokens,
   revokeToken,
   TokenOperationError,
+  TokenLimitError,
   verifyToken,
 } from './tokenService.js';
 
@@ -128,8 +129,8 @@ describe('native personal token service', () => {
   it('rejects a full cap and missing count/insert results rather than issuing misleading success', async () => {
     const full = fixture();
     full.count.mockResolvedValueOnce(result([{ count: 10 }]));
-    await expect(issueToken(full.db, 'owner', 4, { name: 'Laptop' })).rejects.toThrow(
-      'Token operation failed',
+    await expect(issueToken(full.db, 'owner', 4, { name: 'Laptop' })).rejects.toBeInstanceOf(
+      TokenLimitError,
     );
     expect(full.insert).not.toHaveBeenCalled();
     const missingCount = fixture();

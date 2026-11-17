@@ -18,6 +18,13 @@ export class TokenOperationError extends Error {
   }
 }
 
+export class TokenLimitError extends TokenOperationError {
+  constructor() {
+    super();
+    this.name = 'TokenLimitError';
+  }
+}
+
 export interface TokenMetadata {
   id: string;
   name: string;
@@ -81,7 +88,9 @@ export async function issueToken(
            AND revoked_at IS NULL AND expires_at > $3::timestamp`,
         [ownerId, owner.sessionVersion, timestampParameter(createdAt)],
       );
-      if (!active.rows[0] || active.rows[0].count >= 10) throw new TokenOperationError();
+      if (!active.rows[0]) throw new TokenOperationError();
+      // Return a safe result through the driver boundary, not a sensitive cause.
+      if (active.rows[0].count >= 10) return null;
       const created = await tx.query<TokenMetadata>(
         `INSERT INTO ${db.tables.tokens}
            (id, owner_id, name, display_prefix, secret_digest, scopes,
@@ -103,8 +112,10 @@ export async function issueToken(
       if (!created.rows[0]) throw new TokenOperationError();
       return created.rows[0];
     });
+    if (token === null) throw new TokenLimitError();
     return { rawToken: material.rawToken, token };
-  } catch {
+  } catch (error) {
+    if (error instanceof TokenLimitError) throw error;
     throw new TokenOperationError();
   }
 }

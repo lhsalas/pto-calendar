@@ -15,16 +15,27 @@ import { logger } from './lib/logger.js';
 import { createGlobalLimiter, createLoginLimiter } from './lib/rateLimit.js';
 import { loadEnv } from './config/env.js';
 import { safeRequestId, safeReqSerializer, safeResSerializer } from './lib/logSanitizers.js';
+import { createTokenRouter } from './routes/tokens.js';
+import {
+  tokenManagementBoundary,
+  tokenManagementErrorHandler,
+} from './middleware/tokenManagement.js';
+import { createTokenRuntime } from './services/tokens/tokenRuntime.js';
 
-export function createApp(): Express {
+export type ManagedApp = Express & { closeResources(): Promise<void> };
+
+export function createApp(): ManagedApp {
   const env = loadEnv();
-  const app = express();
+  const app = express() as ManagedApp;
+  const tokenRuntime = createTokenRuntime(env.DATABASE_URL);
+  app.closeResources = () => tokenRuntime.close();
 
   app.disable('x-powered-by');
   if (env.TRUST_PROXY_HOPS > 0) {
     app.set('trust proxy', env.TRUST_PROXY_HOPS);
   }
   app.use(helmet());
+  app.use('/auth/tokens', tokenManagementBoundary);
   app.use(
     cors({
       origin: env.CORS_ORIGIN,
@@ -50,7 +61,9 @@ export function createApp(): Express {
 
   app.use(healthRouter);
 
-  app.use('/auth', createAuthRouter(createLoginLimiter()));
+  const loginLimiter = createLoginLimiter();
+  app.use('/auth/tokens', createTokenRouter(tokenRuntime, loginLimiter));
+  app.use('/auth', createAuthRouter(loginLimiter));
   app.use('/pto', ptoRouter);
   app.use('/users', createUsersRouter());
   app.use('/holidays', createHolidaysRouter());
@@ -61,6 +74,7 @@ export function createApp(): Express {
     });
   });
 
+  app.use('/auth/tokens', tokenManagementErrorHandler);
   app.use(errorHandler);
 
   return app;

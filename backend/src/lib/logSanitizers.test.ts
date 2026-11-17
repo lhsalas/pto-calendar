@@ -39,6 +39,13 @@ describe('safeRequestId', () => {
     expect(headerStore['x-request-id']).toBe(id);
   });
 
+  it('does not reflect a pasted personal token as a correlation ID or log identifier', () => {
+    const token = `pto_pat_00000000-0000-4000-8000-000000000000.${'a'.repeat(64)}`;
+    const { req, res, headerStore } = makeReqRes({ 'x-request-id': token });
+    expect(safeRequestId(req, res)).toMatch(UUID_REGEX);
+    expect(headerStore['x-request-id']).not.toBe(token);
+  });
+
   it('replaces a header containing newlines (log-injection guard) with a fresh UUID', () => {
     const malicious = 'abc\nINJECTED LOG LINE: {"msg":"pwn"}';
     const { req, res, headerStore } = makeReqRes({ 'x-request-id': malicious });
@@ -59,6 +66,19 @@ describe('safeRequestId', () => {
 });
 
 describe('safeReqSerializer', () => {
+  it('redacts all credential-management dynamic paths and query strings, including absolute-form URLs', () => {
+    for (const url of [
+      '/auth/tokens',
+      '/AUTH/TOKENS/secret-token?password=secret',
+      '/auth/tokens?password=secret',
+      '/auth/tokens#secret',
+      'https://secret@example.test/auth/tokens/secret?secret=secret',
+    ])
+      expect(safeReqSerializer({ url }).url).toBe('/auth/tokens');
+    expect(safeReqSerializer({ url: '/auth/tokens-extra' }).url).toBe('/auth/tokens-extra');
+    expect(safeReqSerializer({ url: 12 }).url).toBe(12);
+  });
+
   it('strips headers and any other non-allowlisted fields', () => {
     const out = safeReqSerializer({
       id: 'req-1',
