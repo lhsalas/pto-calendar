@@ -33,6 +33,45 @@ Confirmed architecture:
   it loads dotenv explicitly and uses `DATABASE_URL` when supplied. Generate
   the client after installing dependencies. The adapter creates its own
   PostgreSQL pool, which is disposed by `prisma.$disconnect()`.
+- **Personal-token foundation (#249)**: internal persistence and services only;
+  no PAT HTTP endpoints, bearer authentication, UI, CLI or MCP are enabled by
+  this change. Token names are 1–120 Unicode code points with no surrounding
+  whitespace. Scopes are validated, deduplicated by rejection and returned in
+  canonical vocabulary order; absent scopes default to `pto:read`. The
+  `pto:notes:read` scope requires `pto:read`, and team writes require a live
+  team-lead/admin role. Lifetime defaults to 90 days and is bounded by 365
+  24-hour days. Public metadata never includes the digest or secret.
+
+  Issuance takes the session version captured by the caller's credential
+  verification and locks the owner row before checking eligibility, version
+  and the ten-active-token cap. Verification checks the database on each call.
+  `changeRoleAndInvalidate` atomically increments `sessionVersion` with role
+  changes; operational/manual role changes must do the same. Existing reset and
+  setup operations already increment that version atomically. The development
+  seed increments it when changing a seeded user's role or password. Revoked and
+  expired metadata is retained for future audit attribution; no purge or
+  plaintext recovery path is introduced. Verification updates `lastUsedAt`
+  with an additional validity-guarded write; it does not cache validity.
+  Its SQL guard uses live database time, and a final application-clock check
+  after the write rejects expiry crossed while waiting for a row lock.
+
+  Token persistence uses a small native `pg` boundary rather than Prisma
+  operations containing digests: Prisma diagnostic argument logging can expose
+  those values even when the service later sanitizes an error. The existing
+  Prisma model and additive migration still own the schema. No global debug
+  output is disabled or filtered. The repository binds data parameters, quotes
+  the configured schema, sends UTC wall-clock timestamp strings and returns
+  timestamp columns as UTC `timestamptz` instants.
+
+  `createTokenDatabase` creates one lazy, owned pool; its caller must await
+  `close()` at shutdown. No token pool is created at module import. A borrowed
+  pool wrapper does not end its caller's pool. Transactions explicitly use one
+  checked-out client with read-committed isolation, so the active-token count
+  sees prior issuances after waiting for the owner lock. Error paths roll back
+  and release or discard that client, exposing only generic errors without
+  driver causes. Idle errors on an owned pool fail the wrapper closed; recovery
+  requires an explicit replacement. Unknown issuance outcomes are not retried
+  automatically: list safe metadata and revoke an unusable entry instead.
 - **Authentication**: Email/password authentication for manually seeded users with bcrypt password hashing and HTTP-only cookie sessions
 
 ### 3.2 Core modules

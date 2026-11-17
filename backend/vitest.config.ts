@@ -25,6 +25,12 @@ export default defineConfig({
         'src/routes/**',
       ],
       thresholds: {
+        'src/services/tokens/**': {
+          lines: 100,
+          statements: 100,
+          branches: 100,
+          functions: 100,
+        },
         'src/services/authorization/**': {
           lines: 100,
           statements: 100,

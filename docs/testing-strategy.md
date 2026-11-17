@@ -112,6 +112,7 @@ non-`Error` fallback by mocking the API boundary, and the `AuthContext` and
 | Path | Lines | Branches | Functions | Statements | Notes |
 |---|---|---|---|---|---|
 | `src/services/authorization/**` | 100% | 100% | 100% | 100% | Highest-risk surface; centralized note-visibility + modification logic |
+| `src/services/tokens/**` | 100% | 100% | 100% | 100% | Token parsing, scopes, validity and lifecycle |
 | `src/services/pto/validation.ts` | 100% | 100% | 100% | 100% | All PTO business rules |
 | `src/services/pto/schemas.ts` | 100% | 100% | 100% | 100% | Shared Zod schemas (route ↔ validation) |
 | `src/services/auth/schemas.ts` | 100% | 100% | 100% | 100% | Shared Zod login schema |
@@ -132,6 +133,15 @@ non-`Error` fallback by mocking the API boundary, and the `AuthContext` and
 `lib/rateLimit.ts` is measured by integration coverage, including synthetic Redis
 command tests that exercise the actual limiter and store without a Redis service.
 These tests do not certify behavior against a real Redis deployment.
+
+Token foundation tests include synthetic successful/failing persistence with
+`DEBUG=prisma:client` and `DEBUG=*`, without opening a socket. They check that
+native token operations do not expose a digest or raw token in diagnostics or
+exception causes. Pool tests cover transaction isolation, rollback, release,
+owned/borrowed cleanup and fail-closed errors. Written PostgreSQL tests cover
+concurrent issuance, invalidation and UTC round-trips across process timezones;
+these require a separate identity-verified disposable-database run before
+claiming database-backed guarantees.
 
 > **Coverage partition.** Service-layer files (`lib/lifecycle.ts`, `services/pto/**`, `services/audit/**`, `services/calendar/**`) are measured by the **unit** run (`backend/vitest.config.ts`) and excluded from integration. HTTP routes + `lib/rateLimit.ts` are measured by the **integration** run (`backend/vitest.integration.config.ts`) and excluded from unit coverage. The sets are not strictly disjoint: for example, `lib/prismaClient.ts` and holiday services can appear in both reports. The PR-comment backend summary uses integration coverage only; configured path thresholds in each run are separate gates.
 
@@ -586,7 +596,8 @@ new authentication/authorization/scope/validation code requires 100% unit covera
 across metrics. Other new agent packages target >=90% lines/statements/functions
 and >=80% branches; wire each workspace into existing CI/security gates.
 
-Deliver #270 after all 11 original backlog issues and before #249/#251. Future token/auth verification must include
+The eleven original backlog issues and #270 are delivered on master `c4233a5d`
+(master CI `43986788679`, eleven jobs). Future token/auth verification must include
 `npm run test:coverage -w backend` with fake test-only environment values (no DB
 or services), not only passing unit tests; preserve the existing configured targets.
 

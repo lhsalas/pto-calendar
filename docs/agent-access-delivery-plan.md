@@ -328,6 +328,13 @@ Revalidate after #227, then deliver #270 after the original backlog and before
 #249/#251 token implementation; it is not a twelfth original backlog issue.
 The image-only risk acceptance above does not waive #270 or change coverage policy.
 
+**Feature prerequisite checkpoint — 2026-11-16:** all eleven original issues
+and #270 are delivered on master `c4233a5d86f633f7ca47861d27b169752d122431`;
+master CI run `43986788679` passed all eleven jobs. #249 is the first foundation
+implementation candidate, not yet reviewed or delivered. The earlier
+checkpoint above is preserved as dated history. #247 remains open/high priority;
+the temporary image-risk acceptance is not remediation.
+
 ### Feature order, with explicit prerequisites
 
 Rows give the safe serial default. Parallel development is restricted to the
