@@ -128,8 +128,11 @@ probe exemptions. Document bounded tuning/NAT behavior; 429 includes correct
 
 ## 3. Shared REST and compatibility contract
 
-All entries below are **proposed**. Existing cookie calendar behavior remains
-supported; changes ship with their browser callers and regression coverage.
+Entries below remain **proposed** except the session-only token-management
+contract implemented by #250 and documented in OpenAPI. Existing cookie
+calendar behavior remains supported; changes ship with their browser callers
+and regression coverage. This exception does not enable PTO bearer access,
+client packages or pilot rollout.
 
 | Contract | Required behavior | Deliverable |
 | --- | --- | --- |
@@ -336,6 +339,13 @@ checkpoint above is preserved as dated history. #247 remains open/high priority;
 the temporary image-risk acceptance is not remediation.
 
 ### Feature order, with explicit prerequisites
+
+**Foundation checkpoint — 2026-11-17:** #249 was delivered by PR291 on master
+`b386bf7d7994a336278a35e65dd66be3ecdac13e`; post-merge CI run `44105460188`
+passed all eleven jobs. #250 adds the session-only management contract below,
+not a token settings UI or PTO bearer access. #251, lifecycle auditing/quotas
+and the separate pilot/production gates remain outstanding; the dated earlier
+checkpoint is retained rather than rewritten as historical certification.
 
 Rows give the safe serial default. Parallel development is restricted to the
 approved waves below after prerequisites merge; every row is one deliverable/PR.

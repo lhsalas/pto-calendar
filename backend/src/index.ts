@@ -13,4 +13,4 @@ const server = app.listen(env.PORT, (error?: Error) => {
   if (error) throw error;
   logger.info({ port: env.PORT, env: env.NODE_ENV }, 'Backend listening');
 });
-installShutdown(server, prisma);
+installShutdown(server, prisma, { cleanup: app.closeResources });

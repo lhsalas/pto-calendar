@@ -1,10 +1,10 @@
 openapi: 3.0.3
-# Proposed agent-access contract (not available endpoints/security schemes):
+# Remaining proposed agent-access contract (bearer/client features not available):
 # docs/agent-access-delivery-plan.md, tracked by #246 and owning #249–#269 PRs.
 # Add PAT, pagination and precondition schemas only with their implementations.
 info:
   title: PTO / Vacation Calendar API
-  version: 1.1.0
+  version: 1.2.0
   description: |
     API for managing PTO requests in a shared team calendar.
 
@@ -195,6 +195,138 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /auth/tokens:
+    get:
+      tags: [Auth]
+      summary: List the browser session owner's safe token metadata
+      description: |
+        All three roles manage only their own tokens. No query parameters are
+        accepted. Every management response, including early errors, uses
+        Cache-Control no-store and a safe X-Request-Id. Any Authorization header
+        is rejected, even with a valid session; PATs cannot manage tokens.
+      responses:
+        '200':
+          description: Safe metadata only; no digest, raw token or credential version
+          headers:
+            Cache-Control: { $ref: '#/components/headers/TokenNoStore' }
+            X-Request-Id: { $ref: '#/components/headers/TokenRequestId' }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [tokens]
+                properties:
+                  tokens:
+                    type: array
+                    items: { $ref: '#/components/schemas/PersonalTokenMetadata' }
+        '400': { $ref: '#/components/responses/TokenManagementError' }
+        '401': { $ref: '#/components/responses/TokenManagementError' }
+        '413': { $ref: '#/components/responses/TokenManagementError' }
+        '415': { $ref: '#/components/responses/TokenManagementError' }
+        '429': { $ref: '#/components/responses/TokenManagementError' }
+        '500': { $ref: '#/components/responses/TokenManagementError' }
+    post:
+      tags: [Auth]
+      summary: Issue one personal token after verifying the current password
+      description: |
+        Session-only; owner is derived from the session. Verify the current
+        password on every issuance; share the failed-auth limiter with login
+        and setup (successful responses are excluded). Defaults to read-only
+        scope and 90 days; hard lifetime maximum is 365*24h and active cap is 10.
+        Team scopes require a live lead/admin role. RawToken is returned once,
+        never retrieved later. Normal cookie CSRF/Origin protections apply.
+        No bearer authentication or settings UI is supplied by this endpoint.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IssuePersonalTokenRequest' }
+      responses:
+        '201':
+          description: Show-once raw credential and safe metadata; do not persist the response
+          headers:
+            Cache-Control: { $ref: '#/components/headers/TokenNoStore' }
+            X-Request-Id: { $ref: '#/components/headers/TokenRequestId' }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [rawToken, token]
+                properties:
+                  rawToken:
+                    type: string
+                    pattern: '^pto_pat_[0-9a-f-]{36}\.[0-9a-f]{64}$'
+                    description: One-time secret; never present in later management responses.
+                  token: { $ref: '#/components/schemas/PersonalTokenMetadata' }
+        '400': { $ref: '#/components/responses/TokenManagementError' }
+        '401': { $ref: '#/components/responses/TokenManagementError' }
+        '403': { $ref: '#/components/responses/TokenManagementError' }
+        '409': { $ref: '#/components/responses/TokenManagementError' }
+        '413': { $ref: '#/components/responses/TokenManagementError' }
+        '415': { $ref: '#/components/responses/TokenManagementError' }
+        '429': { $ref: '#/components/responses/TokenManagementError' }
+        '500': { $ref: '#/components/responses/TokenManagementError' }
+  /auth/tokens/{id}:
+    delete:
+      tags: [Auth]
+      summary: Revoke one own token without a fresh password
+      description: |
+        Session-only with normal CSRF/Origin checks; no Authorization header or
+        query fields accepted. An absent or empty body is allowed. Repeating
+        an own revocation returns 204; foreign and unknown valid UUIDs both
+        return 404. Revoked metadata is retained; logout is not PAT revocation.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EmptyTokenManagementRequest' }
+      responses:
+        '204':
+          description: Own token revoked, or already revoked; no response body
+          headers:
+            Cache-Control: { $ref: '#/components/headers/TokenNoStore' }
+            X-Request-Id: { $ref: '#/components/headers/TokenRequestId' }
+        '400': { $ref: '#/components/responses/TokenManagementError' }
+        '401': { $ref: '#/components/responses/TokenManagementError' }
+        '403': { $ref: '#/components/responses/TokenManagementError' }
+        '404': { $ref: '#/components/responses/TokenManagementError' }
+        '413': { $ref: '#/components/responses/TokenManagementError' }
+        '415': { $ref: '#/components/responses/TokenManagementError' }
+        '429': { $ref: '#/components/responses/TokenManagementError' }
+        '500': { $ref: '#/components/responses/TokenManagementError' }
+  /auth/tokens/revoke-all:
+    post:
+      tags: [Auth]
+      summary: Revoke all own tokens without a fresh password
+      description: |
+        Session-only with normal CSRF/Origin checks, no Authorization header or
+        query fields, and only an absent or empty body. Does not affect another
+        owner. Incident revocation does not use the issuance/password limiter.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EmptyTokenManagementRequest' }
+      responses:
+        '204':
+          description: All own tokens revoked; no response body
+          headers:
+            Cache-Control: { $ref: '#/components/headers/TokenNoStore' }
+            X-Request-Id: { $ref: '#/components/headers/TokenRequestId' }
+        '400': { $ref: '#/components/responses/TokenManagementError' }
+        '401': { $ref: '#/components/responses/TokenManagementError' }
+        '403': { $ref: '#/components/responses/TokenManagementError' }
+        '413': { $ref: '#/components/responses/TokenManagementError' }
+        '415': { $ref: '#/components/responses/TokenManagementError' }
+        '429': { $ref: '#/components/responses/TokenManagementError' }
+        '500': { $ref: '#/components/responses/TokenManagementError' }
   /auth/setup-account:
     post:
       summary: Redeem a one-time setup token and set the initial password
@@ -800,7 +932,32 @@ paths:
         '429':
           $ref: '#/components/responses/RateLimited'
 components:
+  headers:
+    TokenNoStore:
+      description: Credential responses must never be cached, including errors.
+      schema: { type: string, enum: [no-store] }
+    TokenRequestId:
+      description: Safe inbound correlation ID or a generated UUID v4.
+      schema: { type: string, pattern: '^[A-Za-z0-9._-]{1,200}$' }
   responses:
+    TokenManagementError:
+      description: |
+        400 VALIDATION_ERROR (strict input/UUID/query), 401 UNAUTHENTICATED
+        (session/current password) or SESSION_REQUIRED (Authorization present),
+        403 FORBIDDEN (team scopes) or CSRF_REJECTED (Origin),
+        404 NOT_FOUND (foreign/unknown token), 409 TOKEN_LIMIT_REACHED,
+        413 PAYLOAD_TOO_LARGE, 415 UNSUPPORTED_MEDIA_TYPE,
+        429 RATE_LIMITED, or a generic 500 INTERNAL_ERROR.
+        No submitted credentials, validation inputs or private causes are returned.
+      headers:
+        Cache-Control: { $ref: '#/components/headers/TokenNoStore' }
+        X-Request-Id: { $ref: '#/components/headers/TokenRequestId' }
+        Retry-After:
+          description: Present on 429 responses; seconds until the limit resets.
+          schema: { type: integer, minimum: 0 }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
     Unauthorized:
       description: Unauthenticated — no valid session cookie.
       headers:
@@ -850,6 +1007,63 @@ components:
         type: string
         format: uuid
   schemas:
+    EmptyTokenManagementRequest:
+      type: object
+      additionalProperties: false
+      properties: {}
+    PersonalTokenScope:
+      type: string
+      enum: ['pto:read', 'pto:notes:read', 'pto:create', 'pto:update:self', 'pto:delete:self', 'pto:update:team', 'pto:delete:team']
+    IssuePersonalTokenRequest:
+      type: object
+      additionalProperties: false
+      required: [name, password]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Nonempty, at most 120 Unicode code points, no leading/trailing whitespace.
+        password:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 72
+          writeOnly: true
+          description: Current password, verified on every issuance; never stored or echoed.
+        scopes:
+          type: array
+          minItems: 1
+          maxItems: 7
+          uniqueItems: true
+          default: ['pto:read']
+          items: { $ref: '#/components/schemas/PersonalTokenScope' }
+          description: Notes require read; team scopes require live lead/admin eligibility. No implied notes or writes.
+        expiresInDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+          default: 90
+    PersonalTokenMetadata:
+      type: object
+      additionalProperties: false
+      required: [id, name, displayPrefix, scopes, createdAt, expiresAt, lastUsedAt, revokedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 120 }
+        displayPrefix:
+          type: string
+          description: Non-secret pto_pat_ plus the public UUID, not a secret fragment.
+        scopes:
+          type: array
+          items: { $ref: '#/components/schemas/PersonalTokenScope' }
+        createdAt: { type: string, format: date-time }
+        expiresAt:
+          type: string
+          format: date-time
+          description: Absolute UTC expiry, at most 365*24h after creation.
+        lastUsedAt: { type: string, format: date-time, nullable: true }
+        revokedAt: { type: string, format: date-time, nullable: true }
     Role:
       type: string
       enum: [member, team_lead, admin]

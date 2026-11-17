@@ -72,6 +72,11 @@ Confirmed architecture:
   driver causes. Idle errors on an owned pool fail the wrapper closed; recovery
   requires an explicit replacement. Unknown issuance outcomes are not retried
   automatically: list safe metadata and revoke an unusable entry instead.
+
+  Each Express application owns one lazy token runtime. It opens no connection
+  until a token operation needs the pool; `app.closeResources()` closes that
+  runtime permanently and is awaited by graceful shutdown after HTTP drain,
+  before Prisma disconnect. Integration test teardown also awaits it.
 - **Authentication**: Email/password authentication for manually seeded users with bcrypt password hashing and HTTP-only cookie sessions
 
 ### 3.2 Core modules
@@ -217,6 +222,10 @@ The base `pino` logger applies a `redact` configuration covering `req.headers.co
 Global middleware order:
 1. `app.disable('x-powered-by')`
 2. `helmet()` — canonical security headers (CSP, HSTS, `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, COOP/CORP/OAC)
+   For `/auth/tokens` and its children, a narrow boundary then sets `no-store`
+   and a safe correlation ID before CORS/body parsing/CSRF/limiter failures.
+   The later session-only guard rejects any Authorization header, including
+   empty/malformed/mixed attempts, without bypassing normal global limiting.
 3. `cors({ origin: env.CORS_ORIGIN, credentials: true })`
 4. `express.json({ limit: '100kb' })`
 5. `pinoHttp(...)` — generates the `X-Request-Id` and emits the request-completion log
@@ -268,6 +277,38 @@ Response 200:
   "colorCode": "#3B82F6"
 }
 ```
+
+#### Session-only personal-token management
+
+All `member`, `team_lead` and `admin` browser sessions manage only their own
+tokens. `GET /auth/tokens` returns `{ tokens: [...] }` with safe metadata.
+`POST /auth/tokens` accepts a strict object with `name`, `password`, optional
+`scopes` and `expiresInDays`; it returns 201 `{ rawToken, token }` exactly once.
+Passwords are 1–72 characters, as for login, and are verified afresh by the
+session-derived owner ID. The live credential version used by that proof is
+passed to the serialized issuance primitive; there is no recent-auth cache.
+The existing failed-auth limiter instance/budget is shared with login/setup.
+
+Unknown properties/query fields, owner/role spoofing, invalid scope dependencies
+or lifetimes return 400 `VALIDATION_ERROR`; team scopes require live lead/admin
+eligibility (403 `FORBIDDEN`). The active cap returns 409 `TOKEN_LIMIT_REACHED`.
+Invalid sessions/passwords return 401; Authorization-bearing requests return
+401 `SESSION_REQUIRED`, never cookie fallback. DB failures fail closed with a
+generic 500. Malformed/oversized/unsupported parser input returns 400/413/415,
+without serializing parser bodies, Zod inputs or driver causes.
+
+`DELETE /auth/tokens/:id` returns 204 for an own token, including an already
+revoked token; foreign and unknown valid UUIDs both return 404 `NOT_FOUND`.
+`POST /auth/tokens/revoke-all` returns 204. Both accept only an absent/empty
+body, need no fresh password, retain normal cookie CSRF/Origin checks and
+never return credentials. Logout does not revoke PATs.
+
+Every management response, including early errors and 429s, is `no-store` with
+`X-Request-Id`. Request logs replace dynamic token paths/queries with the fixed
+`/auth/tokens` namespace; a pasted `pto_pat_` credential cannot become a request
+ID. OpenAPI defines the complete payload/status contract.
+There is no token UI or PTO bearer authentication yet; lifecycle auditing,
+dedicated quotas and the separate pilot/release gates remain prerequisites.
 
 ### 7.2 PTO APIs
 

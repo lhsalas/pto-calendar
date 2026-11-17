@@ -7,6 +7,7 @@ export type ShutdownFn = (signal: NodeJS.Signals) => Promise<void>;
 
 export interface LifecycleOptions {
   graceMs?: number;
+  cleanup?: () => Promise<void>;
 }
 
 function forceExit(code: number, message: string, meta?: Record<string, unknown>): void {
@@ -55,6 +56,14 @@ export async function shutdown(
     logger.error({ err: closeError }, 'Error closing HTTP server');
   }
 
+  let cleanupFailed = false;
+  try {
+    await options.cleanup?.();
+  } catch {
+    cleanupFailed = true;
+    logger.error('Error closing application resources');
+  }
+
   try {
     await prisma.$disconnect();
     logger.info('Prisma disconnected');
@@ -64,7 +73,7 @@ export async function shutdown(
 
   clearTimeout(timer);
 
-  process.exit(closeError ? 1 : 0);
+  process.exit(closeError || cleanupFailed ? 1 : 0);
 }
 
 export function installShutdown(

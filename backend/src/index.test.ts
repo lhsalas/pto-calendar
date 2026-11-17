@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { listen, info, installShutdown, prisma, server } = vi.hoisted(() => ({
+const { listen, info, installShutdown, prisma, server, closeResources } = vi.hoisted(() => ({
   listen: vi.fn(),
   info: vi.fn(),
   installShutdown: vi.fn(),
   prisma: {},
   server: {},
+  closeResources: vi.fn(),
 }));
 
-vi.mock('./server.js', () => ({ createApp: () => ({ listen }) }));
+vi.mock('./server.js', () => ({ createApp: () => ({ listen, closeResources }) }));
 vi.mock('./config/env.js', () => ({ loadEnv: () => ({ PORT: 3000, NODE_ENV: 'test' }) }));
 vi.mock('./lib/logger.js', () => ({ logger: { info } }));
 vi.mock('./lib/lifecycle.js', () => ({ installShutdown }));
@@ -24,7 +25,10 @@ describe('backend startup callback', () => {
   async function start(): Promise<(error?: Error) => void> {
     await import('./index.js');
     expect(listen).toHaveBeenCalledExactlyOnceWith(3000, expect.any(Function));
-    expect(installShutdown).toHaveBeenCalledExactlyOnceWith(server, prisma);
+    expect(installShutdown).toHaveBeenCalledExactlyOnceWith(server, prisma, {
+      cleanup: closeResources,
+    });
+    expect(closeResources).not.toHaveBeenCalled();
     return listen.mock.calls[0]![1] as (error?: Error) => void;
   }
 

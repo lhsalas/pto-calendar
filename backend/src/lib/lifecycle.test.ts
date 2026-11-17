@@ -168,6 +168,37 @@ describe('shutdown', () => {
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
+  it('awaits application cleanup after HTTP drain and before disconnect/exit', async () => {
+    const order: string[] = [];
+    const server = createMockServer({
+      closeBehavior: (cb) => {
+        order.push('drained');
+        cb();
+      },
+    });
+    const prisma = createMockPrisma();
+    vi.mocked(prisma.$disconnect).mockImplementationOnce(async () => {
+      order.push('prisma');
+    });
+    const cleanup = vi.fn(async () => {
+      order.push('tokens');
+    });
+    await shutdown('SIGTERM', server as unknown as Server, prisma, { cleanup });
+    expect(order).toEqual(['drained', 'tokens', 'prisma']);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+
+  it('still disconnects and exits 1 when application cleanup fails', async () => {
+    const prisma = createMockPrisma();
+    await shutdown('SIGTERM', createMockServer() as unknown as Server, prisma, {
+      cleanup: async () => {
+        throw new Error('private driver details');
+      },
+    });
+    expect(prisma.$disconnect).toHaveBeenCalledOnce();
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
   it('forces exit 1 when server.close never drains within the grace period', async () => {
     vi.useFakeTimers();
     let pendingCb: ((err?: Error) => void) | undefined;
