@@ -120,7 +120,7 @@ non-`Error` fallback by mocking the API boundary, and the `AuthContext` and
 | `src/middleware/requireAuth.ts` | 100% | 100% | 100% | 100% | Auth gate |
 | `src/middleware/cookieSession.ts` | 80% | 80% | 80% | 80% | Cookie-session factory |
 | `src/middleware/errorHandler.ts` | 80% | 80% | 80% | 80% | Centralized error formatter |
-| `src/lib/lifecycle.ts` | tracked | tracked | tracked | tracked | Tested directly; no explicit unit threshold is currently configured |
+| `src/lib/lifecycle.ts` | 100% | 100% | 100% | 100% | Documented target only; no explicit unit threshold is currently configured or enforced |
 | `src/services/pto/PTOService.ts` | 90% | 80% | 90% | 90% | CRUD + overlap checks; create/overlap paths have direct unit coverage |
 | `src/services/calendar/CalendarQuery.ts` | 80% | 80% | 80% | 80% | Overlap SQL + expansion |
 | `src/services/audit/AuditLogService.ts` | 80% | 80% | 80% | 80% | Required for audit correctness |
