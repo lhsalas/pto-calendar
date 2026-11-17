@@ -3,7 +3,7 @@ import prettier from 'eslint-config-prettier';
 
 export default tseslint.config(
   {
-    ignores: ['dist/', 'coverage/', 'node_modules/', 'prisma/migrations/'],
+    ignores: ['dist/', 'coverage/', 'coverage-unit/', 'node_modules/', 'prisma/migrations/'],
   },
   ...tseslint.configs.recommended,
   {

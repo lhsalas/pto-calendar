@@ -1,11 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { canModifyPTO, canViewNote } from './AuthorizationService.js';
+import { canManageUsers, canModifyPTO, canViewNote } from './AuthorizationService.js';
 
 describe('AuthorizationService', () => {
   const member = { id: 'u-member', role: 'member' as const };
   const teamLead = { id: 'u-lead', role: 'team_lead' as const };
   const ownPto = { userId: 'u-member' };
   const otherPto = { userId: 'u-other' };
+
+  it.each([
+    ['member', false],
+    ['team_lead', true],
+    ['admin', true],
+  ] as const)('applies the user management role policy for %s', (role, allowed) => {
+    expect(canManageUsers({ id: 'actor', role })).toBe(allowed);
+  });
+
+  it('allows an admin to modify and view another user’s PTO', () => {
+    const admin = { id: 'u-admin', role: 'admin' as const };
+    expect(canModifyPTO(admin, otherPto)).toBe(true);
+    expect(canViewNote(admin, otherPto)).toBe(true);
+  });
 
   describe('canModifyPTO', () => {
     it('lets a member modify their own PTO', () => {

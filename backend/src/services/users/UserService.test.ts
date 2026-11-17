@@ -7,10 +7,14 @@ import {
   resetUserPassword,
   generateSetupToken,
   hashSetupToken,
+  getUserById,
+  getUserByEmail,
+  getUserWithCredentialsByEmail,
   PasswordSchema,
   SetupAccountSchema,
 } from './UserService.js';
 import { HttpError } from '../../middleware/errorHandler.js';
+import { COLOR_PALETTE, pickColorCode } from './palette.js';
 
 vi.mock('../../lib/prisma.js', () => {
   const user = {
@@ -68,6 +72,35 @@ afterEach(() => {
 });
 
 describe('UserService setup token helpers', () => {
+  it('selects public fields for id and normalized email lookups, but credentials for login', async () => {
+    mockFindUnique
+      .mockResolvedValueOnce({ id: 'one' })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 'two', passwordHash: 'hash' });
+    await expect(getUserById('one')).resolves.toEqual({ id: 'one' });
+    await expect(getUserByEmail('MIXED@Example.COM')).resolves.toBeNull();
+    await expect(getUserWithCredentialsByEmail('USER@Example.COM')).resolves.toEqual({
+      id: 'two',
+      passwordHash: 'hash',
+    });
+    expect(mockFindUnique).toHaveBeenNthCalledWith(1, {
+      where: { id: 'one' },
+      select: { id: true, name: true, email: true, role: true, colorCode: true },
+    });
+    expect(mockFindUnique).toHaveBeenNthCalledWith(2, {
+      where: { email: 'mixed@example.com' },
+      select: { id: true, name: true, email: true, role: true, colorCode: true },
+    });
+    expect(mockFindUnique).toHaveBeenNthCalledWith(3, { where: { email: 'user@example.com' } });
+  });
+
+  it('returns a deterministic color when the palette is exhausted', () => {
+    const used = new Set(COLOR_PALETTE);
+    const color = pickColorCode(used);
+    expect(color).toMatch(/^#[0-9a-f]{6}$/);
+    expect(pickColorCode(used)).toBe(color);
+  });
+
   it('generates a 64-char hex token and a sha256 hash', () => {
     const { plaintext, hash, expiresAt } = generateSetupToken();
     expect(plaintext).toMatch(/^[a-f0-9]{64}$/);
@@ -92,6 +125,22 @@ describe('UserService setup token helpers', () => {
 });
 
 describe('createUser', () => {
+  it('hashes an explicit password and uses the supplied color without a palette lookup', async () => {
+    mockFindUnique.mockResolvedValueOnce(null);
+    mockCreate.mockImplementationOnce(({ data }) => Promise.resolve({ id: 'u-password', ...data }));
+    const result = await createUser({
+      email: 'USER@example.com',
+      name: 'User',
+      role: 'member',
+      colorCode: '#123456',
+      password: 'secret-password',
+    });
+    expect(mockFindMany).not.toHaveBeenCalled();
+    expect(result.colorCode).toBe('#123456');
+    expect(result.setupTokenHash).toBeUndefined();
+    expect(await bcrypt.compare('secret-password', result.passwordHash!)).toBe(true);
+  });
+
   it('creates a member with a setup token, no password', async () => {
     mockFindUnique.mockResolvedValueOnce(null); // no duplicate
     mockFindMany.mockResolvedValueOnce([]); // colorCode palette
@@ -172,6 +221,38 @@ describe('createUser', () => {
 });
 
 describe('setupAccount', () => {
+  it('rejects a token without an expiry without claiming it', async () => {
+    mockFindFirst.mockResolvedValueOnce({ id: 'u1', setupTokenExpiresAt: null });
+    await expect(
+      setupAccount({ token: 'a'.repeat(64), password: 'password123' }),
+    ).rejects.toMatchObject({ status: 401, code: 'UNAUTHENTICATED' });
+    expect(mockUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a lost concurrent token claim without loading the user', async () => {
+    mockFindFirst.mockResolvedValueOnce({
+      id: 'u1',
+      setupTokenExpiresAt: new Date(Date.now() + 60000),
+    });
+    mockUpdateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(
+      setupAccount({ token: 'a'.repeat(64), password: 'password123' }),
+    ).rejects.toMatchObject({ status: 401, code: 'UNAUTHENTICATED' });
+    expect(mockFindUnique).not.toHaveBeenCalled();
+  });
+
+  it('rejects if the claimed user disappears before it can be returned', async () => {
+    mockFindFirst.mockResolvedValueOnce({
+      id: 'u1',
+      setupTokenExpiresAt: new Date(Date.now() + 60000),
+    });
+    mockUpdateMany.mockResolvedValueOnce({ count: 1 });
+    mockFindUnique.mockResolvedValueOnce(null);
+    await expect(
+      setupAccount({ token: 'a'.repeat(64), password: 'password123' }),
+    ).rejects.toMatchObject({ status: 401, code: 'UNAUTHENTICATED' });
+  });
+
   it('sets the password, clears the token, and returns the user', async () => {
     const token = generateSetupToken();
     let updatedData: Record<string, unknown> = {};
