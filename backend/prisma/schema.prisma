@@ -35,8 +35,28 @@ model User {
   ptoRequests PTORequest[]
   auditLogs   AuditLog[]   @relation("AuditActor")
   holidays    Holiday[]    @relation("HolidayCreator")
+  personalAccessTokens PersonalAccessToken[]
 
   @@map("users")
+}
+
+model PersonalAccessToken {
+  id                   String    @id @default(uuid()) @db.Uuid
+  ownerId              String    @map("owner_id") @db.Uuid
+  name                 String    @db.VarChar(120)
+  displayPrefix        String    @map("display_prefix") @db.VarChar(44)
+  secretDigest         String    @map("secret_digest") @db.Char(64)
+  scopes               String[]  @db.VarChar(32)
+  issuedSessionVersion Int       @map("issued_session_version")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  expiresAt            DateTime  @map("expires_at")
+  lastUsedAt           DateTime? @map("last_used_at")
+  revokedAt            DateTime? @map("revoked_at")
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+
+  @@index([ownerId, createdAt])
+  @@map("personal_access_tokens")
 }
 
 model PTORequest {

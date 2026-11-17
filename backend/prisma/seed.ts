@@ -37,16 +37,32 @@ export async function runSeed(prisma: PrismaClient): Promise<void> {
   const rounds = Number.parseInt(process.env.BCRYPT_ROUNDS ?? String(DEFAULT_ROUNDS), 10);
   for (const u of SEED_USERS) {
     const passwordHash = await bcrypt.hash(u.password, rounds);
-    await prisma.user.upsert({
-      where: { email: u.email },
-      update: { name: u.name, role: u.role, colorCode: u.colorCode, passwordHash },
-      create: {
-        name: u.name,
-        email: u.email,
-        role: u.role,
-        colorCode: u.colorCode,
-        passwordHash,
-      },
+    await prisma.$transaction(async (tx) => {
+      // The upsert locks existing users before inspecting their credentials.
+      // Do not rewrite role/password until the version decision is made.
+      const user = await tx.user.upsert({
+        where: { email: u.email },
+        update: { name: u.name, colorCode: u.colorCode },
+        create: {
+          name: u.name,
+          email: u.email,
+          role: u.role,
+          colorCode: u.colorCode,
+          passwordHash,
+        },
+        select: { id: true, role: true, passwordHash: true },
+      });
+      const samePassword = user.passwordHash
+        ? await bcrypt.compare(u.password, user.passwordHash)
+        : false;
+      await tx.user.update({
+        where: { id: user.id },
+        data: {
+          role: u.role,
+          passwordHash,
+          ...(!samePassword || user.role !== u.role ? { sessionVersion: { increment: 1 } } : {}),
+        },
+      });
     });
   }
 }
