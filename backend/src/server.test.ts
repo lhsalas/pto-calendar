@@ -186,6 +186,53 @@ describe('server', () => {
       expect(parseLogs().filter((line) => line.msg === 'request completed')).toHaveLength(3);
     });
 
+    it('never reflects encoded dynamic paths in captured denied-request logs', async () => {
+      const app = createApp();
+      const secret = 'ab'.repeat(32);
+      const token = `pto_pat_00000000-0000-4000-8000-000000000000.${secret}`;
+      const suffix = token.slice(1);
+      const segments = [
+        token,
+        `%70${suffix}`,
+        `%2570${suffix}`,
+        `%252570${suffix}`,
+        `%70%74%6F%5fpat_${token.slice(8)}`,
+        '%broken',
+        'unknown-private-content',
+      ];
+      for (const segment of segments) {
+        const response = await request(app)
+          .get(`/pto/${segment}?private=query-secret`)
+          .set('Authorization', 'Bearer invalid')
+          .set('X-Request-Id', 'safe-followup-id')
+          .expect(401);
+        expect(response.headers['x-request-id']).toBe('safe-followup-id');
+      }
+      const logs = capturedLogs.lines.join('');
+      expect(logs).not.toContain(token);
+      expect(logs).not.toContain(secret);
+      expect(logs).not.toContain('unknown-private-content');
+      expect(logs).not.toContain('query-secret');
+      // Decode complete captured output at each represented depth; no token may emerge.
+      let decoded = logs;
+      for (let depth = 0; depth <= 3; depth++) {
+        expect(decoded).not.toContain(token);
+        decoded = decoded.replace(/%[0-9a-f]{2}/gi, (byte) =>
+          String.fromCharCode(parseInt(byte.slice(1), 16)),
+        );
+      }
+      const completion = parseLogs().filter((line) => line.msg === 'request completed');
+      expect(completion).toHaveLength(segments.length);
+      for (const line of completion) {
+        expect(line['req']).toMatchObject({
+          id: 'safe-followup-id',
+          method: 'GET',
+          url: '[unclassified]',
+        });
+        expect(line['res']).toMatchObject({ statusCode: 401 });
+      }
+    });
+
     it('does NOT log request completion for GET /health', async () => {
       const app = createApp();
       await request(app).get('/health');

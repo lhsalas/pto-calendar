@@ -198,6 +198,11 @@ and bracket-form required parameters remain invalid despite the framework's
 simple query-parser default. Async rejection tests cover explicit `next(err)`
 and Express 5 automatic forwarding with one JSON response and one error log.
 
+Request-serializer and captured pino-http tests verify fixed URL labels and the
+constant fallback for unknown or dynamic paths, including malformed and
+multiply encoded synthetic PATs in denied requests. Logs must omit secrets,
+authority, query and fragment without relying on route metadata.
+
 `index.test.ts` invokes a mocked listen callback, never a real occupied port:
 successful binding logs readiness; bind errors are rethrown into the already
 installed fatal exception lifecycle and cannot log false readiness. Existing

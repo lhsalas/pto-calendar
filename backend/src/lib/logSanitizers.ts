@@ -2,6 +2,21 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 const SAFE_REQUEST_ID = /^[A-Za-z0-9._\-]{1,200}$/;
+const STATIC_URL_LABELS = new Map(
+  [
+    '/health',
+    '/ready',
+    '/auth/login',
+    '/auth/setup-account',
+    '/auth/logout',
+    '/auth/me',
+    '/pto',
+    '/users',
+    '/holidays',
+    '/holidays/all',
+    '/holidays/seed',
+  ].map((label) => [label, label]),
+);
 
 export function safeRequestId(req: IncomingMessage, res: ServerResponse): string {
   const headerId = req.headers['x-request-id'];
@@ -31,19 +46,15 @@ export function safeRequestId(req: IncomingMessage, res: ServerResponse): string
 
 export function safeReqSerializer(value: Record<string, unknown>): Record<string, unknown> {
   const url = value['url'];
-  let safeUrl = url;
+  let safeUrl = '[unclassified]';
   if (typeof url === 'string') {
-    // Do not decode or log an authority, query, or fragment. Match percent
-    // encoded prefix bytes directly so malformed escapes cannot throw.
+    // Classification happens before routing: never return any untrusted path
+    // bytes, even when credentials are encoded or the path is malformed.
     const path = url.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i, '').split(/[?#]/, 1)[0]!;
     if (/^\/auth\/tokens(?:\/|$)/i.test(path)) {
       safeUrl = '/auth/tokens';
-    } else if (
-      /(?:p|%70)(?:t|%74)(?:o|%6f)(?:_|%5f)(?:p|%70)(?:a|%61)(?:t|%74)(?:_|%5f)/i.test(path)
-    ) {
-      safeUrl = '[REDACTED]';
     } else {
-      safeUrl = path;
+      safeUrl = STATIC_URL_LABELS.get(path.toLowerCase()) ?? '[unclassified]';
     }
   }
   return {

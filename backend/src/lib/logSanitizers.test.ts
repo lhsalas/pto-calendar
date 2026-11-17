@@ -92,21 +92,48 @@ describe('safeReqSerializer', () => {
       'https://secret@example.test/auth/tokens/secret?secret=secret',
     ])
       expect(safeReqSerializer({ url }).url).toBe('/auth/tokens');
-    expect(safeReqSerializer({ url: '/auth/tokens-extra' }).url).toBe('/auth/tokens-extra');
-    expect(safeReqSerializer({ url: 12 }).url).toBe(12);
+    expect(safeReqSerializer({ url: '/auth/tokens-extra' }).url).toBe('[unclassified]');
+    for (const url of [12, null, undefined, {}, ['/pto']]) {
+      expect(safeReqSerializer({ url }).url).toBe('[unclassified]');
+    }
   });
 
-  it('removes query, fragment and authority, and redacts raw or encoded PAT paths without decoding', () => {
+  it('only emits fixed labels, irrespective of dynamic path contents or encoding', () => {
     const token = `pto_pat_00000000-0000-4000-8000-000000000000.${'a'.repeat(64)}`;
     for (const [url, expected] of [
       [`/pto?token=${token}#secret`, '/pto'],
       [`https://user:secret@example.test/pto?token=${token}`, '/pto'],
-      [`/pto/prefix-${token}`, '[REDACTED]'],
-      [`/pto/%70%74%6f%5f%70%61%74%5f${token}`, '[REDACTED]'],
-      ['/pto/%broken', '/pto/%broken'],
-      ['https://user:secret@example.test?token=secret', ''],
+      [`/pto/prefix-${token}`, '[unclassified]'],
+      [`/pto/%70%74%6f%5f%70%61%74%5f${token}`, '[unclassified]'],
+      [`/pto/%2570${token.slice(1)}`, '[unclassified]'],
+      [`/pto/%252570${token.slice(1)}`, '[unclassified]'],
+      [`/pto/%70%74%6F%5fpat_${token.slice(8)}`, '[unclassified]'],
+      ['/pto/%broken', '[unclassified]'],
+      ['https://user:secret@example.test?token=secret', '[unclassified]'],
     ]) {
       expect(safeReqSerializer({ url }).url).toBe(expected);
+    }
+    for (const segment of ['123', '00000000-0000-4000-8000-000000000000', 'private', '%', token]) {
+      expect(safeReqSerializer({ url: `/pto/${segment}` }).url).toBe('[unclassified]');
+      expect(safeReqSerializer({ url: `/unknown/${segment}` }).url).toBe('[unclassified]');
+    }
+  });
+
+  it('recognizes only known static endpoint labels', () => {
+    for (const path of [
+      '/health',
+      '/ready',
+      '/auth/login',
+      '/auth/setup-account',
+      '/auth/logout',
+      '/auth/me',
+      '/pto',
+      '/users',
+      '/holidays',
+      '/holidays/all',
+      '/holidays/seed',
+    ]) {
+      expect(safeReqSerializer({ url: `${path}?private=secret#fragment` }).url).toBe(path);
     }
   });
 
