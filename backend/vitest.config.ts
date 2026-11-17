@@ -22,13 +22,35 @@ export default defineConfig({
         'src/lib/prisma.ts',
         'src/lib/logger.ts',
         'src/lib/rateLimit.ts',
-        'src/routes/auth.ts',
-        'src/routes/pto.ts',
         'src/routes/users.ts',
         'src/routes/health.ts',
         'src/routes/holidays.ts',
       ],
       thresholds: {
+        'src/routes/auth.ts': {
+          lines: 100,
+          statements: 100,
+          branches: 100,
+          functions: 100,
+        },
+        'src/routes/pto.ts': {
+          lines: 100,
+          statements: 100,
+          branches: 100,
+          functions: 100,
+        },
+        'src/middleware/patAuth.ts': {
+          lines: 100,
+          statements: 100,
+          branches: 100,
+          functions: 100,
+        },
+        'src/middleware/csrf.ts': {
+          lines: 100,
+          statements: 100,
+          branches: 100,
+          functions: 100,
+        },
         'src/routes/tokens.ts': {
           lines: 100,
           statements: 100,

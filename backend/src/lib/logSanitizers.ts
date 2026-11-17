@@ -9,10 +9,20 @@ export function safeRequestId(req: IncomingMessage, res: ServerResponse): string
     typeof headerId === 'string' &&
     headerId.length > 0 &&
     SAFE_REQUEST_ID.test(headerId) &&
-    !/^pto_pat_/i.test(headerId)
+    !/pto_pat_/i.test(headerId)
   ) {
     res.setHeader('X-Request-Id', headerId);
     return headerId;
+  }
+  // An early credential boundary may already have generated the safe ID before
+  // pino/auth run. Preserve it so response, auth context and log IDs agree.
+  const existing = res.getHeader('X-Request-Id');
+  if (
+    typeof existing === 'string' &&
+    SAFE_REQUEST_ID.test(existing) &&
+    !/pto_pat_/i.test(existing)
+  ) {
+    return existing;
   }
   const id = randomUUID();
   res.setHeader('X-Request-Id', id);
@@ -21,13 +31,21 @@ export function safeRequestId(req: IncomingMessage, res: ServerResponse): string
 
 export function safeReqSerializer(value: Record<string, unknown>): Record<string, unknown> {
   const url = value['url'];
-  // Token endpoints have no query API. Dynamic paths/queries can contain a
-  // pasted credential; log only the fixed namespace, never those values.
-  const safeUrl =
-    typeof url === 'string' &&
-    /^\/auth\/tokens(?:[/?#]|$)/i.test(url.replace(/^https?:\/\/[^/]*/i, ''))
-      ? '/auth/tokens'
-      : url;
+  let safeUrl = url;
+  if (typeof url === 'string') {
+    // Do not decode or log an authority, query, or fragment. Match percent
+    // encoded prefix bytes directly so malformed escapes cannot throw.
+    const path = url.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i, '').split(/[?#]/, 1)[0]!;
+    if (/^\/auth\/tokens(?:\/|$)/i.test(path)) {
+      safeUrl = '/auth/tokens';
+    } else if (
+      /(?:p|%70)(?:t|%74)(?:o|%6f)(?:_|%5f)(?:p|%70)(?:a|%61)(?:t|%74)(?:_|%5f)/i.test(path)
+    ) {
+      safeUrl = '[REDACTED]';
+    } else {
+      safeUrl = path;
+    }
+  }
   return {
     id: value['id'],
     method: value['method'],

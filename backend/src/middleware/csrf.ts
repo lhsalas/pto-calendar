@@ -1,6 +1,7 @@
 import type { RequestHandler } from 'express';
 import { loadEnv } from '../config/env.js';
 import { HttpError } from './errorHandler.js';
+import type {} from '../services/auth/authContext.js';
 
 const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -31,7 +32,14 @@ export function csrfOriginMiddleware(): RequestHandler {
       next(new HttpError(403, 'CSRF_REJECTED', 'Request origin is not allowed.'));
       return;
     }
-    if (env.NODE_ENV === 'production' && !requestOrigin && req.session?.user) {
+    const verifiedCookieFreePat =
+      req.auth?.method === 'pat' && req.headers.cookie === undefined && !req.session?.user;
+    if (
+      env.NODE_ENV === 'production' &&
+      !requestOrigin &&
+      !verifiedCookieFreePat &&
+      (req.session?.user || req.headers.authorization !== undefined)
+    ) {
       next(new HttpError(403, 'CSRF_REJECTED', 'Request origin is not allowed.'));
       return;
     }

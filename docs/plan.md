@@ -7,7 +7,9 @@ Build a small internal app where team members can record planned PTO/vacation da
 > [Personal-token CLI + local stdio MCP delivery plan / ADR](agent-access-delivery-plan.md)
 > defines the shared contract and parallel waves. All 11 pre-existing issues
 > #227–#237 must be delivered with green CI before feature implementation.
-> Token settings, bearer access and agent adapters are planned, not shipped here;
+> Session-only token APIs (#250) and scoped PTO/identity bearer REST (#251) are
+> implemented foundations; both bearer rollout flags remain off by default.
+> Token settings UI and agent adapters remain planned, not shipped here;
 > hosted MCP/OAuth remains out of scope.
 
 ## 2. Core Users

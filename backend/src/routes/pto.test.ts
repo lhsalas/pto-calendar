@@ -1,0 +1,169 @@
+import request from 'supertest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { patFixture } from '../../tests/unit/helpers/patFixture.js';
+import { resetEnvForTests } from '../config/env.js';
+import { ptoRouter } from './pto.js';
+import { createPto, deletePto, getPtoById, updatePto } from '../services/pto/PTOService.js';
+import { listVisibleRange } from '../services/calendar/CalendarQuery.js';
+import type { TokenScope } from '../services/tokens/tokenDomain.js';
+
+vi.mock('../services/pto/PTOService.js', async () => ({
+  ...(await vi.importActual('../services/pto/PTOService.js')),
+  createPto: vi.fn(),
+  deletePto: vi.fn(),
+  getPtoById: vi.fn(),
+  updatePto: vi.fn(),
+}));
+vi.mock('../services/calendar/CalendarQuery.js', () => ({ listVisibleRange: vi.fn() }));
+
+const id = '00000000-0000-4000-8000-000000000001';
+const body = { startDate: '2026-12-01', endDate: '2026-12-01', dayPart: 'all_day' as const };
+const raw = {
+  id,
+  userId: 'owner',
+  startDate: new Date('2026-12-01'),
+  endDate: new Date('2026-12-01'),
+  dayPart: 'all_day' as const,
+  note: 'stored private note',
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
+
+function fixture(options: Parameters<typeof patFixture>[0] = {}) {
+  const f = patFixture(options);
+  f.app.use('/pto', ptoRouter);
+  f.finish();
+  const record = { ...raw, userId: f.owner.id };
+  vi.mocked(getPtoById).mockResolvedValue({
+    ...record,
+    startDate: '2026-12-01',
+    endDate: '2026-12-01',
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString(),
+    user: { id: record.userId, name: 'Owner', colorCode: '#123456' },
+  });
+  vi.mocked(createPto).mockResolvedValue(record);
+  vi.mocked(updatePto).mockResolvedValue(record);
+  vi.mocked(deletePto).mockResolvedValue(undefined);
+  vi.mocked(listVisibleRange).mockResolvedValue([
+    {
+      id,
+      ...body,
+      user: { id: record.userId, name: 'Owner', colorCode: '#123456' },
+      note: 'defensive list note',
+    },
+  ]);
+  return { ...f, bearer: `Bearer ${f.material.rawToken}`, record };
+}
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+  resetEnvForTests();
+});
+
+describe('PTO HTTP scopes and note serialization', () => {
+  it('keeps list notes null and gates detail reads with scope plus canViewNote', async () => {
+    const f = fixture({ scopes: ['pto:read', 'pto:notes:read'] });
+    const list = await request(f.app)
+      .get('/pto?start=2026-12-01&end=2026-12-31')
+      .set('Authorization', f.bearer)
+      .expect(200);
+    expect(list.body[0].note).toBeNull();
+    const detail = await request(f.app)
+      .get(`/pto/${id}`)
+      .set('Authorization', f.bearer)
+      .expect(200);
+    expect(detail.body.note).toBe('stored private note');
+    vi.mocked(getPtoById).mockResolvedValueOnce({ ...detail.body, userId: 'other' });
+    const foreign = await request(f.app)
+      .get(`/pto/${id}`)
+      .set('Authorization', f.bearer)
+      .expect(200);
+    expect(foreign.body.note).toBeNull();
+    const metadata = fixture();
+    const noNotes = await request(metadata.app)
+      .get(`/pto/${id}`)
+      .set('Authorization', metadata.bearer)
+      .expect(200);
+    expect(noNotes.body.note).toBeNull();
+  });
+
+  it('never leaks notes from write-only create or legacy PUT, including omitted notes', async () => {
+    const f = fixture({ scopes: ['pto:create', 'pto:update:self'] });
+    const created = await request(f.app)
+      .post('/pto')
+      .set('Authorization', f.bearer)
+      .send({ ...body, note: 'submitted', userId: 'other' })
+      .expect(201);
+    expect(created.body.note).toBeNull();
+    expect(createPto).toHaveBeenCalledWith(f.owner.id, { ...body, note: 'submitted' });
+    const updated = await request(f.app)
+      .put(`/pto/${id}`)
+      .set('Authorization', f.bearer)
+      .send(body)
+      .expect(200);
+    expect(updated.body.note).toBeNull();
+    expect(updatePto).toHaveBeenCalledWith({ id: f.owner.id, role: 'member' }, id, body);
+    const notes = fixture({
+      scopes: ['pto:create', 'pto:update:self', 'pto:read', 'pto:notes:read'],
+    });
+    expect(
+      (
+        await request(notes.app)
+          .post('/pto')
+          .set('Authorization', notes.bearer)
+          .send(body)
+          .expect(201)
+      ).body.note,
+    ).toBe('stored private note');
+    expect(
+      (
+        await request(notes.app)
+          .put(`/pto/${id}`)
+          .set('Authorization', notes.bearer)
+          .send(body)
+          .expect(200)
+      ).body.note,
+    ).toBe('stored private note');
+  });
+
+  it('requires explicit team delegation even for a lead; member record authorization still applies', async () => {
+    const f = fixture({ role: 'team_lead', scopes: ['pto:update:self', 'pto:delete:self'] });
+    const other = { ...f.record, userId: 'other' };
+    vi.mocked(getPtoById).mockResolvedValue(other as never);
+    await request(f.app).put(`/pto/${id}`).set('Authorization', f.bearer).send(body).expect(403);
+    await request(f.app).delete(`/pto/${id}`).set('Authorization', f.bearer).expect(403);
+    expect(updatePto).not.toHaveBeenCalled();
+    expect(deletePto).not.toHaveBeenCalled();
+    const team = fixture({ role: 'admin', scopes: ['pto:update:team', 'pto:delete:team'] });
+    vi.mocked(getPtoById).mockResolvedValue(other as never);
+    await request(team.app)
+      .put(`/pto/${id}`)
+      .set('Authorization', team.bearer)
+      .send(body)
+      .expect(200);
+    await request(team.app).delete(`/pto/${id}`).set('Authorization', team.bearer).expect(204);
+  });
+
+  it('returns consistent not-found results for missing read/update/delete records', async () => {
+    const f = fixture({ scopes: ['pto:read', 'pto:update:self', 'pto:delete:self'] });
+    vi.mocked(getPtoById).mockResolvedValue(null);
+    await request(f.app).get(`/pto/${id}`).set('Authorization', f.bearer).expect(404);
+    await request(f.app).put(`/pto/${id}`).set('Authorization', f.bearer).send(body).expect(404);
+    await request(f.app).delete(`/pto/${id}`).set('Authorization', f.bearer).expect(404);
+  });
+
+  it('propagates schema and service failures from every handler without exposing private causes', async () => {
+    const scopes: TokenScope[] = ['pto:read', 'pto:create', 'pto:update:self', 'pto:delete:self'];
+    const f = fixture({ scopes });
+    await request(f.app).post('/pto').set('Authorization', f.bearer).send({}).expect(400);
+    await request(f.app).get('/pto?start=bad').set('Authorization', f.bearer).expect(400);
+    vi.mocked(getPtoById).mockRejectedValueOnce(new Error('private failure'));
+    await request(f.app).get(`/pto/${id}`).set('Authorization', f.bearer).expect(500);
+    await request(f.app).put(`/pto/${id}`).set('Authorization', f.bearer).send({}).expect(400);
+    vi.mocked(deletePto).mockRejectedValueOnce(new Error('private failure'));
+    await request(f.app).delete(`/pto/${id}`).set('Authorization', f.bearer).expect(500);
+  });
+});

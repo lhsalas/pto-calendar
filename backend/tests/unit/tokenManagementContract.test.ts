@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { TOKEN_SCOPES } from '../../src/services/tokens/tokenDomain.js';
 
 interface Operation {
+  security?: Record<string, unknown[]>[];
   responses: Record<string, { headers?: Record<string, { $ref: string }> }>;
 }
 const api = parse(readFileSync(new URL('../../../docs/openapi.yaml', import.meta.url), 'utf8')) as {
@@ -30,7 +31,7 @@ const api = parse(readFileSync(new URL('../../../docs/openapi.yaml', import.meta
 describe('personal token OpenAPI contract', () => {
   it('documents every session-only operation and no-store/correlation success and error headers', () => {
     expect(api.security).toEqual([{ cookieAuth: [] }]);
-    expect(Object.keys(api.components.securitySchemes)).toEqual(['cookieAuth']);
+    expect(Object.keys(api.components.securitySchemes)).toEqual(['cookieAuth', 'personalToken']);
     for (const [path, method, status] of [
       ['/auth/tokens', 'get', '200'],
       ['/auth/tokens', 'post', '201'],
@@ -38,6 +39,7 @@ describe('personal token OpenAPI contract', () => {
       ['/auth/tokens/revoke-all', 'post', '204'],
     ]) {
       const operation = api.paths[path!]![method!]!;
+      expect(operation.security).toBeUndefined(); // inherits session-only, not global PAT access
       expect(operation.responses[status!]!.headers?.['Cache-Control']?.$ref).toBe(
         '#/components/headers/TokenNoStore',
       );
@@ -50,6 +52,33 @@ describe('personal token OpenAPI contract', () => {
     expect(api.components.responses.TokenManagementError!.headers['Cache-Control']?.$ref).toBe(
       '#/components/headers/TokenNoStore',
     );
+  });
+
+  it('adds bearer alternatives only on the six deliberately scoped operations', () => {
+    const eligible = new Set([
+      'GET /auth/me',
+      'GET /pto',
+      'POST /pto',
+      'GET /pto/{id}',
+      'PUT /pto/{id}',
+      'DELETE /pto/{id}',
+    ]);
+    const actual: string[] = [];
+    for (const [path, operations] of Object.entries(api.paths)) {
+      for (const [method, operation] of Object.entries(operations)) {
+        if (operation.security?.some((entry) => 'personalToken' in entry)) {
+          const key = `${method.toUpperCase()} ${path}`;
+          expect(eligible.has(key)).toBe(true);
+          expect(operation.security).toEqual([{ cookieAuth: [] }, { personalToken: [] }]);
+          actual.push(key);
+        }
+      }
+    }
+    expect(actual.sort()).toEqual([...eligible].sort());
+    const identity = api.components.schemas.PersonalTokenIdentity!;
+    expect(identity.additionalProperties).toBe(false);
+    expect(Object.keys(identity.properties).sort()).toEqual(['auth', 'id', 'role']);
+    expect(identity.required).toEqual(['id', 'role', 'auth']);
   });
 
   it('bounds issuance and declares the exact vocabulary with no owner/role or recovery fields', () => {

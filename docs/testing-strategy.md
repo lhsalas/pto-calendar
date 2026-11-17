@@ -114,6 +114,8 @@ non-`Error` fallback by mocking the API boundary, and the `AuthContext` and
 | `src/services/authorization/**` | 100% | 100% | 100% | 100% | Highest-risk surface; centralized note-visibility + modification logic |
 | `src/services/tokens/**` | 100% | 100% | 100% | 100% | Token parsing, scopes, validity and lifecycle |
 | `src/routes/tokens.ts` | 100% | 100% | 100% | 100% | Session-only credential-management HTTP adapter |
+| `src/routes/auth.ts`, `src/routes/pto.ts` | 100% | 100% | 100% | 100% | Cookie/PAT identity and every PTO HTTP method |
+| `src/middleware/patAuth.ts`, `src/middleware/csrf.ts` | 100% | 100% | 100% | 100% | Credential selection, rollout and verified-only CSRF exemption |
 | `src/middleware/tokenManagement.ts` | 100% | 100% | 100% | 100% | Early no-store/session boundary and safe errors |
 | `src/lib/logSanitizers.ts` | 100% | 100% | 100% | 100% | Correlation IDs and credential-path redaction |
 | `src/services/pto/validation.ts` | 100% | 100% | 100% | 100% | All PTO business rules |
@@ -146,7 +148,7 @@ concurrent issuance, invalidation and UTC round-trips across process timezones;
 these require a separate identity-verified disposable-database run before
 claiming database-backed guarantees.
 
-> **Coverage partition.** Service-layer files (`lib/lifecycle.ts`, `services/pto/**`, `services/audit/**`, `services/calendar/**`) are measured by the **unit** run (`backend/vitest.config.ts`) and excluded from integration. Existing auth/PTO/user/health/holiday routes and `lib/rateLimit.ts` are measured by the **integration** run and excluded from unit coverage. The new security-sensitive token router is deliberately included in both runs, with a 100% unit floor; new routes are no longer blanket-excluded from unit instrumentation. The sets are not strictly disjoint: for example, `lib/prismaClient.ts` and holiday services can appear in both reports. The PR-comment backend summary uses integration coverage only; configured path thresholds in each run are separate gates.
+> **Coverage partition.** Service-layer files (`lib/lifecycle.ts`, `services/pto/**`, `services/audit/**`, `services/calendar/**`) are measured by the **unit** run (`backend/vitest.config.ts`) and excluded from integration. User/health/holiday routes and `lib/rateLimit.ts` remain measured by the **integration** run and excluded from unit coverage. Token/auth/PTO routers are deliberately included in both runs, each with a 100% unit floor. New route/security code is never blanket-excluded; the rollout schema lives in the instrumented auth service rather than excluded env wiring. Existing config/session-secret exclusions are unchanged. The sets are not strictly disjoint: for example, `lib/prismaClient.ts` and holiday services can appear in both reports. The PR-comment backend summary uses integration coverage only; configured path thresholds in each run are separate gates.
 
 Token-management tests exercise all-role ownership, fresh password/version
 proof, failed-auth limiting, bearer/mixed denial, CSRF, no-store and correlation
@@ -154,6 +156,21 @@ headers on parser/auth/limiter failures, show-once metadata/error redaction,
 concurrent HTTP cap enforcement, reset/setup and application-owned pool cleanup.
 Mocked in-process unit transport is separate from the disposable PostgreSQL
 integration suite; written tests alone do not certify a database-backed result.
+
+`scopedPatAuth.test.ts` adds the three-role × own/other × ten-scope-profile
+matrix on list/detail/POST/legacy PUT/DELETE, including impossible member/team
+credentials failing closed. Notes are checked on every note-bearing response.
+It covers strict/duplicate/mixed credentials, default-deny routes and methods,
+both rollout flags, cross-instance revocation/expiry/password/version/role
+invalidation, an actual PostgreSQL missing-relation verifier failure, and
+production-mode cookies/CSRF. Production tests substitute only Redis's
+external store adapter with an in-memory store while retaining real limiters
+and PostgreSQL; they do **not** certify real Redis. Pino output is captured at
+trace level for HTTP credential-redaction checks, not every possible external
+production diagnostic configuration.
+Unit fixtures also exercise the shared parser at its browser and verified-PAT
+positions, invalid bearer/mixed requests before parser errors and IP limiting,
+and denied-request URL and correlation-ID redaction.
 
 A coverage run fails if a **blocking** path falls below its configured threshold.
 The local integration requirement remains All files lines ≥90%; the CI coverage
@@ -167,14 +184,15 @@ aggregate floor. Integration route thresholds remain enforced by its Vitest run.
 Express **5.3.0**, body-parser **2.4.0** and Express types **5.0.6** replace the
 4.x runtime/types together. The direct body-parser declaration stays aligned
 with Express's compatible 2.x dependency; `express.json({ limit: '100kb' })`
-remains the application's parser. No route paths, payloads, query-parser setting,
-limiter versions or middleware order change. See the
+remains the application's parser. That migration did not change route paths,
+payloads, query-parser setting, limiter versions or middleware order; later PAT
+selection defers that same parser only for Authorization requests. See the
 [official migration guide](https://expressjs.com/en/guide/migrating-5.html).
 
 `server.test.ts` characterizes the same HTTP outcomes before/after the upgrade:
 missing/unsupported bodies produce 400 validation errors; malformed/oversized
-JSON retains the existing generic 500 envelope without a request ID because
-parsing precedes logging. This documents the baseline, not a new parser-error
+JSON without Authorization retains the existing generic 500 envelope without a
+request ID because parsing precedes logging. This documents the baseline, not a new parser-error
 policy. Scalar/reordered range queries retain bounds/date validation; duplicate
 and bracket-form required parameters remain invalid despite the framework's
 simple query-parser default. Async rejection tests cover explicit `next(err)`

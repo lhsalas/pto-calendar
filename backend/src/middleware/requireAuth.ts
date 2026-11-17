@@ -3,6 +3,8 @@ import type { NextFunction, Request, Response } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { loadEnv } from '../config/env.js';
 import type { SessionUser } from './cookieSession.js';
+import type {} from '../services/auth/authContext.js';
+import { safeRequestId } from '../lib/logSanitizers.js';
 
 declare module 'express-serve-static-core' {
   interface Request {
@@ -45,6 +47,10 @@ export function __resetAuthUserCacheForTests(): void {
 }
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (req.auth?.method === 'pat') {
+    next();
+    return;
+  }
   const sessionUser = req.session?.user;
   if (!sessionUser) {
     res.status(401).json({
@@ -75,6 +81,11 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       req.session.user = authenticatedUser;
     }
     req.user = authenticatedUser;
+    req.auth = {
+      method: 'session',
+      actor: { id: live.id, role: live.role },
+      requestId: safeRequestId(req, res),
+    };
     next();
   } catch (err) {
     next(err);

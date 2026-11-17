@@ -1,12 +1,26 @@
 openapi: 3.0.3
-# Remaining proposed agent-access contract (bearer/client features not available):
+# Scoped bearer REST is implemented behind disabled-by-default server flags.
 # docs/agent-access-delivery-plan.md, tracked by #246 and owning #249–#269 PRs.
-# Add PAT, pagination and precondition schemas only with their implementations.
+# Pagination, preconditions and client packages remain future deliverables.
 info:
   title: PTO / Vacation Calendar API
-  version: 1.2.0
+  version: 1.3.0
   description: |
     API for managing PTO requests in a shared team calendar.
+
+    ## Personal-token access
+    PAT_AUTH_ENABLED and PAT_WRITES_ENABLED default false in every environment.
+    A bearer alternative exists ONLY on the six explicitly marked operations.
+    Never send a Cookie header with Authorization (even an empty/invalid cookie).
+    Empty, malformed, duplicate, invalid or disabled credentials, ineligible
+    routes and verifier database errors return generic 401 UNAUTHENTICATED;
+    a failed bearer never falls back to a session. Valid scope/role/ownership or
+    disabled-write denials return 403 FORBIDDEN.
+    Verification checks live expiry, revocation, password eligibility, credential
+    version and role on every request: reset/revoke/demotion apply immediately.
+    Promotion cannot revive an invalidated token. These flags remain disabled
+    in production until the separate audit/quota/query/client/pilot gates pass.
+    Authorization-bearing responses are no-store with safe X-Request-Id.
 
     ## Operational notes
     - Every response carries an `X-Request-Id` header (UUID v4) that mirrors
@@ -174,8 +188,16 @@ paths:
               schema: { type: string, format: uuid }
   /auth/me:
     get:
+      security:
+        - cookieAuth: []
+        - personalToken: []
       summary: Get current authenticated user
       tags: [Auth]
+      description: |
+        A session keeps the existing User response. A verified cookie-free PAT
+        returns only actor ID/current role and safe auth method/token public
+        ID/scopes/absolute expiry, without requiring pto:read. No secret, password,
+        browser credential version or user administration fields are exposed.
       responses:
         '200':
           description: Current user
@@ -185,7 +207,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                oneOf:
+                  - $ref: '#/components/schemas/User'
+                  - $ref: '#/components/schemas/PersonalTokenIdentity'
         '401':
           description: Not authenticated
           headers:
@@ -195,6 +219,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /auth/tokens:
     get:
       tags: [Auth]
@@ -487,9 +513,14 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
   /pto:
     get:
+      security:
+        - cookieAuth: []
+        - personalToken: []
       summary: List PTO entries overlapping a visible calendar date range
       tags: [PTO]
-      description: Subject to the global rate limiter; may return `429`.
+      description: |
+        PATs require pto:read. Shared calendar metadata includes no notes: list
+        notes remain null even with pto:notes:read. Subject to the global limiter.
       parameters:
         - in: query
           name: start
@@ -537,12 +568,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/PatForbidden'
         '429':
           $ref: '#/components/responses/RateLimited'
     post:
+      security:
+        - cookieAuth: []
+        - personalToken: []
       summary: Create PTO entry for current user
       tags: [PTO]
-      description: Subject to the global rate limiter; may return `429`.
+      description: |
+        PATs require pto:create AND PAT_WRITES_ENABLED. Always create for the
+        credential owner, never a client-selected owner/role. A write scope
+        does not grant note-read: the response note is null unless the token
+        also has pto:notes:read (which requires pto:read) plus canViewNote.
+        Normal cookie CSRF remains; verified cookie-free PAT writes may omit
+        Origin, but foreign Origin is still rejected. Global limiting applies.
       requestBody:
         required: true
         content:
@@ -577,6 +619,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/PatForbidden'
         '409':
           description: PTO overlaps an existing PTO entry for the same user
           headers:
@@ -590,9 +634,16 @@ paths:
           $ref: '#/components/responses/RateLimited'
   /pto/{id}:
     get:
+      security:
+        - cookieAuth: []
+        - personalToken: []
       summary: Get PTO by id
       tags: [PTO]
-      description: Subject to the global rate limiter; may return `429`.
+      description: |
+        PATs require pto:read. Notes require pto:notes:read AND canViewNote:
+        owners or current leads/admins, never arbitrary shared-calendar readers.
+        Missing notes permission redacts note to null rather than widening it.
+        Subject to the global limiter.
       parameters:
         - $ref: '#/components/parameters/RequestIdHeader'
         - in: path
@@ -620,6 +671,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/PatForbidden'
         '404':
           description: PTO not found
           headers:
@@ -632,9 +685,19 @@ paths:
         '429':
           $ref: '#/components/responses/RateLimited'
     put:
+      security:
+        - cookieAuth: []
+        - personalToken: []
       summary: Update PTO by id
       tags: [PTO]
-      description: Subject to the global rate limiter; may return `429`.
+      description: |
+        Legacy PUT remains scoped: PAT_WRITES_ENABLED AND pto:update:self for
+        an owned record, or pto:update:team AND live lead/admin eligibility.
+        Scope AND role AND record authorization must pass; self-only lead
+        tokens cannot update colleagues. Note omission preserves the stored
+        note, but the response still redacts it unless note-read plus
+        canViewNote pass. Write-only tokens never disclose hidden stored notes.
+        Normal CSRF/foreign-Origin and global limiter protections remain.
       parameters:
         - $ref: '#/components/parameters/RequestIdHeader'
         - in: path
@@ -703,9 +766,16 @@ paths:
         '429':
           $ref: '#/components/responses/RateLimited'
     delete:
+      security:
+        - cookieAuth: []
+        - personalToken: []
       summary: Delete PTO by id
       tags: [PTO]
-      description: Subject to the global rate limiter; may return `429`.
+      description: |
+        PAT_WRITES_ENABLED AND pto:delete:self for an owned record, or
+        pto:delete:team AND live lead/admin eligibility. Scope AND role AND
+        record authorization must pass. Self-only lead tokens stay self-only.
+        Normal CSRF/foreign-Origin and global limiter protections remain.
       parameters:
         - $ref: '#/components/parameters/RequestIdHeader'
         - in: path
@@ -940,10 +1010,21 @@ components:
       description: Safe inbound correlation ID or a generated UUID v4.
       schema: { type: string, pattern: '^[A-Za-z0-9._-]{1,200}$' }
   responses:
+    PatForbidden:
+      description: |
+        403 FORBIDDEN for insufficient PAT scope, disabled writes or failed
+        live role/record authority. CSRF_REJECTED for a foreign write Origin.
+        All Authorization-bearing responses are no-store.
+      headers:
+        Cache-Control: { $ref: '#/components/headers/TokenNoStore' }
+        X-Request-Id: { $ref: '#/components/headers/TokenRequestId' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
     TokenManagementError:
       description: |
         400 VALIDATION_ERROR (strict input/UUID/query), 401 UNAUTHENTICATED
-        (session/current password) or SESSION_REQUIRED (Authorization present),
+        (session/current password/Authorization denial),
         403 FORBIDDEN (team scopes) or CSRF_REJECTED (Origin),
         404 NOT_FOUND (foreign/unknown token), 409 TOKEN_LIMIT_REACHED,
         413 PAYLOAD_TOO_LARGE, 415 UNSUPPORTED_MEDIA_TYPE,
@@ -997,6 +1078,14 @@ components:
       type: apiKey
       in: cookie
       name: session
+    personalToken:
+      type: http
+      scheme: bearer
+      bearerFormat: pto_pat_<public-uuid-v4>.<64-lowercase-hex-secret>
+      description: |
+        Only eligible operations opt in; both server rollout flags default off.
+        Send exactly one Authorization header and no Cookie header. No fallback
+        to browser sessions. This is a personal REST credential, not HTTP MCP OAuth.
   parameters:
     RequestIdHeader:
       name: X-Request-Id
@@ -1007,6 +1096,24 @@ components:
         type: string
         format: uuid
   schemas:
+    PersonalTokenIdentity:
+      type: object
+      additionalProperties: false
+      required: [id, role, auth]
+      properties:
+        id: { type: string, format: uuid }
+        role: { $ref: '#/components/schemas/Role' }
+        auth:
+          type: object
+          additionalProperties: false
+          required: [method, tokenId, scopes, expiresAt]
+          properties:
+            method: { type: string, enum: [pat] }
+            tokenId: { type: string, format: uuid }
+            scopes:
+              type: array
+              items: { $ref: '#/components/schemas/PersonalTokenScope' }
+            expiresAt: { type: string, format: date-time }
     EmptyTokenManagementRequest:
       type: object
       additionalProperties: false

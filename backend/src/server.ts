@@ -21,6 +21,13 @@ import {
   tokenManagementErrorHandler,
 } from './middleware/tokenManagement.js';
 import { createTokenRuntime } from './services/tokens/tokenRuntime.js';
+import {
+  createPatAuth,
+  finishPreflight,
+  patErrorHandler,
+  patResponseBoundary,
+  selectiveJsonParser,
+} from './middleware/patAuth.js';
 
 export type ManagedApp = Express & { closeResources(): Promise<void> };
 
@@ -35,14 +42,17 @@ export function createApp(): ManagedApp {
     app.set('trust proxy', env.TRUST_PROXY_HOPS);
   }
   app.use(helmet());
+  app.use(patResponseBoundary);
   app.use('/auth/tokens', tokenManagementBoundary);
   app.use(
     cors({
       origin: env.CORS_ORIGIN,
       credentials: true,
+      preflightContinue: true,
     }),
   );
-  app.use(express.json({ limit: '100kb' }));
+  const jsonParser = express.json({ limit: '100kb' });
+  app.use(selectiveJsonParser(jsonParser, false));
   const pinoHttpOptions: PinoHttpOptions = {
     logger,
     genReqId: safeRequestId,
@@ -56,8 +66,11 @@ export function createApp(): ManagedApp {
   };
   app.use(pinoHttp(pinoHttpOptions));
   app.use(cookieSessionMiddleware());
-  app.use(csrfOriginMiddleware());
   app.use(createGlobalLimiter());
+  app.use(createPatAuth(tokenRuntime));
+  app.use(csrfOriginMiddleware());
+  app.use(selectiveJsonParser(jsonParser, true));
+  app.use(finishPreflight);
 
   app.use(healthRouter);
 
@@ -75,6 +88,7 @@ export function createApp(): ManagedApp {
   });
 
   app.use('/auth/tokens', tokenManagementErrorHandler);
+  app.use(patErrorHandler);
   app.use(errorHandler);
 
   return app;

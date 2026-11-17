@@ -126,6 +126,21 @@ copies in a separate password vault: GitHub does not reveal stored secret
 values through its UI or API. Do not rotate or delete these values as part of
 the deployment sunset.
 
+### Personal-token rollout remains disabled
+
+`PAT_AUTH_ENABLED=false` and `PAT_WRITES_ENABLED=false` are the application
+defaults in every environment; `backend/.env.example` makes both explicit.
+#251's scoped REST foundation is **not** production enablement. Do not enable
+either flag on the VM as part of this delivery. The ADR's separate
+audit/quota/query/client/read-only/write pilot gates must pass first.
+
+When a later authorized rollout explicitly enables authentication, the write
+flag remains a separate gate: issued write scopes alone cannot mutate. Turning
+auth off denies PAT requests without changing browser cookies; turning writes
+off leaves eligible read/status requests available. Configuration changes take
+effect at application startup; no route or client flag can override them.
+Keep CORS exact-origin and retain HTTPS/normal browser CSRF protections.
+
 For a replacement VM that will restore an existing OCI backup, skip bootstrap
 so no temporary user is created:
 

@@ -105,8 +105,8 @@ malformed/invalid bearer auth. Only a **successfully verified, cookie-free** PAT
 request is exempt from cookie-specific CSRF checks; retain foreign-Origin
 rejection, exact-origin browser protections and existing CORS policy.
 
-Proposed server switches `PAT_AUTH_ENABLED` and `PAT_WRITES_ENABLED` default off
-in production. Disabled writes cannot mutate even with minted write scopes;
+Implemented by #251, server switches `PAT_AUTH_ENABLED` and `PAT_WRITES_ENABLED`
+default off in every environment and remain disabled for production. Disabled writes cannot mutate even with minted write scopes;
 local CLI/MCP write enablement cannot override server flags or authorization.
 
 ### Operational controls ([#252], [#253])
@@ -128,16 +128,16 @@ probe exemptions. Document bounded tuning/NAT behavior; 429 includes correct
 
 ## 3. Shared REST and compatibility contract
 
-Entries below remain **proposed** except the session-only token-management
-contract implemented by #250 and documented in OpenAPI. Existing cookie
-calendar behavior remains supported; changes ship with their browser callers
-and regression coverage. This exception does not enable PTO bearer access,
-client packages or pilot rollout.
+Entries below remain **proposed** except #250's session-only token management
+and #251's deliberately scoped current PTO/identity methods, documented in
+OpenAPI. The latter remain behind disabled-by-default flags, not enabled
+production bearer access. Existing cookie calendar behavior stays supported;
+client packages, new routes and pilot rollout remain separate gates.
 
 | Contract | Required behavior | Deliverable |
 | --- | --- | --- |
 | `GET/POST /auth/tokens`, `DELETE /auth/tokens/:id`, `POST /auth/tokens/revoke-all` | Session-only for every role; session-derived owner; POST defaults to `pto:read` and returns 201 + show-once `rawToken`/safe metadata. Foreign/unknown IDs share a not-found response; repeat own revocation is harmless. | [#250] |
-| `GET /auth/me` | Session or PAT-safe actor, token scopes/expiry; no credential secrets | [#251] |
+| `GET /auth/me` | Session User unchanged; PAT returns only `{ id, role, auth: { method, tokenId, scopes, expiresAt } }` behind disabled-by-default flags; no credential secrets | [#251] |
 | `GET /pto` | Keep real ISO validation and inclusive **366-day** range cap. Filter `userId` in DB **before** limiting. Explicit opt-in paged mode (for example `format=page`) returns `items`, `nextCursor`, `hasMore`; unchanged callers retain the array response. | [#255] |
 | Paged queries | Deterministic `(startDate, userId, id)` ordering, bounded page sizes, validated filter/range-bound cursors; traverse >1,000 records without silent loss. No point-in-time snapshot claim under concurrent changes. Adapters deduplicate/detect changes and report incomplete results when bounded budgets are exhausted. | [#255], [#259] |
 | `PATCH /pto/:id` | Non-empty changed fields only; omitted keys preserve, `note: null` explicitly clears. Document empty-string compatibility. Validate the merged record, reject unknown fields/owner transfer. | [#256] |
@@ -340,6 +340,14 @@ the temporary image-risk acceptance is not remediation.
 
 ### Feature order, with explicit prerequisites
 
+**Scoped-auth checkpoint — 2026-11-17:** #250 was delivered by PR292 on master
+`25db78bc0a3225158a7faf2f20eccd3ce06ff79d`; post-merge CI run `44116608988`
+passed all eleven jobs. #251 implements the typed auth context, strict
+cookie/PAT selection, explicit route allowlist, scope/role/owner checks,
+note redaction and off-by-default rollout flags. This is implementation scope,
+not authorization to enable production access or a claim that audit, quotas,
+query integrity, clients or pilot gates have passed.
+
 **Foundation checkpoint — 2026-11-17:** #249 was delivered by PR291 on master
 `b386bf7d7994a336278a35e65dd66be3ecdac13e`; post-merge CI run `44105460188`
 passed all eleven jobs. #250 adds the session-only management contract below,
@@ -444,7 +452,7 @@ evidence; sole merge authority remains with the orchestrator.
 - Exercise staging/disposable accounts through **HTTPS -> Caddy -> nginx ->
   Express -> PostgreSQL**, with shared Redis: Authorization forwarding, no-store,
   role/scope/note privacy, immediate reset/revoke/demotion, quotas and safe logs.
-- Proposed `PAT_AUTH_ENABLED` and `PAT_WRITES_ENABLED` default **false** for
+- Implemented `PAT_AUTH_ENABLED` and `PAT_WRITES_ENABLED` default **false** for
   production. After UI/auth/audit/quotas/complete-query gates pass, enable only an
   explicitly approved **read-only pilot**; verify both adapters cannot write.
 - Personal writes require version/precondition, overlap, idempotency/audit,

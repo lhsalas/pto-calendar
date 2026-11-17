@@ -25,6 +25,20 @@ function makeReqRes(headers: Record<string, string | string[] | undefined> = {})
 }
 
 describe('safeRequestId', () => {
+  it('reuses only a safe previously generated ID throughout credential middleware', () => {
+    const { req, res, headerStore } = makeReqRes();
+    const id = safeRequestId(req, res);
+    expect(safeRequestId(req, res)).toBe(id);
+    for (const invalid of [
+      ['array-value'],
+      'unsafe value',
+      'pto_pat_pasted-secret',
+      'prefix-PTO_PAT_pasted-secret',
+    ]) {
+      headerStore['x-request-id'] = invalid;
+      expect(safeRequestId(req, res)).toMatch(UUID_REGEX);
+    }
+  });
   it('passes through a valid inbound X-Request-Id header', () => {
     const { req, res, headerStore } = makeReqRes({ 'x-request-id': 'trace-123_abc' });
     const id = safeRequestId(req, res);
@@ -44,6 +58,9 @@ describe('safeRequestId', () => {
     const { req, res, headerStore } = makeReqRes({ 'x-request-id': token });
     expect(safeRequestId(req, res)).toMatch(UUID_REGEX);
     expect(headerStore['x-request-id']).not.toBe(token);
+    const prefixed = makeReqRes({ 'x-request-id': `prefix-${token}` });
+    expect(safeRequestId(prefixed.req, prefixed.res)).toMatch(UUID_REGEX);
+    expect(prefixed.headerStore['x-request-id']).not.toContain(token);
   });
 
   it('replaces a header containing newlines (log-injection guard) with a fresh UUID', () => {
@@ -77,6 +94,20 @@ describe('safeReqSerializer', () => {
       expect(safeReqSerializer({ url }).url).toBe('/auth/tokens');
     expect(safeReqSerializer({ url: '/auth/tokens-extra' }).url).toBe('/auth/tokens-extra');
     expect(safeReqSerializer({ url: 12 }).url).toBe(12);
+  });
+
+  it('removes query, fragment and authority, and redacts raw or encoded PAT paths without decoding', () => {
+    const token = `pto_pat_00000000-0000-4000-8000-000000000000.${'a'.repeat(64)}`;
+    for (const [url, expected] of [
+      [`/pto?token=${token}#secret`, '/pto'],
+      [`https://user:secret@example.test/pto?token=${token}`, '/pto'],
+      [`/pto/prefix-${token}`, '[REDACTED]'],
+      [`/pto/%70%74%6f%5f%70%61%74%5f${token}`, '[REDACTED]'],
+      ['/pto/%broken', '/pto/%broken'],
+      ['https://user:secret@example.test?token=secret', ''],
+    ]) {
+      expect(safeReqSerializer({ url }).url).toBe(expected);
+    }
   });
 
   it('strips headers and any other non-allowlisted fields', () => {
