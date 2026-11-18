@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import bcrypt from 'bcryptjs';
 import { Redis } from 'ioredis';
 import request from 'supertest';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp, type ManagedApp } from '../../src/server.js';
 import { createPrismaClient } from '../../src/lib/prismaClient.js';
 import { prisma as appPrisma } from '../../src/lib/prisma.js';
 import { resetEnvForTests } from '../../src/config/env.js';
 import { __resetAuthUserCacheForTests } from '../../src/middleware/requireAuth.js';
-import { __resetAgentQuotaForTests } from '../../src/middleware/agentQuota.js';
-import { chargeBearerFailure } from '../../src/middleware/agentQuota.js';
+import { __resetAgentQuotaForTests, chargeBearerFailure } from '../../src/middleware/agentQuota.js';
 import { sharedRedisClient } from '../../src/lib/rateLimit.js';
 import { createTokenDatabase } from '../../src/services/tokens/tokenDatabase.js';
 
@@ -45,6 +45,10 @@ const originalEnv = { ...process.env };
 /** An independent connection that never shares state with the application. */
 let observer: Redis;
 const apps: ManagedApp[] = [];
+const USER_WINDOW_MS = 60_000;
+const BEARER_WINDOW_MS = 900_000;
+const EXPIRY_WINDOW_MS = 5_000;
+const REQUEST_HEADROOM_MS = 3_000;
 
 /** The runtime key of the verified-user counter, including its subject. */
 const userKey = `pto:rate-limit:quota-user:user:${user.id}`;
@@ -52,6 +56,28 @@ const userRefundsKey = `${userKey}:refunds`;
 /** The runtime key of the pre-verification counter for the loopback address. */
 const bearerKey = 'pto:rate-limit:bearer-failure:ip:127.0.0.1';
 const bearerRefundsKey = `${bearerKey}:refunds`;
+
+async function waitForWindowHeadroom(windowMs: number): Promise<void> {
+  // Use the Redis clock that chooses the generation, not the Node clock.
+  // If near a boundary, wait for and confirm room in the next window.
+  for (let check = 0; check < 3; check += 1) {
+    const [seconds, microseconds] = await observer.time();
+    const nowMs = Number(seconds) * 1000 + Math.floor(Number(microseconds) / 1000);
+    const remainingMs = windowMs - (nowMs % windowMs);
+    if (remainingMs >= REQUEST_HEADROOM_MS) return;
+    await delay(remainingMs + 5);
+  }
+  throw new Error('Could not establish sufficient time in a Redis fixture window');
+}
+
+async function waitForCounterExpiry(key: string, windowMs: number): Promise<void> {
+  // Observe the actual TTL; never delete or extend the counter to fake expiry.
+  const ttl = await observer.pttl(key);
+  expect(ttl).toBeGreaterThan(0);
+  expect(ttl).toBeLessThanOrEqual(windowMs);
+  await delay(ttl + 5);
+  expect(await observer.exists(key)).toBe(0);
+}
 
 async function login(target: ManagedApp) {
   const agent = request.agent(target);
@@ -79,13 +105,13 @@ describe('the shared counters on a real Redis store', () => {
       CORS_ORIGIN: 'http://localhost:5173',
       AUTH_RATE_LIMIT_MAX: '1000',
       RATE_LIMIT_MAX: '10000',
-      RATE_LIMIT_ATTEMPT_WINDOW_MS: '900000',
+      RATE_LIMIT_ATTEMPT_WINDOW_MS: String(BEARER_WINDOW_MS),
       RATE_LIMIT_BEARER_FAILURE_MAX: '1000',
       RATE_LIMIT_USER_QUOTA_MAX: '1',
       RATE_LIMIT_TOKEN_QUOTA_MAX: '1000',
       RATE_LIMIT_TOKEN_ISSUANCE_MAX: '1000',
       RATE_LIMIT_TOKEN_PASSWORD_MAX: '1000',
-      RATE_LIMIT_QUOTA_WINDOW_MS: '60000',
+      RATE_LIMIT_QUOTA_WINDOW_MS: String(USER_WINDOW_MS),
     });
     resetEnvForTests();
     __resetAuthUserCacheForTests();
@@ -126,6 +152,7 @@ describe('the shared counters on a real Redis store', () => {
   it('keeps one counter that an independent connection can read and extend', async () => {
     const app = newApp();
     const agent = await login(app);
+    await waitForWindowHeadroom(USER_WINDOW_MS);
     await agent.get('/pto?start=2026-12-01&end=2026-12-31').expect(200);
     expect(await observer.hget(userKey, 'count')).toBe('1');
     // A different connection, with no shared process state, extends the same
@@ -141,6 +168,7 @@ describe('the shared counters on a real Redis store', () => {
     const first = newApp();
     const second = newApp();
     const agent = await login(first);
+    await waitForWindowHeadroom(USER_WINDOW_MS);
     await agent.get('/pto?start=2026-12-01&end=2026-12-31').expect(200);
     const other = await login(second);
     const limited = await other.get('/pto?start=2026-12-01&end=2026-12-31');
@@ -153,6 +181,7 @@ describe('the shared counters on a real Redis store', () => {
   it('reuses the counter after the application restarted', async () => {
     const first = newApp();
     const agent = await login(first);
+    await waitForWindowHeadroom(USER_WINDOW_MS);
     await agent.get('/pto?start=2026-12-01&end=2026-12-31').expect(200);
     // The restart closes the shared connection and opens a new one.
     await first.closeResources();
@@ -170,6 +199,7 @@ describe('the shared counters on a real Redis store', () => {
     await observer.del(userKey);
     const app = newApp();
     const agent = await login(app);
+    await waitForWindowHeadroom(USER_WINDOW_MS);
     const responses = await Promise.all(
       Array.from({ length: 20 }, () => agent.get('/pto?start=2026-12-01&end=2026-12-31')),
     );
@@ -180,103 +210,117 @@ describe('the shared counters on a real Redis store', () => {
   });
 
   it('expires the counter with its window and starts a new one', async () => {
-    process.env.RATE_LIMIT_QUOTA_WINDOW_MS = '2000';
+    process.env.RATE_LIMIT_QUOTA_WINDOW_MS = String(EXPIRY_WINDOW_MS);
     resetEnvForTests();
     __resetAgentQuotaForTests();
     await observer.del(userKey);
     const app = newApp();
     const agent = await login(app);
+    await waitForWindowHeadroom(EXPIRY_WINDOW_MS);
     await agent.get('/pto?start=2026-12-01&end=2026-12-31').expect(200);
-    const ttl = await observer.pttl(userKey);
-    expect(ttl).toBeGreaterThan(0);
-    expect(ttl).toBeLessThanOrEqual(2000);
     await agent.get('/pto?start=2026-12-01&end=2026-12-31').expect(429);
-    await new Promise((resolve) => setTimeout(resolve, 2100));
-    // The expired counter is gone, so the next attempt starts a new window.
-    expect(await observer.exists(userKey)).toBe(0);
+    expect(await observer.hget(userKey, 'count')).toBe('2');
+    const firstExpiry = await observer.pexpiretime(userKey);
+    expect(firstExpiry).toBeGreaterThan(0);
+    await waitForCounterExpiry(userKey, EXPIRY_WINDOW_MS);
+    await waitForWindowHeadroom(EXPIRY_WINDOW_MS);
     await agent.get('/pto?start=2026-12-01&end=2026-12-31').expect(200);
+    expect(await observer.hget(userKey, 'count')).toBe('1');
+    expect(await observer.pexpiretime(userKey)).toBeGreaterThan(firstExpiry);
   });
 
   it('never lets a compensation of an expired window touch the new one', async () => {
-    process.env.RATE_LIMIT_ATTEMPT_WINDOW_MS = '2000';
+    process.env.RATE_LIMIT_ATTEMPT_WINDOW_MS = String(EXPIRY_WINDOW_MS);
     resetEnvForTests();
     __resetAgentQuotaForTests();
     await observer.del(bearerKey, bearerRefundsKey);
+    newApp(); // Holds the application Redis lease for the direct quota calls.
     const client = sharedRedisClient(testRedisUrl);
-    const originalEval = client.eval.bind(client);
+    const originalEval = client.eval;
     let release!: () => void;
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    let arrived!: () => void;
-    const entered = new Promise<void>((resolve) => {
-      arrived = resolve;
-    });
+    let entered = false;
     client.eval = (async (...args: Parameters<typeof client.eval>) => {
-      if (String(args[0]).includes('pto-quota:compensate')) {
-        arrived();
+      if (String(args[0]).includes('pto-quota:compensate') && args[2] === bearerKey) {
+        entered = true;
         await held;
       }
-      return originalEval(...args);
+      return originalEval.apply(client, args);
     }) as typeof client.eval;
+    let refund: Promise<void> | undefined;
     try {
+      await waitForWindowHeadroom(EXPIRY_WINDOW_MS);
       const charge = await chargeBearerFailure({
         ip: '127.0.0.1',
         socket: { remoteAddress: '127.0.0.1' },
         headers: {},
       } as never);
-      const refund = charge.refund();
+      expect(await observer.hget(bearerKey, 'count')).toBe('1');
+      refund = charge.refund();
       // Hold the compensation while the window it belongs to expires.
-      await entered;
-      await new Promise((resolve) => setTimeout(resolve, 2100));
-      expect(await observer.exists(bearerKey)).toBe(0);
+      await vi.waitFor(() => expect(entered).toBe(true), { timeout: 1000 });
+      await waitForCounterExpiry(bearerKey, EXPIRY_WINDOW_MS);
+      await waitForWindowHeadroom(EXPIRY_WINDOW_MS);
       // A genuinely new window starts with its own count.
-      await chargeBearerFailure({
+      const next = await chargeBearerFailure({
         ip: '127.0.0.1',
         socket: { remoteAddress: '127.0.0.1' },
         headers: {},
       } as never);
+      expect(next.resetTime.getTime()).toBeGreaterThan(charge.resetTime.getTime());
       expect(await observer.hget(bearerKey, 'count')).toBe('1');
-      const ttlBefore = await observer.pttl(bearerKey);
+      const expiry = await observer.pexpiretime(bearerKey);
+      expect(expiry).toBeGreaterThan(0);
       release();
       await refund;
-      // The stale compensation changed neither the new count nor its window.
+      // The remaining TTL naturally decreases; the absolute expiry must not change.
       expect(await observer.hget(bearerKey, 'count')).toBe('1');
-      expect(await observer.pttl(bearerKey)).toBe(ttlBefore);
+      expect(await observer.pexpiretime(bearerKey)).toBe(expiry);
+      expect(await observer.exists(bearerRefundsKey)).toBe(0);
     } finally {
       release();
-      client.eval = originalEval;
+      try {
+        await refund;
+      } finally {
+        client.eval = originalEval;
+      }
     }
   });
 
   it('compensates the same attempt only once', async () => {
     await observer.del(bearerKey, bearerRefundsKey);
+    newApp();
     const request_ = {
       ip: '127.0.0.1',
       socket: { remoteAddress: '127.0.0.1' },
       headers: {},
     } as never;
+    await waitForWindowHeadroom(BEARER_WINDOW_MS);
     const charge = await chargeBearerFailure(request_);
-    await charge.refund();
-    await charge.refund();
-    // The duplicate compensation did not take the next attempt's budget.
     const next = await chargeBearerFailure(request_);
     expect(next.allowed).toBe(true);
+    expect(next.resetTime.getTime()).toBe(charge.resetTime.getTime());
+    expect(await observer.hget(bearerKey, 'count')).toBe('2');
+    await Promise.all([charge.refund(), charge.refund()]);
+    // Leave another charge outstanding: a zero-count floor cannot mask a second refund.
     expect(await observer.hget(bearerKey, 'count')).toBe('1');
   });
 
   it('never creates a counter for a compensation whose window is gone', async () => {
-    process.env.RATE_LIMIT_ATTEMPT_WINDOW_MS = '2000';
+    process.env.RATE_LIMIT_ATTEMPT_WINDOW_MS = String(EXPIRY_WINDOW_MS);
     resetEnvForTests();
     __resetAgentQuotaForTests();
     await observer.del(bearerKey, bearerRefundsKey);
+    newApp();
+    await waitForWindowHeadroom(EXPIRY_WINDOW_MS);
     const charge = await chargeBearerFailure({
       ip: '127.0.0.1',
       socket: { remoteAddress: '127.0.0.1' },
       headers: {},
     } as never);
-    await new Promise((resolve) => setTimeout(resolve, 2100));
-    expect(await observer.exists(bearerKey)).toBe(0);
+    await waitForCounterExpiry(bearerKey, EXPIRY_WINDOW_MS);
     await charge.refund();
     // No counter and no compensation record were created.
     expect(await observer.exists(bearerKey)).toBe(0);

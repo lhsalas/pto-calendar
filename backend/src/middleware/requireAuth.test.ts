@@ -51,6 +51,7 @@ describe('requireAuth', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
     __resetAgentQuotaForTests();
   });
@@ -248,6 +249,7 @@ describe('requireAuth', () => {
   });
 
   it('refuses a verified session that is outside its traffic budget', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now());
     vi.stubEnv('RATE_LIMIT_USER_QUOTA_MAX', '1');
     const { resetEnvForTests, loadEnv } = await import('../config/env.js');
     resetEnvForTests();

@@ -293,6 +293,7 @@ describe('session-only personal token management on PostgreSQL', () => {
     resetEnvForTests();
     __resetAgentQuotaForTests();
     const limitedApp = createApp();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
     try {
       const limited = await login('member', limitedApp);
       for (let i = 0; i < 2; i += 1)
@@ -308,6 +309,7 @@ describe('session-only personal token management on PostgreSQL', () => {
       // The issuance password budget is separate from the browser login.
       await login('member', limitedApp);
     } finally {
+      clock.mockRestore();
       await limitedApp.closeResources();
     }
     expect(JSON.stringify(spy.mock.calls)).not.toContain(password);

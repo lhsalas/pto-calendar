@@ -2,7 +2,17 @@ import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import type * as bcryptModule from 'bcryptjs';
 import request from 'supertest';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
 import { createApp, type ManagedApp } from '../../src/server.js';
 import { createPrismaClient } from '../../src/lib/prismaClient.js';
 import { prisma as appPrisma } from '../../src/lib/prisma.js';
@@ -50,6 +60,7 @@ function sessionActor(id: string): AuditActor {
 }
 const originalEnv = { ...process.env };
 let app: ManagedApp | undefined;
+let clock: MockInstance<typeof Date.now> | undefined;
 
 function confidential(res: request.Response): void {
   expect(res.headers['x-request-id']).toMatch(/^[A-Za-z0-9._-]{1,200}$/);
@@ -116,9 +127,15 @@ describe('verified traffic and issuance quotas on PostgreSQL', () => {
           setupTokenExpiresAt: null,
         },
       });
+    // Fix Date.now() so consecutive requests cannot straddle a quota window;
+    // keep the real event loop and timers for PostgreSQL and HTTP.
+    const now = Date.now();
+    clock = vi.spyOn(Date, 'now').mockReturnValue(now);
     app = createApp();
   });
   afterEach(async () => {
+    clock?.mockRestore();
+    clock = undefined;
     // A failed setup must not mask its own error with a cleanup failure.
     if (app) await app.closeResources();
     app = undefined;
@@ -314,10 +331,14 @@ describe('verified traffic and issuance quotas on PostgreSQL', () => {
     process.env.RATE_LIMIT_QUOTA_WINDOW_MS = '1000';
     resetEnvForTests();
     __resetAgentQuotaForTests();
+    const boundary = (Math.floor(Date.now() / 1000) + 1) * 1000;
+    clock!.mockReturnValue(boundary - 1);
     const agent = await login(0);
     await agent.get('/pto?start=2026-12-01&end=2026-12-31').expect(200);
-    await agent.get('/pto?start=2026-12-01&end=2026-12-31').expect(429);
-    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const limited = await agent.get('/pto?start=2026-12-01&end=2026-12-31').expect(429);
+    expect(limited.headers['retry-after']).toBe('1');
+    expect(draft7Reset(limited)).toBe(1);
+    clock!.mockReturnValue(boundary);
     await agent.get('/pto?start=2026-12-01&end=2026-12-31').expect(200);
   });
 

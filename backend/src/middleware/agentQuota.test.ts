@@ -43,6 +43,7 @@ const BASE_ENV = {
   SESSION_SECRET: 'aB1!cD2@eF3#gH4$iJ5%kL6&mN7*oP8+',
   DATABASE_URL: 'postgresql://test:test@localhost:5432/test',
 } as const;
+const CLOCK_START = Date.UTC(2026, 0, 1, 0, 0, 0, 1);
 
 function useEnv(overrides: Record<string, string> = {}): void {
   const base: Record<string, string | undefined> = { ...process.env };
@@ -76,6 +77,7 @@ const pat = {
 };
 
 beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(CLOCK_START);
   fake.evals.length = 0;
   fake.failEval = false;
   fake.reply = ['1', '0', '0'];
@@ -83,6 +85,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.mocked(Date.now).mockRestore();
   resetEnvForTests();
   __resetAgentQuotaForTests();
   vi.unstubAllEnvs();
@@ -118,7 +121,7 @@ describe('agent quota policy', () => {
 });
 
 describe('the process-local counter', () => {
-  it('counts inside one window and starts a new window after it elapsed', async () => {
+  it('counts separate subjects inside one window', async () => {
     const backend = new MemoryQuotaBackend();
     const subject = { kind: 'user-traffic' as const, key: 'user:a' };
     const first = await backend.increment(subject, 60_000);
@@ -134,10 +137,10 @@ describe('the process-local counter', () => {
   it('starts a new window once the previous one elapsed', async () => {
     const backend = new MemoryQuotaBackend();
     const subject = { kind: 'user-traffic' as const, key: 'user:a' };
-    const first = await backend.increment(subject, 20);
+    const first = await backend.increment(subject, 1000);
     expect(first.totalHits).toBe(1);
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    const second = await backend.increment(subject, 20);
+    vi.mocked(Date.now).mockReturnValue(first.resetTime.getTime());
+    const second = await backend.increment(subject, 1000);
     expect(second.totalHits).toBe(1);
     expect(second.generation).not.toBe(first.generation);
   });
@@ -158,13 +161,13 @@ describe('the process-local counter', () => {
   it('never lets an old attempt touch a newer window', async () => {
     const backend = new MemoryQuotaBackend();
     const subject = { kind: 'bearer-failure' as const, key: 'ip:1' };
-    const old = await backend.increment(subject, 20);
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    const fresh = await backend.increment(subject, 20);
+    const old = await backend.increment(subject, 1000);
+    vi.mocked(Date.now).mockReturnValue(old.resetTime.getTime());
+    const fresh = await backend.increment(subject, 1000);
     expect(fresh.totalHits).toBe(1);
     // The stale compensation arrives after the window changed.
-    await backend.compensate(subject, 20, old.generation, 'attempt-1');
-    const after = await backend.increment(subject, 20);
+    await backend.compensate(subject, 1000, old.generation, 'attempt-1');
+    const after = await backend.increment(subject, 1000);
     expect(after.totalHits).toBe(2);
   });
 
@@ -222,10 +225,13 @@ describe('pre-verification bearer budget', () => {
 
   it('does not refund a charge whose window already reset', async () => {
     useEnv({ RATE_LIMIT_BEARER_FAILURE_MAX: '1', RATE_LIMIT_ATTEMPT_WINDOW_MS: '1000' });
-    const charge = await chargeBearerFailure(requestAt('203.0.113.7'));
-    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const req = requestAt('203.0.113.7');
+    const charge = await chargeBearerFailure(req);
+    vi.mocked(Date.now).mockReturnValue(charge.resetTime.getTime());
+    const fresh = await chargeBearerFailure(req);
+    expect(fresh.allowed).toBe(true);
     await charge.refund();
-    expect((await chargeBearerFailure(requestAt('203.0.113.7'))).allowed).toBe(true);
+    expect((await chargeBearerFailure(req)).allowed).toBe(false);
   });
 });
 

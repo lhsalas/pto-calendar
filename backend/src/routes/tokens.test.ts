@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import express, { type Request, type Response } from 'express';
 import request from 'supertest';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { resetEnvForTests } from '../config/env.js';
@@ -164,6 +164,10 @@ beforeEach(() => {
   vi.mocked(prisma.user.findUnique).mockReset();
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe('session-only token HTTP adapter with real domain/auth logic', () => {
   it.each(['member', 'team_lead', 'admin'] as const)(
     'lets %s issue once and list safe own metadata',
@@ -248,6 +252,7 @@ describe('session-only token HTTP adapter with real domain/auth logic', () => {
   });
 
   it('bounds every password verification attempt and does not lock out revocation', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now());
     const f = fixture('member', 100, 10000, 3);
     // The budget covers every verification, not only the failed ones: a
     // verified password is not given back.
@@ -274,6 +279,7 @@ describe('session-only token HTTP adapter with real domain/auth logic', () => {
   });
 
   it('bounds token issuance separately from the password budget and writes nothing for a rejected issuance', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now());
     const f = fixture('member', 100, 10000, 100, 1);
     await request(f.app)
       .post('/auth/tokens')

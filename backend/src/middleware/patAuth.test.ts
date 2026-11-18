@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import request from 'supertest';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetEnvForTests } from '../config/env.js';
 import { patFixture } from '../../tests/unit/helpers/patFixture.js';
 import { __resetAgentQuotaForTests } from './agentQuota.js';
@@ -253,6 +253,14 @@ describe('strict bearer selection and database-backed verification', () => {
 });
 
 describe('bounded bearer verification and verified traffic', () => {
+  beforeEach(() => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+  });
+
+  afterEach(() => {
+    vi.mocked(Date.now).mockRestore();
+  });
+
   it('refuses a repeated failed verification before the database is consulted', async () => {
     vi.stubEnv('RATE_LIMIT_BEARER_FAILURE_MAX', '1');
     const f = fixture();
