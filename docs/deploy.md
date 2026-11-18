@@ -367,9 +367,10 @@ the per-caller budgets only become the effective limit below that ceiling.
 Alert on these signals:
 
 - A rising share of `429 RATE_LIMITED` responses with the message
-  `Too many requests. Try again later.` — the verified-user or verified-token
-  budget is exhausted. Check which account or token is affected before raising
-  a limit; a single account looping is a client bug, not a capacity problem.
+  `Too many requests. Try again later.` can come from the shared IP limiter or
+  a verified-user or verified-token budget. The message alone does not identify
+  the exhausted budget. Check whether rejections affect several callers behind
+  one address or are concentrated on one verified caller before raising a limit.
 - `429` responses with `Too many failed credential attempts. Try again later.`
   — the failed-bearer budget is exhausted for one address. This is a
   credential-guessing signal, not a tuning signal.
