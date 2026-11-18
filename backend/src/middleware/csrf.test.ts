@@ -11,9 +11,10 @@ function requestFor(
   session?: {
     user?: { id: string; role: 'member' | 'team_lead' | 'admin'; sessionVersion: number };
   },
-): { method: string; get: (name: string) => string | undefined } {
+): { method: string; headers: Record<string, string>; get: (name: string) => string | undefined } {
   return {
     method,
+    headers,
     get: (name) => headers[name.toLowerCase()],
     ...(session ? { session } : {}),
   };
@@ -33,6 +34,40 @@ describe('csrfOriginMiddleware', () => {
       RATE_LIMIT_REDIS_URL: 'rediss://:test-password@redis.example.test:6379/0',
     });
     resetEnvForTests();
+  });
+
+  it('exempts only a verified cookie-free PAT, never a header or mixed credential alone', () => {
+    const auth = { method: 'pat' };
+    const valid = { ...requestFor('PUT', { authorization: 'Bearer token' }), auth };
+    const next = vi.fn();
+    csrfOriginMiddleware()(valid as never, {} as never, next);
+    expect(next).toHaveBeenCalledWith();
+    for (const candidate of [
+      requestFor('PUT', { authorization: 'Bearer invalid' }),
+      { ...valid, headers: { authorization: 'Bearer token', cookie: '' } },
+      { ...valid, session: { user: { id: 'u1' } } },
+      { ...valid, get: (key: string) => (key === 'origin' ? 'https://foreign.test' : undefined) },
+    ]) {
+      const rejected = vi.fn();
+      csrfOriginMiddleware()(candidate as never, {} as never, rejected);
+      expect(rejected.mock.calls[0]?.[0]).toMatchObject({ status: 403, code: 'CSRF_REJECTED' });
+    }
+  });
+
+  it('handles malformed referers and preserves development cookie behavior', () => {
+    const next = vi.fn();
+    csrfOriginMiddleware()(
+      requestFor('POST', { referer: 'not a URL' }) as never,
+      {} as never,
+      next,
+    );
+    expect(next).toHaveBeenCalledWith();
+    process.env.NODE_ENV = 'test';
+    resetEnvForTests();
+    const user = { id: 'u1', role: 'member' as const, sessionVersion: 0 };
+    const development = vi.fn();
+    csrfOriginMiddleware()(requestFor('POST', {}, { user }) as never, {} as never, development);
+    expect(development).toHaveBeenCalledWith();
   });
 
   afterEach(() => {

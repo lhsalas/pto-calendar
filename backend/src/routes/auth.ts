@@ -49,6 +49,11 @@ export function createAuthRouter(loginLimiter: RequestHandler): Router {
 
   router.get('/me', requireAuth, async (req, res, next) => {
     try {
+      if (req.auth!.method === 'pat') {
+        const { actor, tokenId, scopes, expiresAt } = req.auth!;
+        res.json({ ...actor, auth: { method: 'pat', tokenId, scopes, expiresAt } });
+        return;
+      }
       const user = await getCurrentUser(req.user!.id);
       res.json(user);
     } catch (err) {

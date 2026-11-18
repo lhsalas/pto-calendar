@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { patRolloutFields } from '../services/auth/patRollout.js';
 import {
   isPlaceholderSessionSecret,
   parseSessionKeys,
@@ -42,6 +43,7 @@ const sessionSecretSchema = z
 
 const EnvSchema = z
   .object({
+    ...patRolloutFields,
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     PORT: z.coerce.number().int().positive().optional(),
 

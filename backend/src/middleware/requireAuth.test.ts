@@ -11,6 +11,7 @@ vi.mock('../lib/prisma.js', () => ({
     user: { findUnique: findUniqueMock },
   },
 }));
+vi.mock('../lib/logSanitizers.js', () => ({ safeRequestId: () => 'safe-unit-request-id' }));
 
 interface MockResponse {
   status: ReturnType<typeof vi.fn>;
@@ -90,6 +91,12 @@ describe('requireAuth', () => {
       select: { id: true, role: true },
     });
     expect(req.user).toEqual({ id: 'u1', role: 'member', sessionVersion: 0 });
+    expect(req.auth).toEqual({
+      method: 'session',
+      actor: { id: 'u1', role: 'member' },
+      requestId: 'safe-unit-request-id',
+    });
+    expect(req.auth?.actor).not.toHaveProperty('sessionVersion');
     expect(next).toHaveBeenCalledWith();
   });
 
@@ -243,5 +250,23 @@ describe('requireAuth', () => {
 
     expect(next).toHaveBeenCalledWith(err);
     expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('uses a gateway-verified PAT context without manufacturing a browser user or reading the role cache', async () => {
+    const req = {
+      auth: {
+        method: 'pat',
+        actor: { id: 'u1', role: 'member' },
+        requestId: 'request',
+        tokenId: 'token',
+        scopes: ['pto:read'],
+        expiresAt: new Date(),
+      },
+    } as unknown as Request;
+    const next = vi.fn();
+    await requireAuth(req, makeRes(), next);
+    expect(next).toHaveBeenCalledWith();
+    expect(findUniqueMock).not.toHaveBeenCalled();
+    expect(req.user).toBeUndefined();
   });
 });

@@ -25,6 +25,20 @@ function makeReqRes(headers: Record<string, string | string[] | undefined> = {})
 }
 
 describe('safeRequestId', () => {
+  it('reuses only a safe previously generated ID throughout credential middleware', () => {
+    const { req, res, headerStore } = makeReqRes();
+    const id = safeRequestId(req, res);
+    expect(safeRequestId(req, res)).toBe(id);
+    for (const invalid of [
+      ['array-value'],
+      'unsafe value',
+      'pto_pat_pasted-secret',
+      'prefix-PTO_PAT_pasted-secret',
+    ]) {
+      headerStore['x-request-id'] = invalid;
+      expect(safeRequestId(req, res)).toMatch(UUID_REGEX);
+    }
+  });
   it('passes through a valid inbound X-Request-Id header', () => {
     const { req, res, headerStore } = makeReqRes({ 'x-request-id': 'trace-123_abc' });
     const id = safeRequestId(req, res);
@@ -44,6 +58,9 @@ describe('safeRequestId', () => {
     const { req, res, headerStore } = makeReqRes({ 'x-request-id': token });
     expect(safeRequestId(req, res)).toMatch(UUID_REGEX);
     expect(headerStore['x-request-id']).not.toBe(token);
+    const prefixed = makeReqRes({ 'x-request-id': `prefix-${token}` });
+    expect(safeRequestId(prefixed.req, prefixed.res)).toMatch(UUID_REGEX);
+    expect(prefixed.headerStore['x-request-id']).not.toContain(token);
   });
 
   it('replaces a header containing newlines (log-injection guard) with a fresh UUID', () => {
@@ -75,8 +92,49 @@ describe('safeReqSerializer', () => {
       'https://secret@example.test/auth/tokens/secret?secret=secret',
     ])
       expect(safeReqSerializer({ url }).url).toBe('/auth/tokens');
-    expect(safeReqSerializer({ url: '/auth/tokens-extra' }).url).toBe('/auth/tokens-extra');
-    expect(safeReqSerializer({ url: 12 }).url).toBe(12);
+    expect(safeReqSerializer({ url: '/auth/tokens-extra' }).url).toBe('[unclassified]');
+    for (const url of [12, null, undefined, {}, ['/pto']]) {
+      expect(safeReqSerializer({ url }).url).toBe('[unclassified]');
+    }
+  });
+
+  it('only emits fixed labels, irrespective of dynamic path contents or encoding', () => {
+    const token = `pto_pat_00000000-0000-4000-8000-000000000000.${'a'.repeat(64)}`;
+    for (const [url, expected] of [
+      [`/pto?token=${token}#secret`, '/pto'],
+      [`https://user:secret@example.test/pto?token=${token}`, '/pto'],
+      [`/pto/prefix-${token}`, '[unclassified]'],
+      [`/pto/%70%74%6f%5f%70%61%74%5f${token}`, '[unclassified]'],
+      [`/pto/%2570${token.slice(1)}`, '[unclassified]'],
+      [`/pto/%252570${token.slice(1)}`, '[unclassified]'],
+      [`/pto/%70%74%6F%5fpat_${token.slice(8)}`, '[unclassified]'],
+      ['/pto/%broken', '[unclassified]'],
+      ['https://user:secret@example.test?token=secret', '[unclassified]'],
+    ]) {
+      expect(safeReqSerializer({ url }).url).toBe(expected);
+    }
+    for (const segment of ['123', '00000000-0000-4000-8000-000000000000', 'private', '%', token]) {
+      expect(safeReqSerializer({ url: `/pto/${segment}` }).url).toBe('[unclassified]');
+      expect(safeReqSerializer({ url: `/unknown/${segment}` }).url).toBe('[unclassified]');
+    }
+  });
+
+  it('recognizes only known static endpoint labels', () => {
+    for (const path of [
+      '/health',
+      '/ready',
+      '/auth/login',
+      '/auth/setup-account',
+      '/auth/logout',
+      '/auth/me',
+      '/pto',
+      '/users',
+      '/holidays',
+      '/holidays/all',
+      '/holidays/seed',
+    ]) {
+      expect(safeReqSerializer({ url: `${path}?private=secret#fragment` }).url).toBe(path);
+    }
   });
 
   it('strips headers and any other non-allowlisted fields', () => {

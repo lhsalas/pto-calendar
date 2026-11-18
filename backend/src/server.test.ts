@@ -33,6 +33,7 @@ vi.mock('./lib/logger.js', () => {
 
 import { createApp } from './server.js';
 import { resetEnvForTests } from './config/env.js';
+import { createTokenMaterial } from './services/tokens/tokenDomain.js';
 
 const REQUIRED_ENV = {
   NODE_ENV: 'test',
@@ -165,6 +166,71 @@ describe('server', () => {
       const inbound = '11111111-2222-3333-4444-555555555555';
       const res = await request(app).get('/health').set('X-Request-Id', inbound);
       expect(res.headers['x-request-id']).toBe(inbound);
+    });
+
+    it('does not log PATs in denied request URLs or echo prefixed PAT correlation IDs', async () => {
+      const app = createApp();
+      const token = createTokenMaterial().rawToken;
+      const encodedPrefix = `%70%74%6f%5f%70%61%74%5f${token.slice('pto_pat_'.length)}`;
+      for (const path of [`/pto?token=${token}`, `/pto/${token}`, `/pto/${encodedPrefix}`]) {
+        const res = await request(app)
+          .get(path)
+          .set('Authorization', 'Bearer invalid')
+          .set('X-Request-Id', `prefix-${token}`)
+          .expect(401);
+        expect(res.headers['x-request-id']).toMatch(UUID_REGEX);
+      }
+      const logs = capturedLogs.lines.join('');
+      expect(logs).not.toContain(token);
+      expect(logs).not.toContain(encodedPrefix);
+      expect(parseLogs().filter((line) => line.msg === 'request completed')).toHaveLength(3);
+    });
+
+    it('never reflects encoded dynamic paths in captured denied-request logs', async () => {
+      const app = createApp();
+      const secret = 'ab'.repeat(32);
+      const token = `pto_pat_00000000-0000-4000-8000-000000000000.${secret}`;
+      const suffix = token.slice(1);
+      const segments = [
+        token,
+        `%70${suffix}`,
+        `%2570${suffix}`,
+        `%252570${suffix}`,
+        `%70%74%6F%5fpat_${token.slice(8)}`,
+        '%broken',
+        'unknown-private-content',
+      ];
+      for (const segment of segments) {
+        const response = await request(app)
+          .get(`/pto/${segment}?private=query-secret`)
+          .set('Authorization', 'Bearer invalid')
+          .set('X-Request-Id', 'safe-followup-id')
+          .expect(401);
+        expect(response.headers['x-request-id']).toBe('safe-followup-id');
+      }
+      const logs = capturedLogs.lines.join('');
+      expect(logs).not.toContain(token);
+      expect(logs).not.toContain(secret);
+      expect(logs).not.toContain('unknown-private-content');
+      expect(logs).not.toContain('query-secret');
+      // Decode complete captured output at each represented depth; no token may emerge.
+      let decoded = logs;
+      for (let depth = 0; depth <= 3; depth++) {
+        expect(decoded).not.toContain(token);
+        decoded = decoded.replace(/%[0-9a-f]{2}/gi, (byte) =>
+          String.fromCharCode(parseInt(byte.slice(1), 16)),
+        );
+      }
+      const completion = parseLogs().filter((line) => line.msg === 'request completed');
+      expect(completion).toHaveLength(segments.length);
+      for (const line of completion) {
+        expect(line['req']).toMatchObject({
+          id: 'safe-followup-id',
+          method: 'GET',
+          url: '[unclassified]',
+        });
+        expect(line['res']).toMatchObject({ statusCode: 401 });
+      }
     });
 
     it('does NOT log request completion for GET /health', async () => {
@@ -327,6 +393,60 @@ describe('server', () => {
       } else {
         expect(response.headers['x-request-id']).toMatch(UUID_REGEX);
       }
+    });
+  });
+
+  describe('Authorization selection before JSON parsing', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      resetEnvForTests();
+    });
+
+    it('rejects invalid, disabled and mixed credentials before parsing malformed, oversized or unsupported JSON', async () => {
+      const token = createTokenMaterial().rawToken;
+      for (const enabled of [true, false]) {
+        vi.stubEnv('PAT_AUTH_ENABLED', String(enabled));
+        vi.stubEnv('RATE_LIMIT_MAX', '100');
+        resetEnvForTests();
+        const app = createApp();
+        for (const [body, contentType] of [
+          ['{', 'application/json'],
+          [JSON.stringify({ padding: 'x'.repeat(102_400) }), 'application/json'],
+          ['{}', 'application/json; charset=iso-8859-1'],
+        ] as const) {
+          for (const mode of ['invalid', 'mixed', ...(enabled ? [] : ['disabled'])]) {
+            const req = request(app)
+              .post('/pto')
+              .set('Authorization', mode === 'invalid' ? 'Bearer invalid' : `Bearer ${token}`)
+              .set('Content-Type', contentType);
+            if (mode === 'mixed') req.set('Cookie', 'session=invalid');
+            const res = await req.send(body).expect(401);
+            expect(res.body.error.code).toBe('UNAUTHENTICATED');
+            expect(res.headers['cache-control']).toBe('no-store');
+            expect(res.headers['x-request-id']).toMatch(UUID_REGEX);
+          }
+        }
+        await app.closeResources();
+      }
+    });
+
+    it('counts invalid malformed bearer requests against the global IP limit', async () => {
+      vi.stubEnv('PAT_AUTH_ENABLED', 'true');
+      vi.stubEnv('RATE_LIMIT_MAX', '2');
+      resetEnvForTests();
+      const app = createApp();
+      for (const status of [401, 401, 429]) {
+        const res = await request(app)
+          .post('/pto')
+          .set('Authorization', 'Bearer invalid')
+          .set('Content-Type', 'application/json')
+          .send('{')
+          .expect(status);
+        expect(res.body.error.code).toBe(status === 429 ? 'RATE_LIMITED' : 'UNAUTHENTICATED');
+        expect(res.headers['cache-control']).toBe('no-store');
+        expect(res.headers['x-request-id']).toMatch(UUID_REGEX);
+      }
+      await app.closeResources();
     });
   });
 
