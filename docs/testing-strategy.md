@@ -432,6 +432,24 @@ not the stale count of eight in older instructions. The OCI deployment
 workflow lists the same job names, so a release cannot be tagged around a
 failing check.
 
+**Explicit owner security waiver (PR #293, restoration #294):** for
+`lhsalas/pto-calendar`, the owner authorized disabling the entire job named
+`Security scan` repository-wide until it is restored through issue #294, because
+the unpatched `picomatch` advisory GHSA-fc5q-39xc-vjpf blocks the existing
+development dependency graph. The job condition is false only for this
+repository; this disables both npm dependency audits and the pinned-image
+vulnerability/secret scans on PR, master, tag and scheduled CI runs. Its skipped result is waived,
+not a passing security scan or remediation. All other checks remain mandatory.
+Before applying this waiver, the coordinator verified that this was the only
+failing dependency advisory and all four pinned images passed the unchanged
+image-risk policy with zero rejected findings (40 temporary and 79 legacy
+acceptances, not clean images). The underlying audit/image policies, branch
+protections, required-check settings, permissions and deployment guards are
+unchanged. No production deployment or PAT activation is authorized. Issue #294
+remains an open security item with manual review on 2026-11-24; closing the issue
+alone does not restore the control. Restoration must remove the false condition
+and prove both audit graphs, real image scans and all normal CI checks pass.
+
 ### 10.5 Secrets
 - `DATABASE_URL` for the Postgres service container (set per job, never from repo secrets).
 - OCI deployment uses `OCI_HOST`,

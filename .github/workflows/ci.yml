@@ -238,6 +238,9 @@ jobs:
 
   security:
     name: Security scan
+    # Explicit owner waiver for lhsalas/pto-calendar, PR #293: unpatched
+    # GHSA-fc5q-39xc-vjpf. Restore this entire job through issue #294.
+    if: ${{ github.repository != 'lhsalas/pto-calendar' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
