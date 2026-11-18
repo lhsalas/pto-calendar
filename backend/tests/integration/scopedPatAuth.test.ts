@@ -16,6 +16,7 @@ import {
 } from '../../src/services/tokens/tokenService.js';
 import { TOKEN_SCOPES, type TokenScope } from '../../src/services/tokens/tokenDomain.js';
 import { resetUserPassword, setupAccount } from '../../src/services/users/UserService.js';
+import { trustedOperatorActor, type AuditActor } from '../../src/services/audit/auditContext.js';
 
 const { logs } = vi.hoisted(() => ({ logs: [] as string[] }));
 vi.mock('../../src/lib/logger.js', async () => {
@@ -67,6 +68,10 @@ const users = [...roles, 'member' as const].map((role) => {
   };
 });
 const ids = users.map((u) => u.id);
+/** Attribution for a verified browser session; never derived from request data. */
+function sessionActor(id: string): AuditActor {
+  return { id, credential: { type: 'session' }, requestId: 'scoped-pat-integration' };
+}
 const foreignId = users[3]!.id;
 const originalEnv = { ...process.env };
 const apps: ManagedApp[] = [];
@@ -92,7 +97,10 @@ async function makeRecord(userId: string) {
   });
 }
 async function mint(index: number, scopes: readonly TokenScope[] = ['pto:read']) {
-  return issueToken(tokens, users[index]!.id, 0, { name: 'Integration', scopes: [...scopes] });
+  return issueToken(tokens, sessionActor(users[index]!.id), 0, {
+    name: 'Integration',
+    scopes: [...scopes],
+  });
 }
 function confidential(res: request.Response) {
   expect(res.headers['cache-control']).toBe('no-store');
@@ -396,10 +404,10 @@ describe('scoped PAT HTTP authorization on PostgreSQL', () => {
     };
     const first = await mint(0);
     await request(app).get('/auth/me').set('Authorization', `Bearer ${first.rawToken}`).expect(200);
-    await revokeToken(tokens, users[0]!.id, first.token.id);
+    await revokeToken(tokens, sessionActor(users[0]!.id), first.token.id);
     await denied(first.rawToken);
     const all = await mint(0);
-    await revokeAllTokens(tokens, users[0]!.id);
+    await revokeAllTokens(tokens, sessionActor(users[0]!.id));
     await denied(all.rawToken);
     const expired = await mint(0);
     const past = new Date(Date.now() - 2 * 86400000);
@@ -417,9 +425,19 @@ describe('scoped PAT HTTP authorization on PostgreSQL', () => {
     });
     await denied(passwordless.rawToken);
     const lead = await mint(1, ['pto:read', 'pto:update:team']);
-    await changeRoleAndInvalidate(tokens, users[1]!.id, 'member');
+    await changeRoleAndInvalidate(
+      tokens,
+      users[1]!.id,
+      'member',
+      trustedOperatorActor(users[2]!.id),
+    );
     await denied(lead.rawToken);
-    await changeRoleAndInvalidate(tokens, users[1]!.id, 'team_lead');
+    await changeRoleAndInvalidate(
+      tokens,
+      users[1]!.id,
+      'team_lead',
+      trustedOperatorActor(users[2]!.id),
+    );
     await denied(lead.rawToken);
   });
 
@@ -438,14 +456,17 @@ describe('scoped PAT HTTP authorization on PostgreSQL', () => {
       .set('Authorization', `Bearer ${issued.rawToken}`)
       .expect(200);
     expect(demoted.body.note).toBeNull();
-    const reset = await resetUserPassword(users[1]!.id);
+    const reset = await resetUserPassword(users[1]!.id, sessionActor(users[2]!.id));
     confidential(
       await request(app)
         .get('/auth/me')
         .set('Authorization', `Bearer ${issued.rawToken}`)
         .expect(401),
     );
-    await setupAccount({ token: reset.setupToken.plaintext, password: 'new-scoped-pat-password' });
+    await setupAccount(
+      { token: reset.setupToken.plaintext, password: 'new-scoped-pat-password' },
+      { requestId: 'scoped-pat-integration' },
+    );
     confidential(
       await request(app)
         .get('/auth/me')
@@ -517,7 +538,8 @@ describe('scoped PAT HTTP authorization on PostgreSQL', () => {
       );
     for (const state of ['revoked', 'expired', 'version', 'role', 'database'] as const) {
       const candidate = await mint(1, ['pto:create']);
-      if (state === 'revoked') await revokeToken(tokens, users[1]!.id, candidate.token.id);
+      if (state === 'revoked')
+        await revokeToken(tokens, sessionActor(users[1]!.id), candidate.token.id);
       if (state === 'expired') {
         const past = new Date(Date.now() - 2 * 86400000);
         await db.personalAccessToken.update({
@@ -527,7 +549,13 @@ describe('scoped PAT HTTP authorization on PostgreSQL', () => {
       }
       if (state === 'version')
         await db.user.update({ where: { id: users[1]!.id }, data: { sessionVersion: 1 } });
-      if (state === 'role') await changeRoleAndInvalidate(tokens, users[1]!.id, 'member');
+      if (state === 'role')
+        await changeRoleAndInvalidate(
+          tokens,
+          users[1]!.id,
+          'member',
+          trustedOperatorActor(users[2]!.id),
+        );
       if (state === 'database') await production.closeResources();
       confidential(
         await request(production)

@@ -10,6 +10,7 @@ import { __resetAuthUserCacheForTests } from '../../src/middleware/requireAuth.j
 import { createTokenDatabase } from '../../src/services/tokens/tokenDatabase.js';
 import { changeRoleAndInvalidate, verifyToken } from '../../src/services/tokens/tokenService.js';
 import { resetUserPassword, setupAccount } from '../../src/services/users/UserService.js';
+import { trustedOperatorActor, type AuditActor } from '../../src/services/audit/auditContext.js';
 import { logger } from '../../src/lib/logger.js';
 
 const url = process.env.DATABASE_URL;
@@ -30,6 +31,10 @@ const users = (['member', 'team_lead', 'admin'] as const).map((role) => {
   };
 });
 const ids = users.map((u) => u.id);
+/** Attribution for a verified browser session; never derived from request data. */
+function sessionActor(id: string): AuditActor {
+  return { id, credential: { type: 'session' }, requestId: 'auth-tokens-integration' };
+}
 const originalAuthMax = process.env.AUTH_RATE_LIMIT_MAX;
 const originalGlobalMax = process.env.RATE_LIMIT_MAX;
 let app: ManagedApp;
@@ -83,6 +88,8 @@ describe('session-only personal token management on PostgreSQL', () => {
   afterAll(async () => {
     try {
       await db.personalAccessToken.deleteMany({ where: { ownerId: { in: ids } } });
+      // Audit rows reference their actor, so they are removed before the users.
+      await db.auditLog.deleteMany({ where: { actorUserId: { in: ids } } });
       await db.user.deleteMany({ where: { id: { in: ids } } });
     } finally {
       await Promise.all([verifier.close(), db.$disconnect(), appPrisma.$disconnect()]);
@@ -207,8 +214,18 @@ describe('session-only personal token management on PostgreSQL', () => {
       new Date(maximum.body.token.expiresAt).getTime() -
         new Date(maximum.body.token.createdAt).getTime(),
     ).toBe(365 * 86400000);
-    await changeRoleAndInvalidate(verifier, users[1]!.id, 'member');
-    await changeRoleAndInvalidate(verifier, users[1]!.id, 'team_lead');
+    await changeRoleAndInvalidate(
+      verifier,
+      users[1]!.id,
+      'member',
+      trustedOperatorActor(users[2]!.id),
+    );
+    await changeRoleAndInvalidate(
+      verifier,
+      users[1]!.id,
+      'team_lead',
+      trustedOperatorActor(users[2]!.id),
+    );
     confidential(await lead.post('/auth/tokens').send({ name: 'Stale', password }).expect(401));
     expect(await verifyToken(verifier, maximum.body.rawToken)).toBeNull();
   });
@@ -291,13 +308,16 @@ describe('session-only personal token management on PostgreSQL', () => {
       .post('/auth/tokens')
       .send({ name: 'Before reset', password })
       .expect(201);
-    const reset = await resetUserPassword(users[0]!.id);
+    const reset = await resetUserPassword(users[0]!.id, sessionActor(users[2]!.id));
     confidential(
       await agent.post('/auth/tokens').send({ name: 'Old credentials', password }).expect(401),
     );
     expect(await verifyToken(verifier, issued.body.rawToken)).toBeNull();
     const nextPassword = 'new-token-management-password';
-    await setupAccount({ token: reset.setupToken.plaintext, password: nextPassword });
+    await setupAccount(
+      { token: reset.setupToken.plaintext, password: nextPassword },
+      { requestId: 'auth-tokens-integration' },
+    );
     const fresh = await login('member', app, nextPassword);
     confidential(
       await fresh

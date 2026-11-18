@@ -86,6 +86,13 @@ model AuditLog {
   entityId    String   @map("entity_id") @db.Uuid
   details     Json?
   createdAt   DateTime @default(now()) @map("created_at")
+  // Credential attribution (#252). Plain values with no foreign keys: history
+  // must survive token revocation, metadata cleanup and owner changes. Legacy
+  // rows keep NULLs; sourceTokenId is only set for personal-token credentials.
+  credentialType String?  @map("credential_type") @db.VarChar(32)
+  sourceTokenId  String?  @map("source_token_id") @db.Uuid
+  targetOwnerId  String?  @map("target_owner_id") @db.Uuid
+  requestId      String?  @map("request_id") @db.VarChar(200)
 
   actor User @relation("AuditActor", fields: [actorUserId], references: [id])
 

@@ -375,25 +375,33 @@ describe('server', () => {
         500,
         'INTERNAL_ERROR',
       ],
-    ])('preserves the existing response for %s', async (_name, contentType, body, status, code) => {
-      const app = createApp();
-      const req = request(app).post('/auth/login');
-      if (contentType) req.set('Content-Type', contentType);
-      if (body !== undefined) req.send(body);
-      const response = await req;
-      expect(response.status).toBe(status);
-      expect(response.body.error.code).toBe(code);
-      expect(response.headers['content-type']).toMatch(/application\/json/);
-      if (status === 500) {
-        expect(response.body).toEqual({
-          error: { code: 'INTERNAL_ERROR', message: 'Internal server error.' },
-        });
-        // The existing parser runs before request-ID logging; this migration does not reorder it.
-        expect(response.headers['x-request-id']).toBeUndefined();
-      } else {
+    ])(
+      'preserves the status and error envelope for %s',
+      async (_name, contentType, body, status, code) => {
+        const app = createApp();
+        const req = request(app).post('/auth/login');
+        if (contentType) req.set('Content-Type', contentType);
+        if (body !== undefined) req.send(body);
+        const response = await req;
+        expect(response.status).toBe(status);
+        expect(response.body.error.code).toBe(code);
+        expect(response.headers['content-type']).toMatch(/application\/json/);
+        if (status === 500) {
+          expect(response.body).toEqual({
+            error: { code: 'INTERNAL_ERROR', message: 'Internal server error.' },
+          });
+          // Owner-approved additive correlation: parsing still precedes pino-http,
+          // but its error response and safe classification now share an ID.
+          expect(parseLogs()).toContainEqual(
+            expect.objectContaining({
+              reqId: response.headers['x-request-id'],
+              errorType: 'request_body_error',
+            }),
+          );
+        }
         expect(response.headers['x-request-id']).toMatch(UUID_REGEX);
-      }
-    });
+      },
+    );
   });
 
   describe('Authorization selection before JSON parsing', () => {

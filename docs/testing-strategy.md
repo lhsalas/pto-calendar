@@ -117,7 +117,9 @@ non-`Error` fallback by mocking the API boundary, and the `AuthContext` and
 | `src/routes/auth.ts`, `src/routes/pto.ts` | 100% | 100% | 100% | 100% | Cookie/PAT identity and every PTO HTTP method |
 | `src/middleware/patAuth.ts`, `src/middleware/csrf.ts` | 100% | 100% | 100% | 100% | Credential selection, rollout and verified-only CSRF exemption |
 | `src/middleware/tokenManagement.ts` | 100% | 100% | 100% | 100% | Early no-store/session boundary and safe errors |
-| `src/lib/logSanitizers.ts` | 100% | 100% | 100% | 100% | Correlation IDs and credential-path redaction |
+| `src/lib/logSanitizers.ts` | 100% | 100% | 100% | 100% | Correlation IDs, credential-path redaction and the HTTP logging pipeline |
+| `src/lib/logRedaction.ts` | 100% | 100% | 100% | 100% | Credential-safe payload, message, argument and error scrubbing |
+| `src/services/audit/**` | 100% | 100% | 100% | 100% | Attribution vocabulary, audit rows and native-transaction audit writes |
 | `src/services/pto/validation.ts` | 100% | 100% | 100% | 100% | All PTO business rules |
 | `src/services/pto/schemas.ts` | 100% | 100% | 100% | 100% | Shared Zod schemas (route ↔ validation) |
 | `src/services/auth/schemas.ts` | 100% | 100% | 100% | 100% | Shared Zod login schema |
@@ -129,7 +131,7 @@ non-`Error` fallback by mocking the API boundary, and the `AuthContext` and
 | `src/lib/lifecycle.ts` | 100% | 100% | 100% | 100% | Documented target only; no explicit unit threshold is currently configured or enforced |
 | `src/services/pto/PTOService.ts` | 90% | 80% | 90% | 90% | CRUD + overlap checks; create/overlap paths have direct unit coverage |
 | `src/services/calendar/CalendarQuery.ts` | 80% | 80% | 80% | 80% | Overlap SQL + expansion |
-| `src/services/audit/AuditLogService.ts` | 80% | 80% | 80% | 80% | Required for audit correctness |
+| `src/services/audit/AuditLogService.ts` | 100% | 100% | 100% | 100% | Required for audit correctness; the whole `src/services/audit/**` directory is enforced at 100% |
 | Other backend services | tracked | tracked | tracked | tracked | Reported, not blocking |
 | Frontend critical pages (`pages/CalendarPage.tsx`) | 80% | tracked | tracked | tracked | Reported and blocking |
 | Frontend critical components (`components/pto/PTOFormModal.tsx`, `components/calendar/DayCell.tsx`) | 80% | tracked | tracked | tracked | Reported and blocking |
@@ -156,6 +158,51 @@ headers on parser/auth/limiter failures, show-once metadata/error redaction,
 concurrent HTTP cap enforcement, reset/setup and application-owned pool cleanup.
 Mocked in-process unit transport is separate from the disposable PostgreSQL
 integration suite; written tests alone do not certify a database-backed result.
+
+#252 adds three layers of audit evidence.
+
+- **Unit** — `src/services/audit/auditContext.test.ts` pins the attribution
+  vocabulary and the rule that a credential type is derived from verified
+  server state; `src/services/audit/nativeAudit.test.ts` pins the native audit
+  statement, the empty-batch no-op and the public-ID-only values;
+  `src/services/audit/AuditLogService.test.ts` pins the stored attribution
+  columns and the NULL fallbacks. `src/services/pto/PTOService.test.ts` and
+  `src/services/tokens/tokenService.test.ts` pin that each mutation writes its
+  audit row in the same transaction, that a denied or invalid change writes
+  none, and that a repeated revocation writes no duplicate row.
+- **Logger capture** — `src/lib/logRedaction.test.ts` covers the scrubbing
+  helper, and `src/lib/logger.test.ts` builds pino from the **production**
+  `LOGGER_OPTIONS` and `createPinoHttpOptions` and captures real output on the
+  success, failure and debug paths: new credential field names, arbitrarily
+  nested and cyclic shapes, passwords, `Authorization`, raw tokens, digests and
+  setup-token hashes must never appear, while the fixed endpoint label and the
+  safe correlation ID must survive. The regression cases are the production
+  shapes that leaked before: a credential bound to a child logger at any depth,
+  an error whose `name` carries a personal token, and a request- or
+  error-shaped value interpolated into a message. The `pino-http` child is
+  exercised through the same factory, so the request pipeline uses the
+  credential-safe error serializer.
+- **Integration (disposable PostgreSQL)** — `tests/integration/credentialAudit.test.ts`
+  asserts the real rows: attribution columns, note-text absence, one row per
+  public token ID, no row for a no-op, history that survives token deletion,
+  legacy rows that are never backfilled, the CHECK constraints, and a
+  constraint-trigger rollback that leaves no committed mutation and no audit
+  row. It also drives the **real HTTP surface**: a cookie session and a
+  verified personal token each produce a persisted row with the right
+  credential type, source token ID, target owner and correlation ID, and a
+  denied request produces none. Native mutations, credential-version changes
+  and PTO update/delete each roll back when their audit row cannot be written,
+  two independent native connections produce exactly one row per changed
+  public ID, and a temporary custom schema proves that the quoted table names
+  and the audit row live in the same schema and transaction. Every assertion is
+  scoped to the generated fixture actors, owners and entities, and the
+  temporary trigger and schema are always removed.
+  `tests/integration/credentialLogging.test.ts` captures the **production**
+  logger options through the real request pipeline and asserts that a submitted
+  password, an `Authorization` credential and a rejected request body never
+  reach a log line while the endpoint label and the correlation ID do. The file
+  creates and clears audit rows in FK-safe order (audit rows before users).
+  Written tests alone do not certify a database-backed result.
 
 `scopedPatAuth.test.ts` adds the three-role × own/other × ten-scope-profile
 matrix on list/detail/POST/legacy PUT/DELETE, including impossible member/team

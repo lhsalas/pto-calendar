@@ -13,6 +13,7 @@ import {
   assertPtoScope,
   redactPtoNote,
 } from '../services/authorization/patPolicy.js';
+import { attributedActorFromAuth } from '../services/audit/auditContext.js';
 import { CreatePtoSchema, IdParamSchema, RangeQuerySchema } from '../services/pto/schemas.js';
 
 export const ptoRouter: Router = Router();
@@ -21,7 +22,7 @@ ptoRouter.post('/', requireAuth, async (req, res, next) => {
   try {
     assertPtoScope(req.auth!, 'create');
     const input = CreatePtoSchema.parse(req.body);
-    const created = await createPto(req.auth!.actor.id, input);
+    const created = await createPto(attributedActorFromAuth(req.auth!), input);
     res.status(201).json(redactPtoNote(req.auth!, toPublicPto(created)));
   } catch (err) {
     next(err);
@@ -64,7 +65,7 @@ ptoRouter.put('/:id', requireAuth, async (req, res, next) => {
       return;
     }
     assertPtoRecordAccess(req.auth!, 'update', existing);
-    const updated = await updatePto(req.auth!.actor, id, input);
+    const updated = await updatePto(attributedActorFromAuth(req.auth!), id, input);
     res.json(redactPtoNote(req.auth!, toPublicPto(updated)));
   } catch (err) {
     next(err);
@@ -80,7 +81,7 @@ ptoRouter.delete('/:id', requireAuth, async (req, res, next) => {
       return;
     }
     assertPtoRecordAccess(req.auth!, 'delete', existing);
-    await deletePto(req.auth!.actor, id);
+    await deletePto(attributedActorFromAuth(req.auth!), id);
     res.status(204).end();
   } catch (err) {
     next(err);

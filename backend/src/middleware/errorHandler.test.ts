@@ -109,4 +109,66 @@ describe('errorHandler', () => {
     const logArg = errSpy.mock.calls[0]![0] as Record<string, unknown>;
     expect(logArg['reqId']).toBeUndefined();
   });
+
+  it('never logs a body-parser error, whose message can quote the request body', () => {
+    const errSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined as never);
+    const req = makeReq('body-req-1');
+    const res = makeRes();
+    const next = vi.fn() as unknown as NextFunction;
+    const bodyError = Object.assign(
+      new SyntaxError('Unexpected token p, "password=secret-marker" is not valid JSON'),
+      { type: 'entity.parse.failed' },
+    );
+
+    errorHandler(bodyError, req, res as Response, next);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    const logArg = errSpy.mock.calls[0]![0] as Record<string, unknown>;
+    expect(logArg).not.toHaveProperty('err');
+    expect(logArg['reqId']).toBe('body-req-1');
+    expect(logArg['errorType']).toBe('request_body_error');
+    expect(JSON.stringify(errSpy.mock.calls)).not.toContain('secret-marker');
+  });
+
+  it('logs a non-body error with its error payload', () => {
+    const errSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined as never);
+    const req = makeReq('body-req-2');
+    const res = makeRes();
+    const next = vi.fn() as unknown as NextFunction;
+
+    errorHandler(
+      Object.assign(new Error('boom'), { type: 'other.error' }),
+      req,
+      res as Response,
+      next,
+    );
+
+    const logArg = errSpy.mock.calls[0]![0] as Record<string, unknown>;
+    expect(logArg['err']).toBeDefined();
+    expect(logArg).not.toHaveProperty('errorType');
+  });
+
+  it('assigns a safe response and log ID when body parsing failed before pino-http', () => {
+    const errSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined as never);
+    const req = Object.assign(makeReq(), { headers: {} });
+    const res = Object.assign(makeRes(), {
+      getHeader: vi.fn().mockReturnValue(undefined),
+      setHeader: vi.fn(),
+    });
+    const bodyError = Object.assign(new SyntaxError('password=secret-marker'), {
+      type: 'entity.parse.failed',
+    });
+
+    errorHandler(bodyError, req, res, vi.fn() as unknown as NextFunction);
+
+    expect(req.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(res.setHeader).toHaveBeenCalledWith('X-Request-Id', req.id);
+    expect(errSpy).toHaveBeenCalledWith(
+      { reqId: req.id, errorType: 'request_body_error' },
+      'Unhandled error',
+    );
+    expect(JSON.stringify(errSpy.mock.calls)).not.toContain('secret-marker');
+    expect(res.status).toHaveBeenCalledWith(500);
+  });
 });

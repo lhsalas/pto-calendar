@@ -3,6 +3,7 @@ import { getCurrentUser, login } from '../services/auth/AuthService.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { LoginSchema } from '../services/auth/schemas.js';
 import { setupAccount, SetupAccountSchema } from '../services/users/UserService.js';
+import { safeRequestId } from '../lib/logSanitizers.js';
 
 export function createAuthRouter(loginLimiter: RequestHandler): Router {
   const router: Router = Router();
@@ -24,7 +25,12 @@ export function createAuthRouter(loginLimiter: RequestHandler): Router {
   router.post('/setup-account', loginLimiter, async (req, res, next) => {
     try {
       const { token, password } = SetupAccountSchema.parse(req.body);
-      const { user } = await setupAccount({ token, password });
+      // Public route: the audited actor is derived from the claimed setup row inside
+      // the service. Only the verified server correlation ID is passed separately.
+      const { user } = await setupAccount(
+        { token, password },
+        { requestId: safeRequestId(req, res) },
+      );
       req.session = {
         user: { id: user.id, role: user.role, sessionVersion: user.sessionVersion },
       } as typeof req.session;

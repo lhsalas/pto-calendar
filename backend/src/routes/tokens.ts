@@ -16,6 +16,7 @@ import {
   revokeToken,
 } from '../services/tokens/tokenService.js';
 import type { TokenRuntime } from '../services/tokens/tokenRuntime.js';
+import { attributedActorFromAuth } from '../services/audit/auditContext.js';
 
 export function createTokenRouter(runtime: TokenRuntime, issuanceLimiter: RequestHandler): Router {
   const router = Router();
@@ -46,20 +47,22 @@ export function createTokenRouter(runtime: TokenRuntime, issuanceLimiter: Reques
         'Team scopes require a current team lead or administrator role.',
       );
     }
-    res.status(201).json(await issueToken(runtime.get(), owner.id, owner.sessionVersion, input));
+    // The verified session is the only actor source; the body cannot name an owner.
+    const actor = attributedActorFromAuth(req.auth!);
+    res.status(201).json(await issueToken(runtime.get(), actor, owner.sessionVersion, input));
   });
 
   router.delete('/:id', async (req, res) => {
     parseTokenEmptyBody(req.body);
     const id = TokenIdSchema.parse(req.params.id);
-    const found = await revokeToken(runtime.get(), req.user!.id, id);
+    const found = await revokeToken(runtime.get(), attributedActorFromAuth(req.auth!), id);
     if (!found) throw new HttpError(404, 'NOT_FOUND', 'Token not found.');
     res.status(204).end();
   });
 
   router.post('/revoke-all', async (req, res) => {
     parseTokenEmptyBody(req.body);
-    await revokeAllTokens(runtime.get(), req.user!.id);
+    await revokeAllTokens(runtime.get(), attributedActorFromAuth(req.auth!));
     res.status(204).end();
   });
 

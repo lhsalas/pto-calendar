@@ -69,6 +69,12 @@ export default defineConfig({
           branches: 100,
           functions: 100,
         },
+        'src/lib/logRedaction.ts': {
+          lines: 100,
+          statements: 100,
+          branches: 100,
+          functions: 100,
+        },
         'src/services/tokens/**': {
           lines: 100,
           statements: 100,
@@ -141,11 +147,11 @@ export default defineConfig({
           branches: 80,
           functions: 80,
         },
-        'src/services/audit/AuditLogService.ts': {
-          lines: 80,
-          statements: 80,
-          branches: 80,
-          functions: 80,
+        'src/services/audit/**': {
+          lines: 100,
+          statements: 100,
+          branches: 100,
+          functions: 100,
         },
         'src/services/holidays/HolidayService.ts': {
           lines: 80,

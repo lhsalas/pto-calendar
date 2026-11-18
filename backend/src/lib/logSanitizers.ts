@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Options as PinoHttpOptions } from 'pino-http';
+import type { Logger as PinoLogger } from 'pino';
+import { safeErrorSerializer } from './logRedaction.js';
 
 const SAFE_REQUEST_ID = /^[A-Za-z0-9._\-]{1,200}$/;
 const STATIC_URL_LABELS = new Map(
@@ -67,5 +70,28 @@ export function safeReqSerializer(value: Record<string, unknown>): Record<string
 export function safeResSerializer(value: Record<string, unknown>): Record<string, unknown> {
   return {
     statusCode: value['statusCode'],
+  };
+}
+
+/**
+ * The HTTP logging pipeline, assembled next to the serializers it uses so the
+ * request pipeline and the application logger can never drift apart.
+ *
+ * pino-http would otherwise install its own error serializer, which copies
+ * enumerable error properties and cause messages verbatim; the credential-safe
+ * serializer is passed explicitly instead.
+ */
+export function createPinoHttpOptions(target: PinoLogger): PinoHttpOptions {
+  return {
+    logger: target,
+    genReqId: safeRequestId,
+    serializers: {
+      req: safeReqSerializer,
+      res: safeResSerializer,
+      err: safeErrorSerializer,
+    },
+    autoLogging: {
+      ignore: (req) => req.url === '/health' || req.url === '/ready',
+    },
   };
 }

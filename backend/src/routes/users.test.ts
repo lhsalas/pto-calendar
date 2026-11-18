@@ -2,6 +2,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as UserService from '../services/users/UserService.js';
+import type * as AuditLogService from '../services/audit/AuditLogService.js';
 
 const { input, getUserById, resetUserPassword, record } = vi.hoisted(() => ({
   input: { id: 'target-user' as string | string[] | undefined },
@@ -13,6 +14,12 @@ const { input, getUserById, resetUserPassword, record } = vi.hoisted(() => ({
 vi.mock('../middleware/requireAuth.js', () => ({
   requireAuth: (req: Request, _res: Response, next: NextFunction) => {
     req.user = { id: 'actor', role: 'team_lead', sessionVersion: 1 };
+    // The verified request context is the only source of audit attribution.
+    req.auth = {
+      method: 'session',
+      actor: { id: 'actor', role: 'team_lead' },
+      requestId: 'users-route-test',
+    };
     // Exercise the widened Express 5 type; the real non-wildcard route supplies a string.
     if (input.id === undefined) delete req.params.id;
     else req.params.id = input.id;
@@ -24,7 +31,10 @@ vi.mock('../services/users/UserService.js', async (importOriginal) => ({
   getUserById,
   resetUserPassword,
 }));
-vi.mock('../services/audit/AuditLogService.js', () => ({ record }));
+vi.mock('../services/audit/AuditLogService.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof AuditLogService>()),
+  record,
+}));
 vi.mock('../lib/prisma.js', () => ({ prisma: {} }));
 
 import { createUsersRouter } from './users.js';
@@ -58,14 +68,15 @@ describe('reset-password parameter compatibility', () => {
       const response = await reset(id);
       expect(response.status).toBe(200);
       expect(getUserById).toHaveBeenCalledExactlyOnceWith('target-user');
-      expect(resetUserPassword).toHaveBeenCalledExactlyOnceWith('target-user');
-      expect(record).toHaveBeenCalledExactlyOnceWith({
-        actorUserId: 'actor',
-        action: 'reset_user_password',
-        entityType: 'user',
-        entityId: 'target-user',
-        details: { email: 'target@example.test' },
+      // The credential-version audit row is written by the service, in the same
+      // transaction as the reset, so the route must not write it a second time.
+      expect(resetUserPassword).toHaveBeenCalledExactlyOnceWith('target-user', {
+        id: 'actor',
+        role: 'team_lead',
+        credential: { type: 'session' },
+        requestId: 'users-route-test',
       });
+      expect(record).not.toHaveBeenCalled();
     },
   );
 

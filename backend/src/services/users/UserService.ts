@@ -5,6 +5,8 @@ import type { User as PrismaUser } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { loadEnv } from '../../config/env.js';
 import { HttpError } from '../../middleware/errorHandler.js';
+import { auditEntryFor, record as recordAudit } from '../audit/AuditLogService.js';
+import { setupTokenActor, type AuditActor } from '../audit/auditContext.js';
 import { pickColorCode } from './palette.js';
 
 const PUBLIC_USER_SELECT = {
@@ -116,11 +118,24 @@ export interface SetupAccountInput {
   password: string;
 }
 
+export interface SetupAccountContext {
+  /** Correlation ID from the verified request pipeline; the caller is not authenticated. */
+  requestId: string | null;
+}
+
 export interface SetupAccountResult {
   user: PrismaUser;
 }
 
-export async function setupAccount(input: SetupAccountInput): Promise<SetupAccountResult> {
+/**
+ * The setup claim, the credential-version increment and its audit row share one
+ * transaction. The audited actor is the user row claimed from the database, not
+ * anything the public caller supplied; expired and rejected claims record nothing.
+ */
+export async function setupAccount(
+  input: SetupAccountInput,
+  context: SetupAccountContext,
+): Promise<SetupAccountResult> {
   const env = loadEnv();
   const tokenHash = hashSetupToken(input.token);
   const claim = await prisma.$transaction(async (tx) => {
@@ -164,36 +179,70 @@ export async function setupAccount(input: SetupAccountInput): Promise<SetupAccou
       );
     }
     const updated = await tx.user.findUnique({ where: { id: user.id } });
+    if (!updated) {
+      // Roll back the claim: a success must never be committed without a response.
+      throw new HttpError(
+        401,
+        'UNAUTHENTICATED',
+        'Setup link is invalid or has already been used.',
+      );
+    }
+    await recordAudit(
+      auditEntryFor(setupTokenActor(user.id, context.requestId), {
+        action: 'complete_account_setup',
+        entityType: 'user',
+        entityId: user.id,
+        targetOwnerId: user.id,
+        details: { sessionVersion: updated.sessionVersion },
+      }),
+      tx,
+    );
     return { status: 'claimed' as const, user: updated };
   });
   if (claim.status === 'expired') {
     throw new HttpError(401, 'UNAUTHENTICATED', 'Setup link has expired.');
   }
-  if (!claim.user) {
-    throw new HttpError(401, 'UNAUTHENTICATED', 'Setup link is invalid or has already been used.');
-  }
   return { user: claim.user };
 }
 
-export async function resetUserPassword(userId: string): Promise<{
+/**
+ * Clears the password, issues a fresh setup token and increments the credential
+ * version. The target check, mutation and audit row run in one transaction.
+ */
+export async function resetUserPassword(
+  userId: string,
+  actor: AuditActor,
+): Promise<{
   user: PrismaUser;
   setupToken: { plaintext: string; hash: string; expiresAt: Date };
 }> {
-  const target = await prisma.user.findUnique({ where: { id: userId } });
-  if (!target) {
-    throw new HttpError(404, 'NOT_FOUND', 'User not found.');
-  }
-  const setupToken = generateSetupToken();
-  const updated = await prisma.user.update({
-    where: { id: userId },
-    data: {
-      passwordHash: null,
-      setupTokenHash: setupToken.hash,
-      setupTokenExpiresAt: setupToken.expiresAt,
-      sessionVersion: { increment: 1 },
-    },
+  return prisma.$transaction(async (tx) => {
+    const target = await tx.user.findUnique({ where: { id: userId } });
+    if (!target) {
+      throw new HttpError(404, 'NOT_FOUND', 'User not found.');
+    }
+    const setupToken = generateSetupToken();
+    const updated = await tx.user.update({
+      where: { id: userId },
+      data: {
+        passwordHash: null,
+        setupTokenHash: setupToken.hash,
+        setupTokenExpiresAt: setupToken.expiresAt,
+        sessionVersion: { increment: 1 },
+      },
+    });
+    await recordAudit(
+      auditEntryFor(actor, {
+        action: 'reset_user_password',
+        entityType: 'user',
+        entityId: userId,
+        targetOwnerId: userId,
+        details: { email: target.email, sessionVersion: updated.sessionVersion },
+      }),
+      tx,
+    );
+    return { user: updated, setupToken };
   });
-  return { user: updated, setupToken };
 }
 
 async function pickAvailableColor(): Promise<string> {

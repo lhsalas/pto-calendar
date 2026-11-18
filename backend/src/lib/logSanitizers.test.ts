@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { safeReqSerializer, safeResSerializer, safeRequestId } from './logSanitizers.js';
+import type { Logger as PinoLogger } from 'pino';
+import { safeErrorSerializer } from './logRedaction.js';
+import {
+  createPinoHttpOptions,
+  safeReqSerializer,
+  safeResSerializer,
+  safeRequestId,
+} from './logSanitizers.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -161,5 +168,21 @@ describe('safeResSerializer', () => {
     });
     expect(out).toEqual({ statusCode: 201 });
     expect(Object.prototype.hasOwnProperty.call(out, 'headers')).toBe(false);
+  });
+});
+
+describe('createPinoHttpOptions', () => {
+  it('wires the safe serializers, the correlation guard and the health exclusions', () => {
+    const target = { info: () => undefined } as unknown as PinoLogger;
+    const options = createPinoHttpOptions(target);
+    expect(options.logger).toBe(target);
+    expect(options.genReqId).toBe(safeRequestId);
+    expect(options.serializers?.['req']).toBe(safeReqSerializer);
+    expect(options.serializers?.['res']).toBe(safeResSerializer);
+    expect(options.serializers?.['err']).toBe(safeErrorSerializer);
+    const ignore = (options.autoLogging as { ignore: (req: { url: string }) => boolean }).ignore;
+    expect(ignore({ url: '/health' })).toBe(true);
+    expect(ignore({ url: '/ready' })).toBe(true);
+    expect(ignore({ url: '/pto' })).toBe(false);
   });
 });
