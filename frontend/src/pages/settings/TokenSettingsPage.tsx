@@ -12,7 +12,12 @@ import { TokenConfirmDialog } from '../../components/tokens/TokenConfirmDialog';
 import { TokenCreateDialog } from '../../components/tokens/TokenCreateDialog';
 import type { TokenCreateValues } from '../../components/tokens/TokenCreateDialog';
 import { TokenRevealDialog } from '../../components/tokens/TokenRevealDialog';
-import { isAbortError, tokenErrorMessage } from '../../lib/tokens';
+import {
+  ISSUE_BLOCKED_MESSAGE,
+  UNKNOWN_ISSUE_MESSAGE,
+  classifyIssueFailure,
+  tokenErrorMessage,
+} from '../../lib/tokens';
 import type { TokenMetadata, User } from '../../types/api';
 
 interface RevealedToken {
@@ -65,6 +70,13 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
   const [confirm, setConfirm] = useState<ConfirmState>(null);
   const [revoking, setRevoking] = useState<boolean>(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
+  /**
+   * Set when an issuance could not be confirmed. The server may have created
+   * the token, so no further issuance is allowed until the list has been
+   * refreshed and the refresh has succeeded.
+   */
+  const [issuanceUnknown, setIssuanceUnknown] = useState<boolean>(false);
+  const [refreshFailed, setRefreshFailed] = useState<boolean>(false);
 
   const issueGeneration = useRef<number>(0);
   const issueAbort = useRef<AbortController | null>(null);
@@ -96,6 +108,7 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
   // secret or a half-finished issuance alive, so both are dropped at once.
   useEffect(() => {
     function handlePageHide(): void {
+      const wasIssuing = issuingRef.current;
       cancelIssuance();
       // React must commit the removal before a browser freezes this document.
       // A cancelled request cannot reset its own pending state later.
@@ -104,6 +117,9 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
         setCreateOpen(false);
         setSubmitting(false);
         setIssueError(null);
+        // The server may have committed the token before the answer was lost,
+        // so the pane stays in the unknown state until the list is refreshed.
+        if (wasIssuing) setIssuanceUnknown(true);
       });
     }
     window.addEventListener('pagehide', handlePageHide);
@@ -114,6 +130,12 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
     // One issuance at a time: a second submit is refused before the first
     // request has even answered.
     if (issuingRef.current) return;
+    // An unconfirmed issuance keeps the pane blocked until the list has
+    // been refreshed; closing and reopening the form does not lift that.
+    if (issuanceUnknown) {
+      setIssueError(ISSUE_BLOCKED_MESSAGE);
+      return;
+    }
     issuingRef.current = true;
     const generation = ++issueGeneration.current;
     const controller = new AbortController();
@@ -133,11 +155,17 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
       if (generation !== issueGeneration.current || !mountedRef.current) return;
       setCreateOpen(false);
       setRevealed({ rawToken: response.rawToken, token: response.token });
+      setIssuanceUnknown(false);
       await refetch({ silent: true });
     } catch (err) {
       if (generation !== issueGeneration.current || !mountedRef.current) return;
-      if (isAbortError(err)) return;
-      setIssueError(tokenErrorMessage(err, 'issue'));
+      const failure = classifyIssueFailure(err);
+      if (failure.kind === 'unknown') {
+        // The server may have created the token. No further issuance is
+        // allowed until the list has been refreshed successfully.
+        setIssuanceUnknown(true);
+      }
+      setIssueError(failure.message);
     } finally {
       if (generation === issueGeneration.current) {
         issuingRef.current = false;
@@ -148,10 +176,26 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
   }
 
   function handleCloseCreate(): void {
+    const wasIssuing = issuingRef.current;
     cancelIssuance();
     setSubmitting(false);
     setIssueError(null);
     setCreateOpen(false);
+    // A cancelled issuance may still have reached the server.
+    if (wasIssuing) setIssuanceUnknown(true);
+  }
+
+  async function handleRefreshList(): Promise<void> {
+    setRefreshFailed(false);
+    const refreshed = await refetch();
+    if (!mountedRef.current) return;
+    if (refreshed) {
+      setIssuanceUnknown(false);
+      setIssueError(null);
+    } else {
+      // The list could not be confirmed, so the issuance stays blocked.
+      setRefreshFailed(true);
+    }
   }
 
   function handleRequestRevoke(token: TokenMetadata): void {
@@ -245,9 +289,16 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
           </h2>
           <p className="mt-1 max-w-2xl text-sm text-ink-muted dark:text-ink-muted-dark">
             Start read-only, or use the “Manage my PTO” preset to let a client work with your own
-            calendar. Issuing one checks your current password, and the token expires on its own.
-            Personal access tokens are still being rolled out: a deployment that has them switched
-            off refuses the request and creates nothing.
+            calendar. The preset grants the personal writes only, but it still reads the shared
+            calendar, because that is what the read scope covers; it never grants note text or
+            writes on somebody else’s bookings. Issuing one checks your current password, and the
+            token expires on its own.
+          </p>
+          <p className="mt-2 max-w-2xl text-sm text-ink-muted dark:text-ink-muted-dark">
+            Personal access tokens are still being rolled out. A deployment can already issue one
+            with your session while bearer access is switched off; the credential stays unusable for
+            API calls until bearer access is enabled. It must also still be active and have the
+            required scopes.
           </p>
           <button
             type="button"
@@ -274,6 +325,30 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
                 : `${tokens.length} token${tokens.length === 1 ? '' : 's'} · ${activeCount} active`}
             </p>
           </div>
+
+          {issuanceUnknown ? (
+            <div
+              role="alert"
+              data-testid="issuance-unknown"
+              className="mt-3 rounded border border-border bg-surface-2 p-4 dark:border-border-dark dark:bg-surface-dark-2"
+            >
+              <p className="text-sm text-ink dark:text-ink-dark">{UNKNOWN_ISSUE_MESSAGE}</p>
+              <button
+                type="button"
+                onClick={() => void handleRefreshList()}
+                data-testid="refresh-token-list-button"
+                className="mt-3 min-h-11 rounded border border-border px-3 py-2 text-sm text-ink transition-colors duration-150 hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-3 dark:focus-visible:ring-offset-surface-dark"
+              >
+                Refresh token list
+              </button>
+              {refreshFailed ? (
+                <p className="mt-2 text-sm text-danger" data-testid="refresh-token-list-failed">
+                  The token list could not be confirmed. Creating a token stays blocked until a
+                  refresh succeeds.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
 
           {loading ? (
             <p
@@ -306,7 +381,12 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
           ) : (
             <ul className="mt-3 grid gap-3">
               {tokens.map((token) => (
-                <TokenCard key={token.id} token={token} onRevoke={handleRequestRevoke} />
+                <TokenCard
+                  key={token.id}
+                  token={token}
+                  role={user.role}
+                  onRevoke={handleRequestRevoke}
+                />
               ))}
             </ul>
           )}
@@ -345,10 +425,9 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
           </h2>
           <p className="mt-1 max-w-2xl text-sm text-ink-muted dark:text-ink-muted-dark">
             <span className="font-medium text-ink dark:text-ink-dark">Not available yet.</span> The
-            command-line client and the local MCP server are not distributed yet, and the rollout
-            that would turn personal access tokens on is still off. When they ship, this section is
-            replaced by the exact commands, the place to put the token, and how to rotate it — until
-            then, there is nothing to install and nothing to paste.
+            command-line client and the local MCP server are not distributed yet. When they ship,
+            this section is replaced by the exact commands, the place to put the token, and how to
+            rotate it — until then, there is nothing to install and nothing to paste.
           </p>
           <p className="mt-3 max-w-2xl text-sm text-ink-muted dark:text-ink-muted-dark">
             <span className="font-medium text-ink dark:text-ink-dark">About AI providers.</span> An
@@ -365,6 +444,7 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
           role={user.role}
           submitting={submitting}
           error={issueError}
+          blocked={issuanceUnknown}
           returnFocusRef={generateTriggerRef}
           onSubmit={(values) => void handleCreate(values)}
           onClose={handleCloseCreate}
@@ -375,6 +455,7 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
         <TokenRevealDialog
           token={revealed.token}
           rawToken={revealed.rawToken}
+          role={user.role}
           returnFocusRef={generateTriggerRef}
           onClose={() => setRevealed(null)}
         />

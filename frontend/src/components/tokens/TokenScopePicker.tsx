@@ -1,11 +1,13 @@
 import type { JSX } from 'react';
 import type { Role, TokenScope } from '../../types/api';
 import {
+  READ_SCOPE_HINT,
   TOKEN_SCOPE_OPTIONS,
   applyTokenScopePreset,
   canUseTeamScopes,
   isTeamScope,
   normalizeTokenScopes,
+  noteScopeHint,
   toggleTokenScope,
 } from '../../lib/tokens';
 
@@ -52,9 +54,11 @@ export function TokenScopePicker({
       <legend className="px-1 font-display text-sm font-semibold tracking-wide text-ink uppercase dark:text-ink-dark">
         Access scopes
       </legend>
-      <p className="mb-3 text-sm text-ink-muted dark:text-ink-muted-dark">
-        Read-only is the default. Each scope is shown with the exact grant it gives.
+      <p className="mb-1 text-sm text-ink-muted dark:text-ink-muted-dark">
+        Read-only is the default: the shared calendar, without note text. Each scope is shown with
+        the exact grant it gives.
       </p>
+      <p className="mb-3 text-xs text-ink-muted dark:text-ink-muted-dark">{READ_SCOPE_HINT}</p>
 
       <div className="mb-4 flex flex-wrap gap-2">
         <button
@@ -72,6 +76,11 @@ export function TokenScopePicker({
           Manage my PTO
         </button>
       </div>
+      <p className="mb-4 text-xs text-ink-muted dark:text-ink-muted-dark">
+        “Manage my PTO” grants the personal writes only. It still reads the shared calendar, because
+        that is what the read scope covers, and it never grants note text or writes on somebody
+        else’s bookings.
+      </p>
 
       <ul className="grid gap-2">
         {options.map((option) => {
@@ -104,6 +113,10 @@ export function TokenScopePicker({
                   {needsRead && !readSelected ? (
                     <span className="mt-0.5 block text-xs break-words text-ink-muted dark:text-ink-muted-dark">
                       Requires the read scope.
+                    </span>
+                  ) : needsRead ? (
+                    <span className="mt-0.5 block text-xs break-words text-ink-muted dark:text-ink-muted-dark">
+                      {noteScopeHint(role)}
                     </span>
                   ) : null}
                 </span>

@@ -12,7 +12,12 @@ export interface UseTokensResult {
   tokens: TokenMetadata[];
   loading: boolean;
   error: string | null;
-  refetch: (options?: RefetchOptions) => Promise<void>;
+  /**
+   * Reloads the list. Resolves to `true` only when this request produced the
+   * list that is now shown, so a caller can tell an authoritative refresh
+   * from a swallowed failure.
+   */
+  refetch: (options?: RefetchOptions) => Promise<boolean>;
   revoke: (id: string) => Promise<void>;
   revokeAll: () => Promise<void>;
 }
@@ -47,19 +52,21 @@ export function useTokens(userId: string): UseTokensResult {
   }, []);
 
   const load = useCallback(
-    async (options: RefetchOptions = {}): Promise<void> => {
-      if (!mountedRef.current) return;
+    async (options: RefetchOptions = {}): Promise<boolean> => {
+      if (!mountedRef.current) return false;
       const requestId = ++generation.current;
       if (!options.silent) setLoading(true);
       setError(null);
       try {
         const list = await start();
-        if (!mountedRef.current || requestId !== generation.current) return;
+        if (!mountedRef.current || requestId !== generation.current) return false;
         setTokens(list);
+        return true;
       } catch (err) {
-        if (!mountedRef.current || requestId !== generation.current) return;
-        if (isAbortError(err)) return;
+        if (!mountedRef.current || requestId !== generation.current) return false;
+        if (isAbortError(err)) return false;
         setError(tokenErrorMessage(err));
+        return false;
       } finally {
         // The latest request always finishes the loading state, otherwise a
         // silent refresh could leave the list loading forever.

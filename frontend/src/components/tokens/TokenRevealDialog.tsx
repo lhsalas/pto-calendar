@@ -4,12 +4,14 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { useToast } from '../../hooks/useToast';
 import { useTokenDialog } from '../../hooks/useTokenDialog';
-import { formatAbsoluteDateTime, scopeOption } from '../../lib/tokens';
-import type { TokenMetadata } from '../../types/api';
+import { formatAbsoluteDateTime, noteScopeHint, scopeOption } from '../../lib/tokens';
+import type { Role, TokenMetadata } from '../../types/api';
 
 export interface TokenRevealDialogProps {
   token: TokenMetadata | null;
   rawToken: string;
+  /** The reader's role, which decides whose note text a token can read. */
+  role: Role;
   onClose: () => void;
   /** Where the focus returns to; the trigger outlives this dialog. */
   returnFocusRef?: RefObject<HTMLElement | null>;
@@ -30,6 +32,7 @@ type CopyState = 'idle' | 'copied' | 'failed';
 export function TokenRevealDialog({
   token,
   rawToken,
+  role,
   onClose,
   returnFocusRef,
 }: TokenRevealDialogProps): JSX.Element {
@@ -136,6 +139,11 @@ export function TokenRevealDialog({
                 {token.scopes.length > 0
                   ? token.scopes.map((scope) => scopeOption(scope)?.label ?? scope).join(', ')
                   : 'None'}
+                {token.scopes.includes('pto:notes:read') ? (
+                  <span className="mt-0.5 block font-sans text-ink-muted dark:text-ink-muted-dark">
+                    {noteScopeHint(role)}
+                  </span>
+                ) : null}
               </dd>
             </div>
           </dl>

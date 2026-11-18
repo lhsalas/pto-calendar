@@ -26,6 +26,12 @@ export interface TokenCreateDialogProps {
   submitting: boolean;
   /** Safe, static copy for a failed request. */
   error: string | null;
+  /**
+   * Set while an earlier issuance could not be confirmed. The form stays
+   * visible but no new token may be requested until the list has been
+   * refreshed.
+   */
+  blocked?: boolean;
   onSubmit: (values: TokenCreateValues) => void;
   onClose: () => void;
   /** Where the focus returns to; the trigger outlives this dialog. */
@@ -52,6 +58,7 @@ export function TokenCreateDialog({
   role,
   submitting,
   error,
+  blocked = false,
   onSubmit,
   onClose,
   returnFocusRef,
@@ -89,7 +96,7 @@ export function TokenCreateDialog({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (submitting) return;
+    if (submitting || blocked) return;
     const nameError = validateTokenName(name);
     if (nameError) {
       setFieldError({ field: 'name', message: nameError });
@@ -233,6 +240,12 @@ export function TokenCreateDialog({
           </p>
         ) : null}
 
+        {blocked ? (
+          <p role="status" className="mb-3 text-sm text-ink-muted dark:text-ink-muted-dark">
+            Creating a token is blocked until the token list has been refreshed.
+          </p>
+        ) : null}
+
         {submitting ? (
           <p role="status" className="mb-3 text-sm text-ink-muted dark:text-ink-muted-dark">
             Creating token…
@@ -249,7 +262,7 @@ export function TokenCreateDialog({
           </button>
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || blocked}
             className="min-h-11 rounded bg-accent px-4 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60 dark:focus-visible:ring-offset-surface-dark"
           >
             Create token

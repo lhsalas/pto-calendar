@@ -3,19 +3,24 @@ import { ApiError } from '../../src/api/client';
 import {
   DEFAULT_TOKEN_EXPIRY_DAYS,
   DEFAULT_TOKEN_SCOPES,
+  ISSUE_BLOCKED_MESSAGE,
   MANAGE_MY_PTO_SCOPES,
   MAX_TOKEN_NAME_CODE_POINTS,
   MAX_TOKEN_PASSWORD_LENGTH,
   NEAR_EXPIRY_DAYS,
+  READ_SCOPE_HINT,
   TOKEN_EXPIRY_OPTIONS,
+  UNKNOWN_ISSUE_MESSAGE,
   applyTokenScopePreset,
   canUseTeamScopes,
+  classifyIssueFailure,
   daysUntilExpiry,
   formatAbsoluteDateTime,
   isAbortError,
   isNearExpiry,
   isTeamScope,
   normalizeTokenScopes,
+  noteScopeHint,
   resolveTokenStatus,
   scopeOption,
   toggleTokenScope,
@@ -177,14 +182,29 @@ describe('scope rules', () => {
   });
 
   it('describes every scope and ignores unknown ones', () => {
-    expect(scopeOption('pto:read')?.label).toMatch(/view/i);
-    expect(scopeOption('pto:notes:read')?.label).toMatch(/notes/i);
+    expect(scopeOption('pto:read')?.label).toMatch(/read the team calendar/i);
+    expect(scopeOption('pto:notes:read')?.label).toMatch(/note text/i);
     expect(scopeOption('pto:create')?.label).toMatch(/create/i);
     expect(scopeOption('pto:update:self')?.label).toMatch(/update your own/i);
     expect(scopeOption('pto:delete:self')?.label).toMatch(/delete your own/i);
     expect(scopeOption('pto:update:team')?.label).toMatch(/teammates/i);
     expect(scopeOption('pto:delete:team')?.label).toMatch(/teammates/i);
     expect(scopeOption('pto:unknown' as never)).toBeUndefined();
+  });
+
+  it('describes the read scope as the shared calendar, not one person', () => {
+    const read = scopeOption('pto:read');
+    expect(read?.description).toMatch(/whole team/i);
+    expect(read?.description).toMatch(/note text stays hidden/i);
+    expect(read?.label).not.toMatch(/your own/i);
+    expect(READ_SCOPE_HINT).toMatch(/shared team calendar/i);
+  });
+
+  it('explains whose notes a token can read, by role', () => {
+    expect(noteScopeHint('member')).toMatch(/your own notes only/i);
+    expect(noteScopeHint('member')).toMatch(/teammates stay hidden/i);
+    expect(noteScopeHint('team_lead')).toMatch(/notes of teammates/i);
+    expect(noteScopeHint('admin')).toMatch(/notes of teammates/i);
   });
 });
 
@@ -360,5 +380,53 @@ describe('abort detection', () => {
   it('does not treat other failures as aborts', () => {
     expect(isAbortError(new ApiError(500, { code: 'INTERNAL', message: 'x' }))).toBe(false);
     expect(isAbortError(new Error('boom'))).toBe(false);
+  });
+});
+
+describe('issuance failure classification', () => {
+  it('treats a refusal as definite: nothing was created', () => {
+    expect(classifyIssueFailure(new ApiError(400, { code: 'VALIDATION', message: 'x' }))).toEqual({
+      kind: 'rejected',
+      message: expect.stringMatching(/rejected these details/i),
+    });
+    expect(
+      classifyIssueFailure(new ApiError(401, { code: 'UNAUTHENTICATED', message: 'x' })).kind,
+    ).toBe('rejected');
+    expect(classifyIssueFailure(new ApiError(403, { code: 'FORBIDDEN', message: 'x' })).kind).toBe(
+      'rejected',
+    );
+    expect(classifyIssueFailure(new ApiError(409, { code: 'CONFLICT', message: 'x' })).kind).toBe(
+      'rejected',
+    );
+    expect(
+      classifyIssueFailure(new ApiError(429, { code: 'RATE_LIMITED', message: 'x' })).kind,
+    ).toBe('rejected');
+  });
+
+  it('treats an unconfirmed answer as unknown', () => {
+    expect(classifyIssueFailure(new ApiError(0, { code: 'TIMEOUT', message: 'x' })).kind).toBe(
+      'unknown',
+    );
+    expect(classifyIssueFailure(new ApiError(0, { code: 'NETWORK', message: 'x' })).kind).toBe(
+      'unknown',
+    );
+    expect(classifyIssueFailure(new ApiError(0, { code: 'ABORTED', message: 'x' })).kind).toBe(
+      'unknown',
+    );
+    expect(classifyIssueFailure(new ApiError(500, { code: 'INTERNAL', message: 'x' })).kind).toBe(
+      'unknown',
+    );
+    expect(
+      classifyIssueFailure(new ApiError(200, { code: 'BAD_RESPONSE', message: 'x' })).kind,
+    ).toBe('unknown');
+    expect(classifyIssueFailure(new Error('boom')).kind).toBe('unknown');
+  });
+
+  it('never claims that nothing was created when the outcome is unknown', () => {
+    const failure = classifyIssueFailure(new ApiError(0, { code: 'TIMEOUT', message: 'x' }));
+    expect(failure.message).toBe(UNKNOWN_ISSUE_MESSAGE);
+    expect(failure.message).toMatch(/may have reached the server/i);
+    expect(failure.message).not.toMatch(/creates nothing/i);
+    expect(ISSUE_BLOCKED_MESSAGE).toMatch(/blocked until the token list has been refreshed/i);
   });
 });

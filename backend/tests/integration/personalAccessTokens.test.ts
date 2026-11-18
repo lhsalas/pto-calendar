@@ -310,7 +310,7 @@ describe('personal access tokens on PostgreSQL', () => {
     expect(await statusOf(team.token.id)).toBe('invalidated');
   });
 
-  it('expires at the database clock exactly at the boundary and lets revocation win', async () => {
+  it('changes status after the database reaches expiry and lets revocation win', async () => {
     const issued = await issueToken(tokens, sessionActor(ownerId), 0, { name: 'expiry' });
     const statusOf = async (): Promise<string | undefined> =>
       (await listTokens(tokens, ownerId)).find((token) => token.id === issued.token.id)?.status;
@@ -325,14 +325,26 @@ describe('personal access tokens on PostgreSQL', () => {
       WHERE id = ${issued.token.id}::uuid`;
     expect(await statusOf()).toBe('active');
 
-    // At the boundary the token is expired: now is not before expiresAt. The
-    // clamp keeps the stored instant after the creation instant, so the
-    // lifetime constraint of the table still holds.
+    // Keep the stored instant after creation so the lifetime constraint
+    // still holds. The TIMESTAMP(3) column can round a sub-millisecond
+    // value up, so the next read is not guaranteed to be after expiry.
     await db.$executeRaw`
       UPDATE personal_access_tokens
       SET expires_at = GREATEST(
         (clock_timestamp() AT TIME ZONE 'UTC'), created_at + INTERVAL '1 millisecond')
       WHERE id = ${issued.token.id}::uuid`;
+    // Synchronize on the persisted deadline, not on the behavior under test.
+    // Once PostgreSQL has reached it, a single status read must be expired.
+    await vi.waitFor(
+      async () => {
+        const [row] = await db.$queryRaw<{ reached: boolean }[]>`
+          SELECT expires_at <= (clock_timestamp() AT TIME ZONE 'UTC') AS reached
+          FROM personal_access_tokens WHERE id = ${issued.token.id}::uuid
+        `;
+        expect(row?.reached).toBe(true);
+      },
+      { timeout: 2000, interval: 10 },
+    );
     expect(await statusOf()).toBe('expired');
 
     // Expiry wins over invalidation, and revocation wins over both.

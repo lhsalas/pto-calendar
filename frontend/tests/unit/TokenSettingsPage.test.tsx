@@ -597,6 +597,18 @@ describe('TokenSettingsPage', () => {
     expect(screen.queryByDisplayValue(STUB_RAW_TOKEN)).not.toBeInTheDocument();
     await openCreateDialog(user);
     expect(screen.getByLabelText(/current password/i)).toHaveValue('');
+    // The issuance was cancelled mid-flight, so the pane waits for an
+    // authoritative refresh before another token may be requested.
+    expect(screen.getByTestId('issuance-unknown')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create token' })).toBeDisabled();
+    expect(issue).toHaveBeenCalledTimes(1);
+
+    // Only a successful refresh lifts the block.
+    server.use(http.get('/auth/tokens', () => HttpResponse.json({ tokens: [] })));
+    await user.click(screen.getByTestId('refresh-token-list-button'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('issuance-unknown')).not.toBeInTheDocument();
+    });
     expect(screen.getByRole('button', { name: 'Create token' })).toBeEnabled();
     expect(issue).toHaveBeenCalledTimes(1);
   });
@@ -782,13 +794,14 @@ describe('TokenSettingsPage', () => {
     });
   });
 
-  it('shows the empty state when the server sends no token list', async () => {
+  it('reports an unreadable response instead of treating it as an empty list', async () => {
     server.use(
       authFor('member'),
       http.get('/auth/tokens', () => HttpResponse.json({})),
     );
     renderPage();
-    expect(await screen.findByTestId('tokens-empty')).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(/something went wrong/i);
+    expect(screen.queryByTestId('tokens-empty')).not.toBeInTheDocument();
   });
 
   it('keeps the error visible when a retry also fails', async () => {
@@ -1109,5 +1122,167 @@ describe('TokenSettingsPage', () => {
     release();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(revokeAll).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a new issuance blocked until the token list has been refreshed', async () => {
+    let issueCalls = 0;
+    const issue = vi.fn(() => {
+      issueCalls += 1;
+      return HttpResponse.json(
+        { error: { code: 'INTERNAL_ERROR', message: 'boom' } },
+        { status: 500 },
+      );
+    });
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () => HttpResponse.json({ tokens: [] })),
+      http.post('/auth/tokens', issue),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId('tokens-empty');
+    await issueToken(user);
+
+    // A server error leaves the outcome unknown: the copy never claims that
+    // nothing was created.
+    const banner = await screen.findByTestId('issuance-unknown');
+    expect(banner).toHaveTextContent(/could not confirm/i);
+    expect(banner).toHaveTextContent(/may have reached the server/i);
+    expect(banner).not.toHaveTextContent(/creates nothing/i);
+    expect(screen.queryByRole('dialog', { name: /copy your token/i })).not.toBeInTheDocument();
+    expect(issueCalls).toBe(1);
+
+    // The open form is blocked, and reopening it does not lift the block.
+    const dialog = screen.getByRole('dialog', { name: /new personal access token/i });
+    expect(within(dialog).getByRole('button', { name: 'Create token' })).toBeDisabled();
+    await user.click(within(dialog).getByRole('button', { name: 'Create token' }));
+    expect(issueCalls).toBe(1);
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: /new personal access token/i }),
+      ).not.toBeInTheDocument();
+    });
+    await openCreateDialog(user);
+    expect(screen.getByRole('button', { name: 'Create token' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Create token' }));
+    expect(issueCalls).toBe(1);
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    // A failed refresh keeps the block in place.
+    server.use(
+      http.get('/auth/tokens', () =>
+        HttpResponse.json({ error: { code: 'INTERNAL', message: 'down' } }, { status: 500 }),
+      ),
+    );
+    await user.click(screen.getByTestId('refresh-token-list-button'));
+    expect(await screen.findByTestId('refresh-token-list-failed')).toBeInTheDocument();
+    expect(screen.getByTestId('issuance-unknown')).toBeInTheDocument();
+
+    // A 200 response missing the list is also unconfirmed, not an empty list.
+    server.use(http.get('/auth/tokens', () => HttpResponse.json({})));
+    await user.click(screen.getByTestId('refresh-token-list-button'));
+    expect(await screen.findByTestId('refresh-token-list-failed')).toBeInTheDocument();
+    expect(screen.getByTestId('issuance-unknown')).toBeInTheDocument();
+    expect(screen.queryByTestId('tokens-empty')).not.toBeInTheDocument();
+
+    // An authoritative refresh lifts it and the next intentional submit works.
+    server.use(http.get('/auth/tokens', () => HttpResponse.json({ tokens: [] })));
+    await user.click(screen.getByTestId('refresh-token-list-button'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('issuance-unknown')).not.toBeInTheDocument();
+    });
+    await openCreateDialog(user);
+    expect(screen.getByRole('button', { name: 'Create token' })).toBeEnabled();
+  });
+
+  it.each([
+    {},
+    { rawToken: '', token: STUB_TOKEN },
+    { rawToken: STUB_RAW_TOKEN },
+    { rawToken: STUB_RAW_TOKEN, token: { id: STUB_TOKEN.id } },
+  ])('never reveals a credential from an incomplete issuance response', async (payload) => {
+    server.use(
+      authFor('member'),
+      tokensListEmpty,
+      http.post('/auth/tokens', () => HttpResponse.json(payload, { status: 201 })),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await issueToken(user);
+    expect(await screen.findByTestId('issuance-unknown')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create token' })).toBeDisabled();
+    expect(screen.queryByRole('dialog', { name: /copy your token/i })).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue(STUB_RAW_TOKEN)).not.toBeInTheDocument();
+  });
+
+  it('never shows a secret when the issuance answer is lost', async () => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const requestSignal: { current: AbortSignal | null } = { current: null };
+    const issue = vi.fn(async ({ request }: { request: Request }) => {
+      requestSignal.current = request.signal;
+      await released;
+      return HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 });
+    });
+    server.use(authFor('member'), tokensListEmpty, http.post('/auth/tokens', issue));
+    const user = userEvent.setup();
+    renderPage();
+    await openCreateDialog(user);
+    await user.type(screen.getByLabelText(/token name/i), 'Laptop');
+    await user.type(screen.getByLabelText(/current password/i), 'correct horse');
+    await user.click(screen.getByRole('button', { name: 'Create token' }));
+    await waitFor(() => {
+      expect(issue).toHaveBeenCalledTimes(1);
+    });
+    // The request is cancelled, so the late answer is dropped.
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(requestSignal.current?.aborted).toBe(true);
+    expect(screen.queryByRole('dialog', { name: /copy your token/i })).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue(STUB_RAW_TOKEN)).not.toBeInTheDocument();
+    expect(screen.getByTestId('issuance-unknown')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['member', /your own notes only/i],
+    ['team_lead', /notes of teammates/i],
+    ['admin', /notes of teammates/i],
+  ] as const)('explains whose notes a %s token can read', async (role, expected) => {
+    server.use(authFor(role), tokensListEmpty);
+    const user = userEvent.setup();
+    renderPage();
+    await openCreateDialog(user);
+    expect(screen.getByText(expected)).toBeInTheDocument();
+    // The read scope is about the shared calendar, not one person's bookings.
+    expect(screen.getByText(/shared team calendar/i)).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /pto:read/i })).toBeChecked();
+  });
+
+  it('says that the preset still reads the shared calendar', async () => {
+    server.use(authFor('member'), tokensListEmpty);
+    const user = userEvent.setup();
+    renderPage();
+    await openCreateDialog(user);
+    expect(screen.getAllByText(/still reads the shared calendar/i).length).toBeGreaterThanOrEqual(
+      1,
+    );
+    expect(
+      screen.getAllByText(/never grants note text or writes on somebody else/i).length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it('explains that a token can be issued while bearer access is off', async () => {
+    server.use(authFor('member'), tokensListEmpty);
+    renderPage();
+    await screen.findByTestId('tokens-empty');
+    expect(screen.getByText(/while bearer access is switched off/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/unusable for api calls until bearer access is enabled/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/creates nothing/i)).not.toBeInTheDocument();
   });
 });

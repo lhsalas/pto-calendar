@@ -3,14 +3,17 @@ import {
   daysUntilExpiry,
   formatAbsoluteDateTime,
   isNearExpiry,
+  noteScopeHint,
   resolveTokenStatus,
   scopeOption,
   tokenStatusLabel,
 } from '../../lib/tokens';
-import type { TokenMetadata, TokenStatus } from '../../types/api';
+import type { Role, TokenMetadata, TokenStatus } from '../../types/api';
 
 export interface TokenCardProps {
   token: TokenMetadata;
+  /** The reader's role, which decides whose note text a token can read. */
+  role: Role;
   onRevoke: (token: TokenMetadata) => void;
 }
 
@@ -32,7 +35,7 @@ const STATUS_DARK_CLASS: Record<TokenStatus, string> = {
  * One owned token, shown as metadata only. The secret is never part of this
  * view, and the status is the one the server computed.
  */
-export function TokenCard({ token, onRevoke }: TokenCardProps): JSX.Element {
+export function TokenCard({ token, role, onRevoke }: TokenCardProps): JSX.Element {
   const headingId = `token-name-${token.id}`;
   const status = resolveTokenStatus(token);
   const nearExpiry = isNearExpiry(token);
@@ -107,6 +110,11 @@ export function TokenCard({ token, onRevoke }: TokenCardProps): JSX.Element {
               <li key={scope} className="min-w-0 text-xs text-ink dark:text-ink-dark">
                 {scopeOption(scope)?.label ?? scope}{' '}
                 <span className="font-mono text-ink-muted dark:text-ink-muted-dark">{scope}</span>
+                {scope === 'pto:notes:read' ? (
+                  <span className="mt-0.5 block text-ink-muted dark:text-ink-muted-dark">
+                    {noteScopeHint(role)}
+                  </span>
+                ) : null}
               </li>
             ))
           ) : (

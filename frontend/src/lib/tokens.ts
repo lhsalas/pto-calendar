@@ -16,8 +16,8 @@ export const TOKEN_SCOPE_VALUES: readonly TokenScope[] = [
 export const DEFAULT_TOKEN_SCOPES: readonly TokenScope[] = ['pto:read'];
 
 /**
- * The "Manage my PTO" preset: everything a person can do to their own
- * calendar, and nothing else. It never grants note reads or team writes.
+ * The "Manage my PTO" preset: shared calendar reads and personal writes.
+ * It never grants note reads or team writes.
  */
 export const MANAGE_MY_PTO_SCOPES: readonly TokenScope[] = [
   'pto:read',
@@ -52,44 +52,71 @@ export interface TokenScopeOption {
 /**
  * Presentation metadata for the scope controls. The scope id is always shown
  * next to the human label so the grant is unambiguous.
+ *
+ * The wording matches what the server actually grants: `pto:read` opens the
+ * shared calendar, not one person's bookings, and `pto:notes:read` adds the
+ * note text of the records the reader is allowed to manage.
  */
 export const TOKEN_SCOPE_OPTIONS: readonly TokenScopeOption[] = [
   {
     scope: 'pto:read',
-    label: 'View your own PTO',
-    description: 'Read the time off you booked. Nothing else.',
+    label: 'Read the team calendar',
+    description:
+      'See when the whole team is off: dates, day parts and names. Note text stays hidden.',
   },
   {
     scope: 'pto:notes:read',
-    label: 'Read your own PTO notes',
-    description: 'Include the note text attached to your own bookings.',
+    label: 'Read note text',
+    description: 'Include the note attached to time off. Needs the read scope.',
   },
   {
     scope: 'pto:create',
-    label: 'Create your own PTO',
+    label: 'Create your own time off',
     description: 'Book new time off for yourself.',
   },
   {
     scope: 'pto:update:self',
-    label: 'Update your own PTO',
-    description: 'Change dates or day parts on your own bookings.',
+    label: 'Update your own time off',
+    description: 'Change the dates or the day part of your own bookings.',
   },
   {
     scope: 'pto:delete:self',
-    label: 'Delete your own PTO',
+    label: 'Delete your own time off',
     description: 'Remove your own bookings.',
   },
   {
     scope: 'pto:update:team',
-    label: "Update teammates' PTO",
-    description: "Change any colleague's bookings, not only your own.",
+    label: "Update teammates' time off",
+    description:
+      "Change any colleague's booking, not only your own. Needs a current team lead or administrator role.",
   },
   {
     scope: 'pto:delete:team',
-    label: "Delete teammates' PTO",
-    description: "Remove any colleague's booking, not only your own.",
+    label: "Delete teammates' time off",
+    description:
+      "Remove any colleague's booking, not only your own. Needs a current team lead or administrator role.",
   },
 ];
+
+/**
+ * Who can see note text once `pto:notes:read` is granted.
+ *
+ * The server decides that per record: a member only ever sees the notes of
+ * their own bookings, while a team lead or an administrator also sees the
+ * notes of the bookings they are allowed to manage.
+ */
+export function noteScopeHint(role: Role): string {
+  return canUseTeamScopes(role)
+    ? 'With this scope you also read the notes of teammates, because your role can manage their time off.'
+    : 'With this scope you read your own notes only. The notes of teammates stay hidden for your role.';
+}
+
+/**
+ * The read scope covers the shared calendar, so it is part of every preset
+ * that manages personal time off.
+ */
+export const READ_SCOPE_HINT =
+  'Reading always covers the shared team calendar: who is off and when, without note text.';
 
 export function isTeamScope(scope: TokenScope): boolean {
   return scope === 'pto:update:team' || scope === 'pto:delete:team';
@@ -278,4 +305,46 @@ export function tokenErrorMessage(err: unknown, kind: 'request' | 'issue' = 'req
 export function isAbortError(err: unknown): boolean {
   if (err instanceof ApiError) return err.body.code === 'ABORTED';
   return err instanceof DOMException && err.name === 'AbortError';
+}
+
+/**
+ * Shown when an issuance could not be confirmed. The request may still have
+ * reached the server, so the copy never claims that nothing was created.
+ */
+export const UNKNOWN_ISSUE_MESSAGE =
+  'We could not confirm whether your last token was created. The request may have reached the server, so a token may exist even though no secret was shown. Refresh the token list and check for it before trying again. A slow request can still finish later; if you are unsure, wait and refresh again. If a token was created but its secret was lost, revoke it.';
+
+/** Shown while the issuance is blocked until the list has been refreshed. */
+export const ISSUE_BLOCKED_MESSAGE =
+  'Creating another token stays blocked until the token list has been refreshed. The previous attempt may have created one.';
+
+export type TokenIssueFailureKind = 'rejected' | 'unknown';
+
+export interface TokenIssueFailure {
+  kind: TokenIssueFailureKind;
+  message: string;
+}
+
+/**
+ * Classifies a failed issuance.
+ *
+ * A refusal from the server (a validation, an authentication, a limit or a
+ * rate limit) is definite: nothing was created and the user may try again
+ * after fixing the request. Everything else - a timeout, an unreachable
+ * server, a server error or an unreadable answer - leaves the outcome
+ * unknown, because the server may have committed the token before the
+ * answer was lost.
+ */
+export function classifyIssueFailure(err: unknown): TokenIssueFailure {
+  if (err instanceof ApiError) {
+    const code = err.body.code;
+    if (code === 'TIMEOUT' || code === 'NETWORK' || code === 'ABORTED' || code === 'BAD_RESPONSE') {
+      return { kind: 'unknown', message: UNKNOWN_ISSUE_MESSAGE };
+    }
+    if (err.status === 0 || err.status >= 500) {
+      return { kind: 'unknown', message: UNKNOWN_ISSUE_MESSAGE };
+    }
+    return { kind: 'rejected', message: tokenErrorMessage(err, 'issue') };
+  }
+  return { kind: 'unknown', message: UNKNOWN_ISSUE_MESSAGE };
 }
