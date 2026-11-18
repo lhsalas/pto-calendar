@@ -1,3 +1,5 @@
+import type { AuditActor } from '../audit/auditContext.js';
+import { recordNativeAudit } from '../audit/nativeAudit.js';
 import type { TokenDatabase } from './tokenDatabase.js';
 import { timestampParameter } from './pgTime.js';
 import {
@@ -54,15 +56,17 @@ interface LockedOwner {
 }
 
 /**
- * verifiedSessionVersion must come from the credential verification that
- * authorized this issuance, not a fresh version read after verification.
+ * The authenticated actor is the owner. verifiedSessionVersion must come from the
+ * credential verification that authorized this issuance, not a fresh version read
+ * after verification. The token row and its audit row share one transaction.
  */
 export async function issueToken(
   db: TokenDatabase,
-  ownerId: string,
+  actor: AuditActor,
   verifiedSessionVersion: number,
   input: { name: unknown; scopes?: unknown; expiresInDays?: unknown },
 ): Promise<{ rawToken: string; token: TokenMetadata }> {
+  const ownerId = actor.id;
   const name = validateTokenName(input.name);
   const material = createTokenMaterial();
   try {
@@ -109,8 +113,16 @@ export async function issueToken(
           timestampParameter(expiresAt),
         ],
       );
-      if (!created.rows[0]) throw new TokenOperationError();
-      return created.rows[0];
+      const row = created.rows[0];
+      if (!row) throw new TokenOperationError();
+      await recordNativeAudit(tx, db.tables.audit, actor, {
+        action: 'create_personal_token',
+        entityType: 'personal_access_token',
+        entityIds: [row.id],
+        targetOwnerId: ownerId,
+        details: { scopes, expiresAt: expiresAt.toISOString() },
+      });
+      return row;
     });
     if (token === null) throw new TokenLimitError();
     return { rawToken: material.rawToken, token };
@@ -133,37 +145,71 @@ export async function listTokens(db: TokenDatabase, ownerId: string): Promise<To
   }
 }
 
+/**
+ * Returns true for a newly revoked own token and for an already revoked own token.
+ * Only a real state change writes an audit row, so a repeated request is a no-op.
+ */
 export async function revokeToken(
   db: TokenDatabase,
-  ownerId: string,
+  actor: AuditActor,
   id: string,
 ): Promise<boolean> {
   try {
-    const result = await db.query(
-      `UPDATE ${db.tables.tokens} SET revoked_at = $3::timestamp
-       WHERE id = $1::uuid AND owner_id = $2::uuid AND revoked_at IS NULL`,
-      [id, ownerId, timestampParameter(new Date())],
-    );
-    if (result.rowCount === 1) return true;
-    const own = await db.query(
-      `SELECT id FROM ${db.tables.tokens} WHERE id = $1::uuid AND owner_id = $2::uuid`,
-      [id, ownerId],
-    );
-    return own.rows.length === 1;
+    return await db.transaction(async (tx) => {
+      const result = await tx.query(
+        `UPDATE ${db.tables.tokens} SET revoked_at = $3::timestamp
+         WHERE id = $1::uuid AND owner_id = $2::uuid AND revoked_at IS NULL`,
+        [id, actor.id, timestampParameter(new Date())],
+      );
+      if (result.rowCount === 1) {
+        await recordNativeAudit(tx, db.tables.audit, actor, {
+          action: 'revoke_personal_token',
+          entityType: 'personal_access_token',
+          entityIds: [id],
+          targetOwnerId: actor.id,
+          details: { bulk: false },
+        });
+        return true;
+      }
+      const own = await tx.query(
+        `SELECT id FROM ${db.tables.tokens} WHERE id = $1::uuid AND owner_id = $2::uuid`,
+        [id, actor.id],
+      );
+      return own.rows.length === 1;
+    });
   } catch {
     throw new TokenOperationError();
   }
 }
 
-export async function revokeAllTokens(db: TokenDatabase, ownerId: string): Promise<number> {
+/**
+ * Writes one audit row per token whose state actually changed, keyed by public
+ * token ID. Tokens already revoked by a concurrent request are not matched by the
+ * guarded UPDATE, so races cannot produce duplicate rows. Zero changes write none.
+ */
+export async function revokeAllTokens(db: TokenDatabase, actor: AuditActor): Promise<number> {
   try {
-    const result = await db.query(
-      `UPDATE ${db.tables.tokens} SET revoked_at = $2::timestamp
-       WHERE owner_id = $1::uuid AND revoked_at IS NULL`,
-      [ownerId, timestampParameter(new Date())],
-    );
-    if (result.rowCount === null) throw new TokenOperationError();
-    return result.rowCount;
+    return await db.transaction(async (tx) => {
+      const result = await tx.query<{ id: string }>(
+        `UPDATE ${db.tables.tokens} SET revoked_at = $2::timestamp
+         WHERE owner_id = $1::uuid AND revoked_at IS NULL
+         RETURNING id::text AS id`,
+        [actor.id, timestampParameter(new Date())],
+      );
+      if (result.rowCount === null || result.rowCount !== result.rows.length) {
+        throw new TokenOperationError();
+      }
+      if (result.rows.length > 0) {
+        await recordNativeAudit(tx, db.tables.audit, actor, {
+          action: 'revoke_personal_token',
+          entityType: 'personal_access_token',
+          entityIds: result.rows.map((row) => row.id),
+          targetOwnerId: actor.id,
+          details: { bulk: true },
+        });
+      }
+      return result.rows.length;
+    });
   } catch {
     throw new TokenOperationError();
   }
@@ -223,6 +269,7 @@ export async function verifyToken(
     }
     // Recheck mutable validity conditions in the update to reject a concurrent
     // revocation or owner change instead of writing usage for a stale token.
+    // Usage is operational metadata: it is deliberately not an audited event.
     const used = await db.query(
       `UPDATE ${db.tables.tokens} t SET last_used_at = $2::timestamp
        WHERE t.id = $1::uuid AND t.revoked_at IS NULL
@@ -250,19 +297,45 @@ export async function verifyToken(
   }
 }
 
-/** Role and credential version change atomically, so promotion cannot revive PATs. */
+/**
+ * Role and credential version change in one transaction with its audit row, so
+ * promotion cannot revive credentials and no invalidation goes unrecorded. The
+ * operator is trusted maintenance attribution; no HTTP route can supply it.
+ */
 export async function changeRoleAndInvalidate(
   db: TokenDatabase,
   ownerId: string,
   role: TokenOwnerRole,
+  operator: AuditActor,
 ): Promise<void> {
   try {
-    const result = await db.query(
-      `UPDATE ${db.tables.users} SET role = $2, session_version = session_version + 1
-       WHERE id = $1::uuid`,
-      [ownerId, role],
-    );
-    if (result.rowCount !== 1) throw new TokenOperationError();
+    await db.transaction(async (tx) => {
+      const current = await tx.query<{ role: TokenOwnerRole }>(
+        `SELECT role::text AS role FROM ${db.tables.users} WHERE id = $1::uuid FOR UPDATE`,
+        [ownerId],
+      );
+      const previous = current.rows[0];
+      if (!previous) throw new TokenOperationError();
+      const updated = await tx.query<{ sessionVersion: number }>(
+        `UPDATE ${db.tables.users} SET role = $2, session_version = session_version + 1
+         WHERE id = $1::uuid
+         RETURNING session_version AS "sessionVersion"`,
+        [ownerId, role],
+      );
+      const version = updated.rows[0];
+      if (updated.rowCount !== 1 || !version) throw new TokenOperationError();
+      await recordNativeAudit(tx, db.tables.audit, operator, {
+        action: 'change_user_role',
+        entityType: 'user',
+        entityIds: [ownerId],
+        targetOwnerId: ownerId,
+        details: {
+          fromRole: previous.role,
+          toRole: role,
+          sessionVersion: version.sessionVersion,
+        },
+      });
+    });
   } catch {
     throw new TokenOperationError();
   }

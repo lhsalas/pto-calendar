@@ -1,8 +1,9 @@
 import type { DayPart, PTORequest, Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { HttpError } from '../../middleware/errorHandler.js';
-import { canModifyPTO, type ActorContext } from '../authorization/AuthorizationService.js';
-import { record as recordAudit } from '../audit/AuditLogService.js';
+import { canModifyPTO } from '../authorization/AuthorizationService.js';
+import { auditEntryFor, record as recordAudit } from '../audit/AuditLogService.js';
+import type { AttributedActor } from '../audit/auditContext.js';
 import { validatePtoPayload, type ValidatedPto } from './validation.js';
 import type { CreatePtoInput } from './schemas.js';
 
@@ -88,9 +89,14 @@ export async function getPtoById(id: string): Promise<PublicPtoWithUser | null> 
   };
 }
 
-export async function createPto(userId: string, input: CreatePtoInput): Promise<PublicPto> {
+/**
+ * The authenticated actor becomes the owner, and the create plus its audit row
+ * commit together. Audit details carry dates, day part and whether a note was
+ * written, never the note text.
+ */
+export async function createPto(actor: AttributedActor, input: CreatePtoInput): Promise<PublicPto> {
   const validated: ValidatedPto = validatePtoPayload(input);
-  const overlap = await findOverlapping(userId, validated.startDate, validated.endDate);
+  const overlap = await findOverlapping(actor.id, validated.startDate, validated.endDate);
   if (overlap) {
     throw new HttpError(
       409,
@@ -98,20 +104,38 @@ export async function createPto(userId: string, input: CreatePtoInput): Promise<
       'This PTO overlaps an existing PTO entry for the same user.',
     );
   }
-  return prisma.pTORequest.create({
-    data: {
-      userId,
-      startDate: toDateOnly(validated.startDate),
-      endDate: toDateOnly(validated.endDate),
-      dayPart: validated.dayPart,
-      note: validated.note,
-    },
-    select: PUBLIC_PTO_SELECT,
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.pTORequest.create({
+      data: {
+        userId: actor.id,
+        startDate: toDateOnly(validated.startDate),
+        endDate: toDateOnly(validated.endDate),
+        dayPart: validated.dayPart,
+        note: validated.note,
+      },
+      select: PUBLIC_PTO_SELECT,
+    });
+    await recordAudit(
+      auditEntryFor(actor, {
+        action: 'create_pto',
+        entityType: 'pto_request',
+        entityId: row.id,
+        targetOwnerId: row.userId,
+        details: {
+          startDate: validated.startDate,
+          endDate: validated.endDate,
+          dayPart: validated.dayPart,
+          noteWritten: validated.note !== null,
+        },
+      }),
+      tx,
+    );
+    return row;
   });
 }
 
 export async function updatePto(
-  actor: ActorContext,
+  actor: AttributedActor,
   id: string,
   input: CreatePtoInput,
 ): Promise<PublicPto> {
@@ -144,6 +168,8 @@ export async function updatePto(
       'This PTO overlaps an existing PTO entry for the same user.',
     );
   }
+  // The audit row records the change summary but never the note text. Note writes
+  // are recorded as a boolean; legacy rows keep whatever they stored historically.
   const updated = await prisma.$transaction(async (tx) => {
     const row = await tx.pTORequest.update({
       where: { id },
@@ -156,18 +182,18 @@ export async function updatePto(
       select: PUBLIC_PTO_SELECT,
     });
     await recordAudit(
-      {
-        actorUserId: actor.id,
+      auditEntryFor(actor, {
         action: 'update_pto',
         entityType: 'pto_request',
         entityId: id,
+        targetOwnerId: existing.userId,
         details: {
           startDate: validated.startDate,
           endDate: validated.endDate,
           dayPart: validated.dayPart,
-          note: row.note,
+          noteWritten: noteProvided,
         },
-      },
+      }),
       tx,
     );
     return row;
@@ -175,7 +201,8 @@ export async function updatePto(
   return updated;
 }
 
-export async function deletePto(actor: ActorContext, id: string): Promise<void> {
+/** The delete returns the removed row, so the audit summary describes exactly what was removed. */
+export async function deletePto(actor: AttributedActor, id: string): Promise<void> {
   const existing = await prisma.pTORequest.findUnique({
     where: { id },
     select: { id: true, userId: true },
@@ -187,14 +214,22 @@ export async function deletePto(actor: ActorContext, id: string): Promise<void> 
     throw new HttpError(403, 'FORBIDDEN', 'You are not allowed to delete this PTO entry.');
   }
   await prisma.$transaction(async (tx) => {
-    await tx.pTORequest.delete({ where: { id } });
+    const removed = await tx.pTORequest.delete({
+      where: { id },
+      select: { userId: true, startDate: true, endDate: true, dayPart: true },
+    });
     await recordAudit(
-      {
-        actorUserId: actor.id,
+      auditEntryFor(actor, {
         action: 'delete_pto',
         entityType: 'pto_request',
         entityId: id,
-      },
+        targetOwnerId: removed.userId,
+        details: {
+          startDate: fromDateOnly(removed.startDate),
+          endDate: fromDateOnly(removed.endDate),
+          dayPart: removed.dayPart,
+        },
+      }),
       tx,
     );
   });

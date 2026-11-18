@@ -9,6 +9,10 @@ Build a small internal app where team members can record planned PTO/vacation da
 > #227–#237 must be delivered with green CI before feature implementation.
 > Session-only token APIs (#250) and scoped PTO/identity bearer REST (#251) are
 > implemented foundations; both bearer rollout flags remain off by default.
+> Credential-attributed audit (#252) is the next candidate in the same
+> operational-controls wave: PTO and credential-lifecycle audit rows are
+> written atomically with their mutation and carry credential attribution.
+> The audit trail stays internal — no audit browsing endpoint or UI is added.
 > Token settings UI and agent adapters remain planned, not shipped here;
 > hosted MCP/OAuth remains out of scope.
 

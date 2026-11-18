@@ -12,6 +12,7 @@ import {
   revokeToken,
   verifyToken,
 } from '../../src/services/tokens/tokenService.js';
+import { trustedOperatorActor, type AuditActor } from '../../src/services/audit/auditContext.js';
 
 const url = process.env.DATABASE_URL;
 if (!url)
@@ -22,6 +23,11 @@ const tokens = createTokenDatabase(url);
 const otherTokens = createTokenDatabase(url);
 const ownerId = randomUUID();
 const otherId = randomUUID();
+
+/** Attribution for a verified browser session; never derived from request data. */
+function sessionActor(id: string): AuditActor {
+  return { id, credential: { type: 'session' }, requestId: 'pat-integration' };
+}
 
 describe('personal access tokens on PostgreSQL', () => {
   beforeAll(async () => {
@@ -55,6 +61,8 @@ describe('personal access tokens on PostgreSQL', () => {
     vi.restoreAllMocks();
     try {
       await db.personalAccessToken.deleteMany({ where: { ownerId: { in: [ownerId, otherId] } } });
+      // Audit rows reference their actor, so they are removed before the users.
+      await db.auditLog.deleteMany({ where: { actorUserId: { in: [ownerId, otherId] } } });
       await db.user.deleteMany({ where: { id: { in: [ownerId, otherId] } } });
     } finally {
       await Promise.all([
@@ -70,7 +78,9 @@ describe('personal access tokens on PostgreSQL', () => {
   it('serializes simultaneous issuance to ten active tokens and keeps storage secret-free', async () => {
     const results = await Promise.allSettled(
       Array.from({ length: 11 }, (_, i) =>
-        issueToken(i % 2 ? tokens : otherTokens, ownerId, 0, { name: `token-${i}` }),
+        issueToken(i % 2 ? tokens : otherTokens, sessionActor(ownerId), 0, {
+          name: `token-${i}`,
+        }),
       ),
     );
     const successful = results.filter((r) => r.status === 'fulfilled');
@@ -90,18 +100,20 @@ describe('personal access tokens on PostgreSQL', () => {
   });
 
   it('isolates owners and immediately applies revoke-one and revoke-all', async () => {
-    const first = await issueToken(tokens, ownerId, 0, { name: 'first' });
+    const first = await issueToken(tokens, sessionActor(ownerId), 0, { name: 'first' });
     const id = first.token.id;
-    expect(await revokeToken(otherTokens, otherId, id)).toBe(false);
-    expect(await revokeToken(tokens, ownerId, id)).toBe(true);
-    expect(await revokeToken(otherTokens, ownerId, id)).toBe(true);
-    const replacement = await issueToken(otherTokens, ownerId, 0, { name: 'replacement' });
+    expect(await revokeToken(otherTokens, sessionActor(otherId), id)).toBe(false);
+    expect(await revokeToken(tokens, sessionActor(ownerId), id)).toBe(true);
+    expect(await revokeToken(otherTokens, sessionActor(ownerId), id)).toBe(true);
+    const replacement = await issueToken(otherTokens, sessionActor(ownerId), 0, {
+      name: 'replacement',
+    });
     expect(await verifyToken(tokens, replacement.rawToken)).not.toBeNull();
     expect(
       (await db.personalAccessToken.findUniqueOrThrow({ where: { id: replacement.token.id } }))
         .lastUsedAt,
     ).not.toBeNull();
-    await revokeAllTokens(otherTokens, ownerId);
+    await revokeAllTokens(otherTokens, sessionActor(ownerId));
     expect(await verifyToken(tokens, replacement.rawToken)).toBeNull();
     expect(await listTokens(tokens, otherId)).toEqual([]);
   });
@@ -116,7 +128,7 @@ describe('personal access tokens on PostgreSQL', () => {
     );
     const issued = [];
     for (let i = 0; i < 10; i += 1) {
-      issued.push(await issueToken(tokens, ownerId, 0, { name: `capacity-${i}` }));
+      issued.push(await issueToken(tokens, sessionActor(ownerId), 0, { name: `capacity-${i}` }));
     }
     const past = new Date(Date.now() - 2 * 86400000);
     await db.personalAccessToken.update({
@@ -124,9 +136,9 @@ describe('personal access tokens on PostgreSQL', () => {
       data: { createdAt: past, expiresAt: new Date(past.getTime() + 86400000) },
     });
     await expect(
-      issueToken(otherTokens, ownerId, 0, { name: 'expired replacement' }),
+      issueToken(otherTokens, sessionActor(ownerId), 0, { name: 'expired replacement' }),
     ).resolves.toBeDefined();
-    await revokeAllTokens(tokens, ownerId);
+    await revokeAllTokens(tokens, sessionActor(ownerId));
   });
 
   it('rejects out-of-bounds lifetime and invalid scopes at the database boundary', async () => {
@@ -156,7 +168,7 @@ describe('personal access tokens on PostgreSQL', () => {
   });
 
   it('rejects exactly at expiration and reuses capacity after version changes', async () => {
-    const issued = await issueToken(tokens, ownerId, 0, {
+    const issued = await issueToken(tokens, sessionActor(ownerId), 0, {
       name: 'expiry',
       expiresInDays: 1,
       scopes: ['pto:update:team'],
@@ -167,16 +179,20 @@ describe('personal access tokens on PostgreSQL', () => {
     } finally {
       nowSpy.mockRestore();
     }
-    await changeRoleAndInvalidate(tokens, ownerId, 'member');
-    await changeRoleAndInvalidate(otherTokens, ownerId, 'team_lead');
+    await changeRoleAndInvalidate(tokens, ownerId, 'member', trustedOperatorActor(otherId));
+    await changeRoleAndInvalidate(otherTokens, ownerId, 'team_lead', trustedOperatorActor(otherId));
     expect(await verifyToken(tokens, issued.rawToken)).toBeNull();
-    await expect(issueToken(tokens, ownerId, 0, { name: 'stale caller' })).rejects.toThrow();
+    await expect(
+      issueToken(tokens, sessionActor(ownerId), 0, { name: 'stale caller' }),
+    ).rejects.toThrow();
     const current = await db.user.findUniqueOrThrow({
       where: { id: ownerId },
       select: { sessionVersion: true },
     });
     await expect(
-      issueToken(otherTokens, ownerId, current.sessionVersion, { name: 'new version' }),
+      issueToken(otherTokens, sessionActor(ownerId), current.sessionVersion, {
+        name: 'new version',
+      }),
     ).resolves.toBeDefined();
   });
 
@@ -185,13 +201,18 @@ describe('personal access tokens on PostgreSQL', () => {
       where: { id: otherId },
       select: { sessionVersion: true },
     });
-    const old = await issueToken(tokens, otherId, user.sessionVersion, { name: 'before reset' });
-    const reset = await resetUserPassword(otherId);
+    const old = await issueToken(tokens, sessionActor(otherId), user.sessionVersion, {
+      name: 'before reset',
+    });
+    const reset = await resetUserPassword(otherId, sessionActor(otherId));
     expect(await verifyToken(tokens, old.rawToken)).toBeNull();
     await expect(
-      issueToken(tokens, otherId, user.sessionVersion, { name: 'stale reset' }),
+      issueToken(tokens, sessionActor(otherId), user.sessionVersion, { name: 'stale reset' }),
     ).rejects.toThrow();
-    await setupAccount({ token: reset.setupToken.plaintext, password: 'test-password' });
+    await setupAccount(
+      { token: reset.setupToken.plaintext, password: 'test-password' },
+      { requestId: 'pat-integration' },
+    );
     expect(await verifyToken(otherTokens, old.rawToken)).toBeNull();
     const updated = await db.user.findUniqueOrThrow({
       where: { id: otherId },
@@ -199,7 +220,7 @@ describe('personal access tokens on PostgreSQL', () => {
     });
     expect(updated.sessionVersion).toBe(user.sessionVersion + 2);
     await expect(
-      issueToken(tokens, otherId, updated.sessionVersion, { name: 'after setup' }),
+      issueToken(tokens, sessionActor(otherId), updated.sessionVersion, { name: 'after setup' }),
     ).resolves.toBeDefined();
   });
 
@@ -209,8 +230,8 @@ describe('personal access tokens on PostgreSQL', () => {
       select: { sessionVersion: true },
     });
     const [issued] = await Promise.allSettled([
-      issueToken(otherTokens, otherId, user.sessionVersion, { name: 'racing' }),
-      resetUserPassword(otherId),
+      issueToken(otherTokens, sessionActor(otherId), user.sessionVersion, { name: 'racing' }),
+      resetUserPassword(otherId, sessionActor(otherId)),
     ]);
     if (issued.status === 'fulfilled') {
       expect(await verifyToken(tokens, issued.value.rawToken)).toBeNull();
@@ -228,7 +249,10 @@ describe('personal access tokens on PostgreSQL', () => {
     try {
       process.env.TZ = 'Pacific/Honolulu';
       const before = Date.now();
-      const issued = await issueToken(tokens, ownerId, 0, { name: 'UTC', expiresInDays: 365 });
+      const issued = await issueToken(tokens, sessionActor(ownerId), 0, {
+        name: 'UTC',
+        expiresInDays: 365,
+      });
       const after = Date.now();
       expect(issued.token.createdAt.getTime()).toBeGreaterThanOrEqual(before);
       expect(issued.token.createdAt.getTime()).toBeLessThanOrEqual(after);
@@ -247,7 +271,7 @@ describe('personal access tokens on PostgreSQL', () => {
   });
 
   it('rejects verification held behind a row lock until after absolute expiry', async () => {
-    const issued = await issueToken(tokens, ownerId, 0, { name: 'Blocked expiry' });
+    const issued = await issueToken(tokens, sessionActor(ownerId), 0, { name: 'Blocked expiry' });
     await db.personalAccessToken.update({
       where: { id: issued.token.id },
       data: {

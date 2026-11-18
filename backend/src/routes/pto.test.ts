@@ -98,14 +98,31 @@ describe('PTO HTTP scopes and note serialization', () => {
       .send({ ...body, note: 'submitted', userId: 'other' })
       .expect(201);
     expect(created.body.note).toBeNull();
-    expect(createPto).toHaveBeenCalledWith(f.owner.id, { ...body, note: 'submitted' });
+    expect(createPto).toHaveBeenCalledWith(
+      {
+        id: f.owner.id,
+        role: 'member',
+        credential: { type: 'personal_access_token', tokenId: f.token.id },
+        requestId: expect.any(String),
+      },
+      { ...body, note: 'submitted' },
+    );
     const updated = await request(f.app)
       .put(`/pto/${id}`)
       .set('Authorization', f.bearer)
       .send(body)
       .expect(200);
     expect(updated.body.note).toBeNull();
-    expect(updatePto).toHaveBeenCalledWith({ id: f.owner.id, role: 'member' }, id, body);
+    expect(updatePto).toHaveBeenCalledWith(
+      {
+        id: f.owner.id,
+        role: 'member',
+        credential: { type: 'personal_access_token', tokenId: f.token.id },
+        requestId: expect.any(String),
+      },
+      id,
+      body,
+    );
     const notes = fixture({
       scopes: ['pto:create', 'pto:update:self', 'pto:read', 'pto:notes:read'],
     });
@@ -165,5 +182,30 @@ describe('PTO HTTP scopes and note serialization', () => {
     await request(f.app).put(`/pto/${id}`).set('Authorization', f.bearer).send({}).expect(400);
     vi.mocked(deletePto).mockRejectedValueOnce(new Error('private failure'));
     await request(f.app).delete(`/pto/${id}`).set('Authorization', f.bearer).expect(500);
+  });
+
+  it('attributes every mutation to the verified token and ignores forged body identity or credentials', async () => {
+    const f = fixture({ scopes: ['pto:create', 'pto:update:self', 'pto:delete:self'] });
+    const forged = {
+      ...body,
+      actorUserId: 'forged-actor',
+      userId: 'forged-owner',
+      credential: { type: 'session' },
+      requestId: 'forged-request',
+    };
+    const verified = {
+      id: f.owner.id,
+      role: 'member',
+      credential: { type: 'personal_access_token', tokenId: f.token.id },
+      requestId: expect.any(String),
+    };
+    await request(f.app).post('/pto').set('Authorization', f.bearer).send(forged).expect(201);
+    await request(f.app).put(`/pto/${id}`).set('Authorization', f.bearer).send(forged).expect(200);
+    await request(f.app).delete(`/pto/${id}`).set('Authorization', f.bearer).expect(204);
+    expect(vi.mocked(createPto).mock.calls[0]![0]).toEqual(verified);
+    expect(vi.mocked(updatePto).mock.calls[0]![0]).toEqual(verified);
+    expect(vi.mocked(deletePto).mock.calls[0]![0]).toEqual(verified);
+    expect(JSON.stringify(vi.mocked(createPto).mock.calls)).not.toContain('forged');
+    expect(JSON.stringify(vi.mocked(updatePto).mock.calls)).not.toContain('forged');
   });
 });

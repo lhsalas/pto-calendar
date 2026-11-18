@@ -355,6 +355,15 @@ not a token settings UI or PTO bearer access. #251, lifecycle auditing/quotas
 and the separate pilot/production gates remain outstanding; the dated earlier
 checkpoint is retained rather than rewritten as historical certification.
 
+**Audit checkpoint — 2026-11-17:** #251 was delivered by PR293 on master
+`82cfc73538259c405608f0e5b870a0c52865b93c`. #252 is the next candidate in the
+operational-controls wave. At this checkpoint it was not yet accepted or
+published, and it adds no public audit browsing endpoint or UI — the trail
+stays internal. Its scope is the audit half of this section only (atomic,
+credential-attributed rows for PTO and credential-lifecycle changes, and
+credential-safe logging); the quota half remains #253. The dated earlier
+checkpoints are retained rather than rewritten as historical certification.
+
 Rows give the safe serial default. Parallel development is restricted to the
 approved waves below after prerequisites merge; every row is one deliverable/PR.
 

@@ -34,12 +34,47 @@ async function login(
   await agent.post('/auth/login').send({ email, password }).expect(200);
 }
 
+async function auditRowsFor(entityId: string, action?: string) {
+  return prisma.auditLog.findMany({
+    where: action ? { entityId, action } : { entityId },
+  });
+}
+
+/** A rejected or invalid change must leave the complete audit set untouched. */
+async function expectOnlyCreateAudit(entityId: string, auditBefore: unknown[]): Promise<void> {
+  const after = await auditRowsFor(entityId);
+  expect(after).toEqual(auditBefore);
+  expect(after).toHaveLength(1);
+  expect(after[0]!.action).toBe('create_pto');
+}
+
 async function createOwnPto(agent: ReturnType<typeof request.agent>): Promise<string> {
   const res = await agent
     .post('/pto')
     .send({ startDate: '2026-05-11', endDate: '2026-05-11', dayPart: 'morning', note: 'Doctor' });
   expect(res.status).toBe(201);
-  return (res.body as { id: string }).id;
+  const id = (res.body as { id: string }).id;
+  // The create is audited in the same transaction as the mutation, and the
+  // summary records that a note was written without repeating its text.
+  const creates = await auditRowsFor(id, 'create_pto');
+  expect(creates).toHaveLength(1);
+  expect(creates[0]).toMatchObject({
+    actorUserId: SEED.dev1.id,
+    action: 'create_pto',
+    entityType: 'pto_request',
+    entityId: id,
+    credentialType: 'session',
+    sourceTokenId: null,
+    targetOwnerId: SEED.dev1.id,
+    details: {
+      startDate: '2026-05-11',
+      endDate: '2026-05-11',
+      dayPart: 'morning',
+      noteWritten: true,
+    },
+  });
+  expect(JSON.stringify(creates[0]!.details)).not.toContain('Doctor');
+  return id;
 }
 
 describe('PTO edit / delete / detail / audit', () => {
@@ -160,23 +195,30 @@ describe('PTO edit / delete / detail / audit', () => {
         dayPart: 'evening',
         note: 'Edited',
       });
-      const logs = await prisma.auditLog.findMany({ where: { entityId: ownPtoId } });
-      expect(logs).toHaveLength(1);
-      expect(logs[0]).toMatchObject({
+      const logs = await auditRowsFor(ownPtoId);
+      expect(logs).toHaveLength(2);
+      const updates = logs.filter((row) => row.action === 'update_pto');
+      expect(updates).toHaveLength(1);
+      expect(updates[0]).toMatchObject({
         actorUserId: SEED.dev1.id,
         action: 'update_pto',
         entityType: 'pto_request',
+        credentialType: 'session',
+        sourceTokenId: null,
+        targetOwnerId: SEED.dev1.id,
         details: {
           startDate: '2026-05-12',
           endDate: '2026-05-12',
           dayPart: 'evening',
-          note: 'Edited',
+          noteWritten: true,
         },
       });
+      // The audit summary never carries the note text.
+      expect(JSON.stringify(logs)).not.toContain('Edited');
     });
 
     it.each(['Doctor', null])(
-      'preserves the stored note %s in the response, database and audit when omitted',
+      'preserves the stored note %s in the response and database and audits that no note was written',
       async (note) => {
         await prisma.pTORequest.update({ where: { id: ownPtoId }, data: { note } });
         const agent = request.agent(app);
@@ -200,19 +242,27 @@ describe('PTO edit / delete / detail / audit', () => {
           dayPart: 'evening',
           note,
         });
-        const logs = await prisma.auditLog.findMany({ where: { entityId: ownPtoId } });
-        expect(logs).toHaveLength(1);
-        expect(logs[0]).toMatchObject({
+        const logs = await auditRowsFor(ownPtoId);
+        expect(logs).toHaveLength(2);
+        const updates = logs.filter((row) => row.action === 'update_pto');
+        expect(updates).toHaveLength(1);
+        expect(updates[0]).toMatchObject({
           actorUserId: SEED.dev1.id,
           action: 'update_pto',
           entityType: 'pto_request',
+          credentialType: 'session',
+          sourceTokenId: null,
+          targetOwnerId: SEED.dev1.id,
           details: {
             startDate: '2026-05-12',
             endDate: '2026-05-12',
             dayPart: 'evening',
-            note,
+            noteWritten: false,
           },
         });
+        // Neither the stored note nor the omitted write appears in the audit.
+        expect(JSON.stringify(logs)).not.toContain('Doctor');
+        expect(updates[0]!.details).not.toHaveProperty('note');
       },
     );
 
@@ -229,13 +279,16 @@ describe('PTO edit / delete / detail / audit', () => {
       expect(res.body.note).toBeNull();
       const stored = await prisma.pTORequest.findUniqueOrThrow({ where: { id: ownPtoId } });
       expect(stored.note).toBeNull();
-      const logs = await prisma.auditLog.findMany({ where: { entityId: ownPtoId } });
-      expect(logs).toHaveLength(1);
-      expect(logs[0]).toMatchObject({
+      const logs = await auditRowsFor(ownPtoId);
+      expect(logs).toHaveLength(2);
+      const updates = logs.filter((row) => row.action === 'update_pto');
+      expect(updates).toHaveLength(1);
+      expect(updates[0]).toMatchObject({
         actorUserId: SEED.dev1.id,
         action: 'update_pto',
-        details: { note: null },
+        details: { noteWritten: true },
       });
+      expect(updates[0]!.details).not.toHaveProperty('note');
     });
 
     it('lets a team lead update another user PTO and audits with their actor id', async () => {
@@ -250,19 +303,26 @@ describe('PTO edit / delete / detail / audit', () => {
         dayPart: 'all_day',
         note: 'Doctor',
       });
-      const logs = await prisma.auditLog.findMany({ where: { entityId: ownPtoId } });
-      expect(logs).toHaveLength(1);
-      expect(logs[0]).toMatchObject({
+      const logs = await auditRowsFor(ownPtoId);
+      expect(logs).toHaveLength(2);
+      const updates = logs.filter((row) => row.action === 'update_pto');
+      expect(updates).toHaveLength(1);
+      expect(updates[0]).toMatchObject({
         actorUserId: SEED.lead.id,
         action: 'update_pto',
-        details: { dayPart: 'all_day', note: 'Doctor' },
+        credentialType: 'session',
+        sourceTokenId: null,
+        targetOwnerId: SEED.dev1.id,
+        details: { dayPart: 'all_day', noteWritten: false },
       });
+      expect(JSON.stringify(logs)).not.toContain('Doctor');
     });
 
     it('returns 403 for a member editing another user PTO', async () => {
       const agent = request.agent(app);
       await login(agent, SEED.dev2.email, SEED.dev2.password);
       const before = await prisma.pTORequest.findUniqueOrThrow({ where: { id: ownPtoId } });
+      const auditBefore = await auditRowsFor(ownPtoId);
       const res = await agent
         .put(`/pto/${ownPtoId}`)
         .send({ startDate: '2026-05-12', endDate: '2026-05-12', dayPart: 'morning', note: '' });
@@ -271,7 +331,7 @@ describe('PTO edit / delete / detail / audit', () => {
       expect(await prisma.pTORequest.findUniqueOrThrow({ where: { id: ownPtoId } })).toEqual(
         before,
       );
-      expect(await prisma.auditLog.count({ where: { entityId: ownPtoId } })).toBe(0);
+      await expectOnlyCreateAudit(ownPtoId, auditBefore);
     });
 
     it('returns 404 for an unknown id', async () => {
@@ -294,6 +354,7 @@ describe('PTO edit / delete / detail / audit', () => {
       const agent = request.agent(app);
       await login(agent, SEED.dev1.email, SEED.dev1.password);
       const before = await prisma.pTORequest.findUniqueOrThrow({ where: { id: ownPtoId } });
+      const auditBefore = await auditRowsFor(ownPtoId);
       const res = await agent.put(`/pto/${ownPtoId}`).send({
         startDate: '2026-05-12',
         endDate: '2026-05-12',
@@ -305,7 +366,7 @@ describe('PTO edit / delete / detail / audit', () => {
       expect(await prisma.pTORequest.findUniqueOrThrow({ where: { id: ownPtoId } })).toEqual(
         before,
       );
-      expect(await prisma.auditLog.count({ where: { entityId: ownPtoId } })).toBe(0);
+      await expectOnlyCreateAudit(ownPtoId, auditBefore);
     });
 
     it.each([
@@ -339,13 +400,14 @@ describe('PTO edit / delete / detail / audit', () => {
       const agent = request.agent(app);
       await login(agent, SEED.dev1.email, SEED.dev1.password);
       const before = await prisma.pTORequest.findUniqueOrThrow({ where: { id: ownPtoId } });
+      const auditBefore = await auditRowsFor(ownPtoId);
       const res = await agent.put(`/pto/${ownPtoId}`).send({ ...payload, note: '' });
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
       expect(await prisma.pTORequest.findUniqueOrThrow({ where: { id: ownPtoId } })).toEqual(
         before,
       );
-      expect(await prisma.auditLog.count({ where: { entityId: ownPtoId } })).toBe(0);
+      await expectOnlyCreateAudit(ownPtoId, auditBefore);
     });
 
     it('returns 409 on overlap with another PTO of the same user', async () => {
@@ -356,6 +418,7 @@ describe('PTO edit / delete / detail / audit', () => {
         .send({ startDate: '2026-05-13', endDate: '2026-05-13', dayPart: 'all_day' })
         .expect(201);
       const before = await prisma.pTORequest.findUniqueOrThrow({ where: { id: ownPtoId } });
+      const auditBefore = await auditRowsFor(ownPtoId);
       const res = await agent
         .put(`/pto/${ownPtoId}`)
         .send({ startDate: '2026-05-13', endDate: '2026-05-13', dayPart: 'all_day', note: '' });
@@ -363,11 +426,12 @@ describe('PTO edit / delete / detail / audit', () => {
       expect(await prisma.pTORequest.findUniqueOrThrow({ where: { id: ownPtoId } })).toEqual(
         before,
       );
-      expect(await prisma.auditLog.count({ where: { entityId: ownPtoId } })).toBe(0);
+      await expectOnlyCreateAudit(ownPtoId, auditBefore);
     });
 
     it('returns 401 when not authenticated', async () => {
       const before = await prisma.pTORequest.findUniqueOrThrow({ where: { id: ownPtoId } });
+      const auditBefore = await auditRowsFor(ownPtoId);
       const res = await request(app)
         .put(`/pto/${ownPtoId}`)
         .send({ startDate: '2026-05-12', endDate: '2026-05-12', dayPart: 'morning', note: '' });
@@ -375,7 +439,7 @@ describe('PTO edit / delete / detail / audit', () => {
       expect(await prisma.pTORequest.findUniqueOrThrow({ where: { id: ownPtoId } })).toEqual(
         before,
       );
-      expect(await prisma.auditLog.count({ where: { entityId: ownPtoId } })).toBe(0);
+      await expectOnlyCreateAudit(ownPtoId, auditBefore);
     });
   });
 
@@ -393,11 +457,17 @@ describe('PTO edit / delete / detail / audit', () => {
       expect(res.status).toBe(204);
       const stillThere = await prisma.pTORequest.findUnique({ where: { id: ownPtoId } });
       expect(stillThere).toBeNull();
-      const logs = await prisma.auditLog.findMany({ where: { entityId: ownPtoId } });
-      expect(logs).toHaveLength(1);
-      expect(logs[0]).toMatchObject({
+      const logs = await auditRowsFor(ownPtoId);
+      expect(logs).toHaveLength(2);
+      const deletions = logs.filter((row) => row.action === 'delete_pto');
+      expect(deletions).toHaveLength(1);
+      expect(deletions[0]).toMatchObject({
         actorUserId: SEED.dev1.id,
         action: 'delete_pto',
+        entityType: 'pto_request',
+        credentialType: 'session',
+        sourceTokenId: null,
+        targetOwnerId: SEED.dev1.id,
       });
     });
 
@@ -406,8 +476,12 @@ describe('PTO edit / delete / detail / audit', () => {
       await login(agent, SEED.lead.email, SEED.lead.password);
       const res = await agent.delete(`/pto/${ownPtoId}`);
       expect(res.status).toBe(204);
-      const logs = await prisma.auditLog.findMany({ where: { entityId: ownPtoId } });
-      expect(logs[0]?.actorUserId).toBe(SEED.lead.id);
+      const logs = await auditRowsFor(ownPtoId);
+      expect(logs).toHaveLength(2);
+      const deletions = logs.filter((row) => row.action === 'delete_pto');
+      expect(deletions).toHaveLength(1);
+      expect(deletions[0]?.actorUserId).toBe(SEED.lead.id);
+      expect(deletions[0]?.targetOwnerId).toBe(SEED.dev1.id);
     });
 
     it('returns 403 for a member deleting another user PTO', async () => {

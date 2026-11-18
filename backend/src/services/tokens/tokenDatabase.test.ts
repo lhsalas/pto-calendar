@@ -155,6 +155,7 @@ describe('private native token database', () => {
     expect(poolConstructor).toHaveBeenCalledWith({ connectionString: url });
     expect(db.tables.users).toBe('"odd""schema"."users"');
     expect(db.tables.tokens).toBe('"odd""schema"."personal_access_tokens"');
+    expect(db.tables.audit).toBe('"odd""schema"."audit_logs"');
     expect(f.pool.connect).not.toHaveBeenCalled();
     await db.close();
   });
@@ -164,6 +165,7 @@ describe('private native token database', () => {
     poolConstructor.mockReturnValueOnce(f.pool);
     const db = createTokenDatabase('postgresql://pto@localhost/db');
     expect(db.tables.users).toBe('"public"."users"');
+    expect(db.tables.audit).toBe('"public"."audit_logs"');
     await db.close();
     poolConstructor.mockImplementationOnce(() => {
       throw new Error('private connection URL');

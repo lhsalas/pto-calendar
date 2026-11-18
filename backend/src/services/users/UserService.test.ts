@@ -26,9 +26,11 @@ vi.mock('../../lib/prisma.js', () => {
     updateMany: vi.fn(),
     count: vi.fn(),
   };
+  const auditLog = { create: vi.fn() };
   return {
     prisma: {
       user,
+      auditLog,
       $transaction: vi.fn(),
     },
   };
@@ -46,6 +48,13 @@ const mockCount = prisma.user.count as unknown as ReturnType<typeof vi.fn>;
 const mockTransaction = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
 
 const SEED_EMAILS = ['lead@example.com', 'dev1@example.com', 'dev2@example.com'];
+
+const SETUP_CONTEXT = { requestId: 'req-setup-1' };
+const SESSION_ACTOR = {
+  id: 'lead-user',
+  credential: { type: 'session' as const },
+  requestId: 'req-reset-1',
+};
 
 beforeEach(() => {
   process.env.SESSION_SECRET = 'aB1!cD2@eF3#gH4$iJ5%kL6&mN7*oP8+';
@@ -224,7 +233,7 @@ describe('setupAccount', () => {
   it('rejects a token without an expiry without claiming it', async () => {
     mockFindFirst.mockResolvedValueOnce({ id: 'u1', setupTokenExpiresAt: null });
     await expect(
-      setupAccount({ token: 'a'.repeat(64), password: 'password123' }),
+      setupAccount({ token: 'a'.repeat(64), password: 'password123' }, SETUP_CONTEXT),
     ).rejects.toMatchObject({ status: 401, code: 'UNAUTHENTICATED' });
     expect(mockUpdateMany).not.toHaveBeenCalled();
   });
@@ -236,7 +245,7 @@ describe('setupAccount', () => {
     });
     mockUpdateMany.mockResolvedValueOnce({ count: 0 });
     await expect(
-      setupAccount({ token: 'a'.repeat(64), password: 'password123' }),
+      setupAccount({ token: 'a'.repeat(64), password: 'password123' }, SETUP_CONTEXT),
     ).rejects.toMatchObject({ status: 401, code: 'UNAUTHENTICATED' });
     expect(mockFindUnique).not.toHaveBeenCalled();
   });
@@ -249,7 +258,7 @@ describe('setupAccount', () => {
     mockUpdateMany.mockResolvedValueOnce({ count: 1 });
     mockFindUnique.mockResolvedValueOnce(null);
     await expect(
-      setupAccount({ token: 'a'.repeat(64), password: 'password123' }),
+      setupAccount({ token: 'a'.repeat(64), password: 'password123' }, SETUP_CONTEXT),
     ).rejects.toMatchObject({ status: 401, code: 'UNAUTHENTICATED' });
   });
 
@@ -274,7 +283,10 @@ describe('setupAccount', () => {
     mockFindUnique.mockImplementationOnce(() =>
       Promise.resolve({ id: 'u1', ...updatedData, sessionVersion: 1 }),
     );
-    const result = await setupAccount({ token: token.plaintext, password: 'correct-horse' });
+    const result = await setupAccount(
+      { token: token.plaintext, password: 'correct-horse' },
+      SETUP_CONTEXT,
+    );
     expect(result.user.id).toBe('u1');
     expect(result.user.sessionVersion).toBe(1);
     expect(mockUpdateMany).toHaveBeenCalledWith(
@@ -310,13 +322,13 @@ describe('setupAccount', () => {
     });
     mockUpdateMany.mockResolvedValueOnce({ count: 1 });
     mockFindUnique.mockResolvedValueOnce({ id: 'u1', sessionVersion: 1 });
-    await setupAccount({ token: token.plaintext, password: 'first-password' });
+    await setupAccount({ token: token.plaintext, password: 'first-password' }, SETUP_CONTEXT);
     // second redemption of the same token — findFirst returns null because
     // the token columns are now cleared.
     mockFindFirst.mockResolvedValueOnce(null);
     let caught: unknown;
     try {
-      await setupAccount({ token: token.plaintext, password: 'second-password' });
+      await setupAccount({ token: token.plaintext, password: 'second-password' }, SETUP_CONTEXT);
     } catch (e) {
       caught = e;
     }
@@ -330,7 +342,7 @@ describe('setupAccount', () => {
     mockFindFirst.mockResolvedValueOnce(null);
     let caught: unknown;
     try {
-      await setupAccount({ token: 'a'.repeat(64), password: 'whatever123' });
+      await setupAccount({ token: 'a'.repeat(64), password: 'whatever123' }, SETUP_CONTEXT);
     } catch (e) {
       caught = e;
     }
@@ -357,7 +369,7 @@ describe('setupAccount', () => {
     mockUpdateMany.mockResolvedValueOnce({ count: 1 });
     let caught: unknown;
     try {
-      await setupAccount({ token: token.plaintext, password: 'whatever123' });
+      await setupAccount({ token: token.plaintext, password: 'whatever123' }, SETUP_CONTEXT);
     } catch (e) {
       caught = e;
     }
@@ -384,7 +396,7 @@ describe('resetUserPassword', () => {
   it('clears the password and issues a fresh token', async () => {
     mockFindUnique.mockResolvedValueOnce({ id: 'u1' });
     mockUpdate.mockImplementationOnce(({ data }) => Promise.resolve({ id: 'u1', ...data }));
-    const result = await resetUserPassword('u1');
+    const result = await resetUserPassword('u1', SESSION_ACTOR);
     expect(result.setupToken.plaintext).toMatch(/^[a-f0-9]{64}$/);
     expect(mockUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -402,7 +414,7 @@ describe('resetUserPassword', () => {
     mockFindUnique.mockResolvedValueOnce(null);
     let caught: unknown;
     try {
-      await resetUserPassword('00000000-0000-0000-0000-000000000000');
+      await resetUserPassword('00000000-0000-0000-0000-000000000000', SESSION_ACTOR);
     } catch (e) {
       caught = e;
     }
@@ -410,6 +422,157 @@ describe('resetUserPassword', () => {
     const err = caught as HttpError;
     expect(err.status).toBe(404);
     expect(err.code).toBe('NOT_FOUND');
+  });
+});
+
+describe('credential-version audit attribution (#252)', () => {
+  const mockAuditCreate = prisma.auditLog.create as unknown as ReturnType<typeof vi.fn>;
+
+  function pendingClaim(overrides: Record<string, unknown> = {}) {
+    const token = generateSetupToken();
+    mockFindFirst.mockResolvedValueOnce({
+      id: 'u1',
+      email: 'newcomer@example.com',
+      name: 'Newcomer',
+      role: 'member',
+      colorCode: '#3B82F6',
+      passwordHash: null,
+      setupTokenHash: token.hash,
+      setupTokenExpiresAt: token.expiresAt,
+      sessionVersion: 0,
+      ...overrides,
+    });
+    return token;
+  }
+
+  it('records a successful claim in the same transaction, attributed to the claimed user and the setup credential', async () => {
+    const token = pendingClaim();
+    mockUpdateMany.mockResolvedValueOnce({ count: 1 });
+    mockFindUnique.mockResolvedValueOnce({
+      id: 'u1',
+      email: 'newcomer@example.com',
+      sessionVersion: 1,
+    });
+
+    await setupAccount(
+      { token: token.plaintext, password: 'correct-horse' },
+      { requestId: 'req-setup-9' },
+    );
+
+    expect(mockTransaction).toHaveBeenCalledOnce();
+    expect(mockAuditCreate).toHaveBeenCalledExactlyOnceWith({
+      data: {
+        actorUserId: 'u1',
+        action: 'complete_account_setup',
+        entityType: 'user',
+        entityId: 'u1',
+        details: { sessionVersion: 1 },
+        credentialType: 'setup_token',
+        sourceTokenId: null,
+        targetOwnerId: 'u1',
+        requestId: 'req-setup-9',
+      },
+    });
+  });
+
+  it('drops an unsafe setup correlation ID to NULL instead of persisting it', async () => {
+    const token = pendingClaim();
+    mockUpdateMany.mockResolvedValueOnce({ count: 1 });
+    mockFindUnique.mockResolvedValueOnce({ id: 'u1', sessionVersion: 1 });
+
+    await setupAccount(
+      { token: token.plaintext, password: 'correct-horse' },
+      { requestId: 'pto_pat_leak' },
+    );
+
+    expect(mockAuditCreate.mock.calls[0]![0].data).toMatchObject({ requestId: null });
+  });
+
+  it('rolls back the claim and records nothing when the claimed row cannot be read back', async () => {
+    const token = pendingClaim();
+    mockUpdateMany.mockResolvedValueOnce({ count: 1 });
+    mockFindUnique.mockResolvedValueOnce(null);
+
+    await expect(
+      setupAccount({ token: token.plaintext, password: 'correct-horse' }, SETUP_CONTEXT),
+    ).rejects.toMatchObject({ status: 401, code: 'UNAUTHENTICATED' });
+    expect(mockAuditCreate).not.toHaveBeenCalled();
+  });
+
+  it('propagates an audit failure so the claim is never committed without its audit row', async () => {
+    const token = pendingClaim();
+    mockUpdateMany.mockResolvedValueOnce({ count: 1 });
+    mockFindUnique.mockResolvedValueOnce({ id: 'u1', sessionVersion: 1 });
+    mockAuditCreate.mockRejectedValueOnce(new Error('audit insert failed'));
+
+    await expect(
+      setupAccount({ token: token.plaintext, password: 'correct-horse' }, SETUP_CONTEXT),
+    ).rejects.toThrow('audit insert failed');
+  });
+
+  it('records no success for an expired token, which is only cleared', async () => {
+    const token = pendingClaim({ setupTokenExpiresAt: new Date(Date.now() - 1000) });
+    mockUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(
+      setupAccount({ token: token.plaintext, password: 'correct-horse' }, SETUP_CONTEXT),
+    ).rejects.toMatchObject({ status: 401, code: 'UNAUTHENTICATED' });
+    expect(mockAuditCreate).not.toHaveBeenCalled();
+  });
+
+  it('records no success for a claim lost to a concurrent redemption', async () => {
+    const token = pendingClaim();
+    mockUpdateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(
+      setupAccount({ token: token.plaintext, password: 'correct-horse' }, SETUP_CONTEXT),
+    ).rejects.toMatchObject({ status: 401, code: 'UNAUTHENTICATED' });
+    expect(mockAuditCreate).not.toHaveBeenCalled();
+  });
+
+  it('records the reset in the same transaction with the trusted actor, safe summary and new version', async () => {
+    mockFindUnique.mockResolvedValueOnce({ id: 'u1', email: 'target@example.com' });
+    mockUpdate.mockResolvedValueOnce({ id: 'u1', email: 'target@example.com', sessionVersion: 3 });
+
+    const result = await resetUserPassword('u1', SESSION_ACTOR);
+
+    expect(result.setupToken.plaintext).toMatch(/^[a-f0-9]{64}$/);
+    expect(mockTransaction).toHaveBeenCalledOnce();
+    expect(mockAuditCreate).toHaveBeenCalledExactlyOnceWith({
+      data: {
+        actorUserId: 'lead-user',
+        action: 'reset_user_password',
+        entityType: 'user',
+        entityId: 'u1',
+        details: { email: 'target@example.com', sessionVersion: 3 },
+        credentialType: 'session',
+        sourceTokenId: null,
+        targetOwnerId: 'u1',
+        requestId: 'req-reset-1',
+      },
+    });
+    expect(JSON.stringify(mockAuditCreate.mock.calls)).not.toContain(result.setupToken.plaintext);
+    expect(JSON.stringify(mockAuditCreate.mock.calls)).not.toContain(result.setupToken.hash);
+  });
+
+  it('neither resets nor audits a missing target', async () => {
+    mockFindUnique.mockResolvedValueOnce(null);
+
+    await expect(resetUserPassword('missing', SESSION_ACTOR)).rejects.toMatchObject({
+      status: 404,
+      code: 'NOT_FOUND',
+    });
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockAuditCreate).not.toHaveBeenCalled();
+  });
+
+  it('propagates a reset audit failure so the credential change cannot commit alone', async () => {
+    mockFindUnique.mockResolvedValueOnce({ id: 'u1', email: 'target@example.com' });
+    mockUpdate.mockResolvedValueOnce({ id: 'u1', sessionVersion: 3 });
+    mockAuditCreate.mockRejectedValueOnce(new Error('audit insert failed'));
+
+    await expect(resetUserPassword('u1', SESSION_ACTOR)).rejects.toThrow('audit insert failed');
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
   });
 });
 

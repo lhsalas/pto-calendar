@@ -2,7 +2,7 @@ import express from 'express';
 import type { Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import { pinoHttp, type Options as PinoHttpOptions } from 'pino-http';
+import { pinoHttp } from 'pino-http';
 import { createAuthRouter } from './routes/auth.js';
 import { ptoRouter } from './routes/pto.js';
 import { healthRouter } from './routes/health.js';
@@ -12,9 +12,9 @@ import { cookieSessionMiddleware } from './middleware/cookieSession.js';
 import { csrfOriginMiddleware } from './middleware/csrf.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { logger } from './lib/logger.js';
+import { createPinoHttpOptions } from './lib/logSanitizers.js';
 import { createGlobalLimiter, createLoginLimiter } from './lib/rateLimit.js';
 import { loadEnv } from './config/env.js';
-import { safeRequestId, safeReqSerializer, safeResSerializer } from './lib/logSanitizers.js';
 import { createTokenRouter } from './routes/tokens.js';
 import {
   tokenManagementBoundary,
@@ -53,18 +53,7 @@ export function createApp(): ManagedApp {
   );
   const jsonParser = express.json({ limit: '100kb' });
   app.use(selectiveJsonParser(jsonParser, false));
-  const pinoHttpOptions: PinoHttpOptions = {
-    logger,
-    genReqId: safeRequestId,
-    serializers: {
-      req: safeReqSerializer,
-      res: safeResSerializer,
-    },
-    autoLogging: {
-      ignore: (req) => req.url === '/health' || req.url === '/ready',
-    },
-  };
-  app.use(pinoHttp(pinoHttpOptions));
+  app.use(pinoHttp(createPinoHttpOptions(logger)));
   app.use(cookieSessionMiddleware());
   app.use(createGlobalLimiter());
   app.use(createPatAuth(tokenRuntime));
@@ -94,4 +83,10 @@ export function createApp(): ManagedApp {
   return app;
 }
 
-export { logger, safeRequestId, safeReqSerializer, safeResSerializer };
+export { logger } from './lib/logger.js';
+export {
+  createPinoHttpOptions,
+  safeRequestId,
+  safeReqSerializer,
+  safeResSerializer,
+} from './lib/logSanitizers.js';

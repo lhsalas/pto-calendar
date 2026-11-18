@@ -51,8 +51,31 @@ function fixture(
   vi.mocked(prisma.user.findUnique).mockImplementation(
     () => Promise.resolve({ ...owner }) as never,
   );
+  const listOwned = (values: unknown[]) =>
+    result(rows.filter((r) => r.ownerId === values[0]).map(safe));
+  const selectOwned = (values: unknown[]) =>
+    result(
+      rows.filter((r) => r.id === values[0] && r.ownerId === values[1]).map((r) => ({ id: r.id })),
+    );
+  /** The guarded revocation update: only live rows of the owner change. */
+  const revokeMatching = (sql: string, values: unknown[]) => {
+    const candidates = rows.filter(
+      (r) =>
+        !r.revokedAt &&
+        (sql.includes('WHERE id =')
+          ? r.id === values[0] && r.ownerId === values[1]
+          : r.ownerId === values[0]),
+    );
+    candidates.forEach((r) => {
+      r.revokedAt = new Date();
+    });
+    return sql.includes('RETURNING')
+      ? result(candidates.map((r) => ({ id: r.id })))
+      : result([], candidates.length);
+  };
   const txQuery = vi.fn(async (sql: string, values: unknown[] = []) => {
     if (sql.includes('FOR UPDATE')) return result([{ ...owner }]);
+    if (sql.includes('audit_logs')) return result([], 1);
     if (sql.includes('COUNT(*)'))
       return result([
         {
@@ -65,6 +88,8 @@ function fixture(
           ).length,
         },
       ]);
+    if (sql.includes('SET revoked_at')) return revokeMatching(sql, values);
+    if (sql.startsWith('SELECT id')) return selectOwned(values);
     const row: Row = {
       id: String(values[0]),
       ownerId: String(values[1]),
@@ -82,28 +107,16 @@ function fixture(
     return result([safe(row)]);
   });
   const query = vi.fn(async (sql: string, values: unknown[] = []) => {
-    if (sql.includes('ORDER BY'))
-      return result(rows.filter((r) => r.ownerId === values[0]).map(safe));
-    if (sql.startsWith('SELECT id'))
-      return result(
-        rows
-          .filter((r) => r.id === values[0] && r.ownerId === values[1])
-          .map((r) => ({ id: r.id })),
-      );
-    const candidates = rows.filter(
-      (r) =>
-        !r.revokedAt &&
-        (sql.includes('WHERE id =')
-          ? r.id === values[0] && r.ownerId === values[1]
-          : r.ownerId === values[0]),
-    );
-    candidates.forEach((r) => {
-      r.revokedAt = new Date();
-    });
-    return result([], candidates.length);
+    if (sql.includes('ORDER BY')) return listOwned(values);
+    if (sql.startsWith('SELECT id')) return selectOwned(values);
+    return revokeMatching(sql, values);
   });
   const db = {
-    tables: { users: '"public"."users"', tokens: '"public"."personal_access_tokens"' },
+    tables: {
+      users: '"public"."users"',
+      tokens: '"public"."personal_access_tokens"',
+      audit: '"public"."audit_logs"',
+    },
     query,
     transaction: vi.fn(async (operation: (tx: { query: typeof txQuery }) => unknown) =>
       operation({ query: txQuery }),

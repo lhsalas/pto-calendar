@@ -12,7 +12,7 @@ export interface TokenConnection {
 }
 
 export interface TokenDatabase extends TokenConnection {
-  readonly tables: { readonly users: string; readonly tokens: string };
+  readonly tables: { readonly users: string; readonly tokens: string; readonly audit: string };
   transaction<T>(operation: (client: TokenConnection) => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
@@ -25,6 +25,7 @@ function tableNames(schema: string): TokenDatabase['tables'] {
   return Object.freeze({
     users: `${namespace}."users"`,
     tokens: `${namespace}."personal_access_tokens"`,
+    audit: `${namespace}."audit_logs"`,
   });
 }
 

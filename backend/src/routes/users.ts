@@ -9,7 +9,8 @@ import {
   getUserById,
   resetUserPassword,
 } from '../services/users/UserService.js';
-import { record } from '../services/audit/AuditLogService.js';
+import { auditEntryFor, record } from '../services/audit/AuditLogService.js';
+import { attributedActorFromAuth } from '../services/audit/auditContext.js';
 import { prisma } from '../lib/prisma.js';
 
 const PUBLIC_USER_SELECT = {
@@ -56,13 +57,15 @@ export function createUsersRouter(): Router {
         role: 'member',
         setupToken,
       });
-      await record({
-        actorUserId: actor.id,
-        action: 'create_user',
-        entityType: 'user',
-        entityId: created.id,
-        details: { email: created.email, name: created.name },
-      });
+      await record(
+        auditEntryFor(attributedActorFromAuth(req.auth!), {
+          action: 'create_user',
+          entityType: 'user',
+          entityId: created.id,
+          targetOwnerId: created.id,
+          details: { email: created.email, name: created.name },
+        }),
+      );
       res.status(201).json({
         user: {
           id: created.id,
@@ -107,14 +110,8 @@ export function createUsersRouter(): Router {
           );
         }
       }
-      const { setupToken } = await resetUserPassword(id);
-      await record({
-        actorUserId: actor.id,
-        action: 'reset_user_password',
-        entityType: 'user',
-        entityId: id,
-        details: { email: target.email },
-      });
+      // The service writes the credential-version audit row in the same transaction.
+      const { setupToken } = await resetUserPassword(id, attributedActorFromAuth(req.auth!));
       res.json({
         setupToken: setupToken.plaintext,
         expiresAt: setupToken.expiresAt.toISOString(),
