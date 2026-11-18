@@ -13,7 +13,12 @@ import { csrfOriginMiddleware } from './middleware/csrf.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { logger } from './lib/logger.js';
 import { createPinoHttpOptions } from './lib/logSanitizers.js';
-import { createGlobalLimiter, createLoginLimiter } from './lib/rateLimit.js';
+import {
+  acquireRateLimitResources,
+  closeRateLimitResources,
+  createGlobalLimiter,
+  createLoginLimiter,
+} from './lib/rateLimit.js';
 import { loadEnv } from './config/env.js';
 import { createTokenRouter } from './routes/tokens.js';
 import {
@@ -35,7 +40,23 @@ export function createApp(): ManagedApp {
   const env = loadEnv();
   const app = express() as ManagedApp;
   const tokenRuntime = createTokenRuntime(env.DATABASE_URL);
-  app.closeResources = () => tokenRuntime.close();
+  acquireRateLimitResources();
+  let closing: Promise<void> | undefined;
+  app.closeResources = () => {
+    // The release is idempotent per application: closing twice must not give
+    // back a connection that another live application still owns.
+    closing ??= (async () => {
+      const [tokenClose] = await Promise.allSettled([
+        tokenRuntime.close(),
+        closeRateLimitResources(),
+      ]);
+      // A token pool that cannot be closed still fails the shutdown, exactly
+      // as before. The limiter connection is closed unconditionally afterwards,
+      // so a store outage cannot leave a reconnect loop behind.
+      if (tokenClose.status === 'rejected') throw tokenClose.reason;
+    })();
+    return closing;
+  };
 
   app.disable('x-powered-by');
   if (env.TRUST_PROXY_HOPS > 0) {
@@ -64,7 +85,7 @@ export function createApp(): ManagedApp {
   app.use(healthRouter);
 
   const loginLimiter = createLoginLimiter();
-  app.use('/auth/tokens', createTokenRouter(tokenRuntime, loginLimiter));
+  app.use('/auth/tokens', createTokenRouter(tokenRuntime));
   app.use('/auth', createAuthRouter(loginLimiter));
   app.use('/pto', ptoRouter);
   app.use('/users', createUsersRouter());

@@ -21,12 +21,23 @@ export default defineConfig({
         'src/types/**',
         'src/lib/prisma.ts',
         'src/lib/logger.ts',
-        'src/lib/rateLimit.ts',
         'src/routes/users.ts',
         'src/routes/health.ts',
         'src/routes/holidays.ts',
       ],
       thresholds: {
+        'src/lib/rateLimit.ts': {
+          lines: 100,
+          statements: 100,
+          branches: 100,
+          functions: 100,
+        },
+        'src/middleware/agentQuota.ts': {
+          lines: 100,
+          statements: 100,
+          branches: 100,
+          functions: 100,
+        },
         'src/routes/auth.ts': {
           lines: 100,
           statements: 100,

@@ -8,6 +8,7 @@ import { assertPatRoute, classifyPatRoute } from '../services/authorization/patP
 import type { AuthContext } from '../services/auth/authContext.js';
 import { HttpError } from './errorHandler.js';
 import { tokenManagementErrorHandler } from './tokenManagement.js';
+import { chargeAuthenticatedTraffic, chargeBearerFailure, sendRateLimited } from './agentQuota.js';
 
 function authorizationCount(req: Request): number {
   return req.rawHeaders.filter(
@@ -67,6 +68,14 @@ export function createPatAuth(runtime: TokenRuntime): RequestHandler {
     const route = classifyPatRoute(req.method, req.path);
     // Ineligible paths cannot use PATs to authenticate, including auth/tokens.
     if (!route) unauthenticated();
+    // Bound failed credential verification before the expensive database
+    // lookup. The charge is keyed by the client address, never by the
+    // unverified header, and a verified secret refunds it below.
+    const failure = await chargeBearerFailure(req);
+    if (!failure.allowed) {
+      sendRateLimited(req, res, failure, 'Too many failed credential attempts. Try again later.');
+      return;
+    }
     let verified;
     try {
       verified = await verifyToken(runtime.get(), match[1]!);
@@ -75,6 +84,9 @@ export function createPatAuth(runtime: TokenRuntime): RequestHandler {
       unauthenticated();
     }
     if (!verified) unauthenticated();
+    // A verified secret is not a failed attempt, whatever the route decides
+    // next, so the pre-verification charge is compensated here.
+    await failure.refund();
     const auth: Extract<AuthContext, { method: 'pat' }> = {
       method: 'pat',
       actor: { id: verified.ownerId, role: verified.role },
@@ -83,6 +95,12 @@ export function createPatAuth(runtime: TokenRuntime): RequestHandler {
       scopes: verified.scopes,
       expiresAt: verified.expiresAt,
     };
+    // Only a verified identity is charged, and only once per request.
+    const traffic = await chargeAuthenticatedTraffic(auth);
+    if (traffic) {
+      sendRateLimited(req, res, traffic, 'Too many requests. Try again later.');
+      return;
+    }
     assertPatRoute(auth, route, env.PAT_WRITES_ENABLED);
     req.auth = auth;
     next();

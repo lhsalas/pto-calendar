@@ -1,13 +1,15 @@
 import type { Request, Response } from 'express';
 import request from 'supertest';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetEnvForTests } from '../config/env.js';
 import { patFixture } from '../../tests/unit/helpers/patFixture.js';
+import { __resetAgentQuotaForTests } from './agentQuota.js';
 import { createPatAuth, hasAuthorization } from './patAuth.js';
 
 afterEach(() => {
   vi.unstubAllEnvs();
   resetEnvForTests();
+  __resetAgentQuotaForTests();
 });
 function fixture(options: Parameters<typeof patFixture>[0] = {}) {
   const f = patFixture(options);
@@ -247,5 +249,65 @@ describe('strict bearer selection and database-backed verification', () => {
         rawHeaders: ['Host', 'test', 'AUTHORIZATION', ''],
       } as Request),
     ).toBe(true);
+  });
+});
+
+describe('bounded bearer verification and verified traffic', () => {
+  beforeEach(() => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+  });
+
+  afterEach(() => {
+    vi.mocked(Date.now).mockRestore();
+  });
+
+  it('refuses a repeated failed verification before the database is consulted', async () => {
+    vi.stubEnv('RATE_LIMIT_BEARER_FAILURE_MAX', '1');
+    const f = fixture();
+    f.token.secretDigest = '0'.repeat(64);
+    await request(f.app)
+      .get('/pto')
+      .set('Authorization', `Bearer ${f.material.rawToken}`)
+      .expect(401);
+    const consulted = f.query.mock.calls.length;
+    expect(consulted).toBeGreaterThan(0);
+    const limited = await request(f.app)
+      .get('/pto')
+      .set('Authorization', `Bearer ${f.material.rawToken}`)
+      .expect(429);
+    expect(limited.body.error.code).toBe('RATE_LIMITED');
+    expect(limited.headers['retry-after']).toBeDefined();
+    expect(limited.headers['x-request-id']).toBeDefined();
+    // The rejected attempt never reached the credential lookup.
+    expect(f.query.mock.calls.length).toBe(consulted);
+  });
+
+  it('gives the budget back after a verified secret', async () => {
+    vi.stubEnv('RATE_LIMIT_BEARER_FAILURE_MAX', '1');
+    const f = fixture();
+    for (let index = 0; index < 3; index += 1)
+      await request(f.app)
+        .get('/pto')
+        .set('Authorization', `Bearer ${f.material.rawToken}`)
+        .expect(200);
+  });
+
+  it('bounds the verified traffic of one owner and keeps the standard rejection', async () => {
+    vi.stubEnv('RATE_LIMIT_USER_QUOTA_MAX', '1');
+    const f = fixture();
+    await request(f.app)
+      .get('/pto')
+      .set('Authorization', `Bearer ${f.material.rawToken}`)
+      .expect(200);
+    const limited = await request(f.app)
+      .get('/pto')
+      .set('Authorization', `Bearer ${f.material.rawToken}`)
+      .expect(429);
+    expect(limited.body).toEqual({
+      error: { code: 'RATE_LIMITED', message: 'Too many requests. Try again later.' },
+    });
+    expect(limited.headers['retry-after']).toBeDefined();
+    expect(limited.headers['ratelimit']).toContain('limit=1');
+    expect(limited.headers['x-request-id']).toBeDefined();
   });
 });

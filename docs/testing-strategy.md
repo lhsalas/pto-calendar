@@ -204,6 +204,59 @@ integration suite; written tests alone do not certify a database-backed result.
   creates and clears audit rows in FK-safe order (audit rows before users).
   Written tests alone do not certify a database-backed result.
 
+#253 adds three layers of quota evidence.
+
+- **Unit** — `src/middleware/agentQuota.test.ts` pins the bounded policy and
+  its defaults, the namespaced keys of every counter, the compensation of a
+  verified attempt, the fail-closed behavior of an unavailable or uninitialised
+  shared store, the rejection envelope with its `Retry-After`, draft-7 headers
+  and correlation id, and the process-local counter's window and floor.
+  `src/lib/rateLimit.test.ts` pins the shared connection lifecycle (one
+  connection per store URL, released with the last application, a connection
+  that cannot be closed cleanly) next to the existing address-key behavior.
+  `src/middleware/patAuth.test.ts` proves that a repeated failed verification
+  is refused **before** the credential lookup and that a verified secret is
+  given its budget back; `src/middleware/requireAuth.test.ts` proves the
+  verified-session traffic budget; `src/routes/tokens.test.ts` proves the
+  issuance and issuance-password budgets, including that a rejected issuance
+  writes neither a token row nor an audit row and that the password budget
+  covers every verification rather than only the failed ones.
+  `tests/unit/applicationCleanup.test.ts` pins the per-application cleanup:
+  a repeated release must not take a connection another live application
+  still owns. `tests/unit/rateLimitComposeConfig.test.ts` pins that every
+  limiter value reaches the container as an explicit bounded operator
+  override whose default equals the schema default.
+- **Integration (disposable PostgreSQL)** — `tests/integration/agentQuota.test.ts`
+  asserts the real HTTP behavior: two verified users behind one address keep
+  independent budgets, two verified tokens of one owner keep independent token
+  budgets, an invalid bearer flood stops before the credential lookup (proved
+  through the untouched usage timestamp of a valid token), a verified secret
+  never consumes the failure budget, issuance password failures are bounded
+  without locking the browser login, the password budget bounds the bcrypt
+  comparisons themselves (proved with a spy over the real comparison, so no
+  further comparison runs once the budget is used, including after a request
+  that was denied for its scope), token creation is bounded separately from
+  ordinary reads, one owner budget stays apart from another owner and from
+  ordinary reads, a budget restarts when its window elapsed, a rejection never
+  exposes a credential or a store address and reports the remaining delay of
+  the rejecting window, and an unavailable shared store fails closed instead of
+  running unmetered.
+- **Real-Redis certification** — `tests/integration/rate-limit-real-redis.test.ts`
+  runs against an explicit disposable fixture (`RATE_LIMIT_TEST_REDIS_URL`).
+  The file fails with a clear error when the fixture is missing; it never falls
+  back to an ambient store, never uses a process-local substitute and never
+  skips. It proves that the counter lives in the store (an independent
+  connection reads and extends it), that two running application instances
+  share one budget, that an application restart continues the same counter,
+  that concurrent attempts are counted exactly once, and that the counter
+  expires with its window. It also pins the compensation semantics against a
+  real store: a compensation that is held across a window expiry leaves the
+  new window's count and expiry untouched, the same attempt is compensated
+  only once, and a compensation whose window is gone never creates a counter.
+  Cleanup removes only the fixture's own keys. The CI backend-integration job
+  starts an isolated Redis service and exports that fixture so the
+  certification actually runs.
+
 `scopedPatAuth.test.ts` adds the three-role × own/other × ten-scope-profile
 matrix on list/detail/POST/legacy PUT/DELETE, including impossible member/team
 credentials failing closed. Notes are checked on every note-bearing response.
@@ -272,6 +325,11 @@ regressions, #281 readiness tests, and all coverage thresholds remain unchanged.
 - Apply Prisma migrations on test setup.
 - Reset between tests with `TRUNCATE ... CASCADE`.
 - Use Supertest to hit Express routes with a real session cookie.
+- The shared rate-limit certification (#253) needs a disposable Redis as well:
+  the integration suite reads the explicit fixture `RATE_LIMIT_TEST_REDIS_URL`
+  and fails with a clear error when it is missing. It never falls back to an
+  ambient store and never skips, so a local integration run must point that
+  variable at a disposable Redis (CI starts an isolated service for it).
 - Cover at minimum:
   - Authenticated member creates own PTO
   - Member edits/deletes own PTO
@@ -412,7 +470,7 @@ Jobs (run in order, with `needs:` dependencies):
 | 1 | `lint` | ubuntu-latest | — | install, eslint, prettier check |
 | 2 | `typecheck` | ubuntu-latest | — | install, `tsc --noEmit` (backend + frontend) |
 | 3 | `test-backend-unit` | ubuntu-latest | — | backend unit suite with coverage and separate unit artifact |
-| 4 | `test-backend-integration` | ubuntu-latest + postgres service | — | vitest run backend integration suite, coverage |
+| 4 | `test-backend-integration` | ubuntu-latest + postgres + redis services | — | vitest run backend integration suite, coverage |
 | 5 | `test-frontend` | ubuntu-latest | — | vitest run frontend, coverage |
 | 6 | `build` | ubuntu-latest | lint, typecheck | build backend + frontend |
 | 7 | `deployment-config` | ubuntu-latest | lint, typecheck | validate OCI Compose/Caddy headers, deployment scripts, workflow guards, retirement isolation, supply-chain pins, and the Node.js runtime baseline |

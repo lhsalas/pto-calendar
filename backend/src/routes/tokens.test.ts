@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import express, { type Request, type Response } from 'express';
 import request from 'supertest';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import { resetEnvForTests } from '../config/env.js';
@@ -12,7 +12,8 @@ import {
   tokenManagementBoundary,
   tokenManagementErrorHandler,
 } from '../middleware/tokenManagement.js';
-import { createGlobalLimiter, createLoginLimiter } from '../lib/rateLimit.js';
+import { createGlobalLimiter } from '../lib/rateLimit.js';
+import { __resetAgentQuotaForTests } from '../middleware/agentQuota.js';
 import type { TokenDatabase } from '../services/tokens/tokenDatabase.js';
 import type { TokenMetadata } from '../services/tokens/tokenService.js';
 import { createTokenRouter } from './tokens.js';
@@ -38,11 +39,16 @@ function fixture(
   role: 'member' | 'team_lead' | 'admin' = 'member',
   authMax = 100,
   globalMax = 10000,
+  passwordMax = 100,
+  issuanceMax = 100,
 ) {
   process.env.AUTH_RATE_LIMIT_MAX = String(authMax);
   process.env.RATE_LIMIT_MAX = String(globalMax);
+  process.env.RATE_LIMIT_TOKEN_PASSWORD_MAX = String(passwordMax);
+  process.env.RATE_LIMIT_TOKEN_ISSUANCE_MAX = String(issuanceMax);
   process.env.CORS_ORIGIN = 'http://localhost:5173';
   resetEnvForTests();
+  __resetAgentQuotaForTests();
   __resetAuthUserCacheForTests();
   const owner = { id: randomUUID(), role, passwordHash: HASH as string | null, sessionVersion: 0 };
   const session = { id: owner.id, role, sessionVersion: 0 };
@@ -133,7 +139,7 @@ function fixture(
   });
   app.use(csrfOriginMiddleware());
   app.use(createGlobalLimiter());
-  app.use('/auth/tokens', createTokenRouter(runtime, createLoginLimiter()));
+  app.use('/auth/tokens', createTokenRouter(runtime));
   app.use('/auth/tokens', tokenManagementErrorHandler);
   return {
     app,
@@ -156,6 +162,10 @@ function confidential(res: request.Response): void {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(prisma.user.findUnique).mockReset();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe('session-only token HTTP adapter with real domain/auth logic', () => {
@@ -241,25 +251,51 @@ describe('session-only token HTTP adapter with real domain/auth logic', () => {
       .expect(201);
   });
 
-  it('limits failed password attempts, excludes successful requests and does not lock out revocation', async () => {
-    const f = fixture('member', 2);
-    for (let i = 0; i < 3; i += 1)
-      await request(f.app)
-        .post('/auth/tokens')
-        .send({ name: `success-${i}`, password: PASSWORD })
-        .expect(201);
-    for (let i = 0; i < 2; i += 1)
-      await request(f.app)
-        .post('/auth/tokens')
-        .send({ name: 'Failure', password: 'wrong' })
-        .expect(401);
-    const limited = await request(f.app)
+  it('bounds every password verification attempt and does not lock out revocation', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    const f = fixture('member', 100, 10000, 3);
+    // The budget covers every verification, not only the failed ones: a
+    // verified password is not given back.
+    await request(f.app)
+      .post('/auth/tokens')
+      .send({ name: 'success-0', password: PASSWORD })
+      .expect(201);
+    await request(f.app)
+      .post('/auth/tokens')
+      .send({ name: 'success-1', password: PASSWORD })
+      .expect(201);
+    await request(f.app)
       .post('/auth/tokens')
       .send({ name: 'Failure', password: 'wrong' })
-      .expect(429);
+      .expect(401);
+    const limited = await request(f.app)
+      .post('/auth/tokens')
+      .send({ name: 'Failure', password: 'wrong' });
+    expect(limited.status).toBe(429);
     confidential(limited);
+    expect(limited.body.error.code).toBe('RATE_LIMITED');
     expect(limited.headers['retry-after']).toBeDefined();
     await request(f.app).post('/auth/tokens/revoke-all').expect(204);
+  });
+
+  it('bounds token issuance separately from the password budget and writes nothing for a rejected issuance', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    const f = fixture('member', 100, 10000, 100, 1);
+    await request(f.app)
+      .post('/auth/tokens')
+      .send({ name: 'First', password: PASSWORD })
+      .expect(201);
+    const limited = await request(f.app)
+      .post('/auth/tokens')
+      .send({ name: 'Second', password: PASSWORD })
+      .expect(429);
+    confidential(limited);
+    expect(limited.body.error.code).toBe('RATE_LIMITED');
+    expect(limited.headers['retry-after']).toBeDefined();
+    // The rejected issuance wrote no token row and no audit entry.
+    expect(f.rows).toHaveLength(1);
+    const audits = f.txQuery.mock.calls.filter(([sql]) => sql.includes('audit_logs'));
+    expect(audits).toHaveLength(1);
   });
 
   it('enforces ten active tokens with the safe cap-specific HTTP error', async () => {

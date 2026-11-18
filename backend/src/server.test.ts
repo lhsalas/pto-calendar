@@ -31,6 +31,23 @@ vi.mock('./lib/logger.js', () => {
   };
 });
 
+vi.mock('ioredis', () => ({
+  Redis: class {
+    status = 'ready';
+    async call(...args: string[]) {
+      const [command] = args;
+      if (command === 'SCRIPT') return args[2]!.includes('INCR') ? 'increment-sha' : 'get-sha';
+      if (command === 'EVALSHA') return [1, 60000];
+      if (command === 'DECR') return 0;
+      throw new Error(`Unexpected command ${command}`);
+    }
+    async quit() {
+      return 'OK';
+    }
+    disconnect() {}
+  },
+}));
+
 import { createApp } from './server.js';
 import { resetEnvForTests } from './config/env.js';
 import { createTokenMaterial } from './services/tokens/tokenDomain.js';

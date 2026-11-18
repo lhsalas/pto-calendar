@@ -126,6 +126,29 @@ namespaced production Redis counters, fail closed on store failure, and preserve
 probe exemptions. Document bounded tuning/NAT behavior; 429 includes correct
 `Retry-After` and `X-Request-Id`.
 
+**Settled by #253 (2026-11-18):** the address-based limiter stays the emergency
+high-water (default 100 requests per 15 min per address); the failed-login
+budget is unchanged (5 failed attempts per 15 min per address). The new budgets
+are bounded by the environment schema and default to: 20 failed bearer
+verifications per client address, charged before the credential lookup and
+refunded once the secret verifies; 600 authenticated requests per verified user
+and 300 per verified token per 60 s quota window; 20 token creations and 20
+issuance password verifications per verified owner. The attempt controls use
+their own bounded window (`RATE_LIMIT_ATTEMPT_WINDOW_MS`, default 15 min,
+bounded to 1 s .. 24 h) so the legacy global and failed-login budgets keep
+their behavior. The password budget is charged before the comparison and is
+**not** given back, so it bounds the expensive comparisons themselves. The
+issuance budgets never consume the browser login budget, an unverified
+`Authorization` header is never an identity, every count and compensation is
+atomic and bound to its own window, an unavailable store fails closed, and
+`/health` and `/ready` stay exempt. The counters live in the production
+Redis deployment under `pto:rate-limit:bearer-failure:`, `pto:rate-limit:quota-user:`,
+`pto:rate-limit:quota-token:`, `pto:rate-limit:token-issuance:` and
+`pto:rate-limit:token-password:`. The address high-water still binds first
+with the conservative defaults, so every limiter value is an explicit operator
+override in the deployment files; the operational tuning and alert thresholds
+are recorded in `docs/deploy.md` §8.1.
+
 ## 3. Shared REST and compatibility contract
 
 Entries below remain **proposed** except #250's session-only token management
@@ -363,6 +386,21 @@ stays internal. Its scope is the audit half of this section only (atomic,
 credential-attributed rows for PTO and credential-lifecycle changes, and
 credential-safe logging); the quota half remains #253. The dated earlier
 checkpoints are retained rather than rewritten as historical certification.
+
+**Quota checkpoint — 2026-11-18:** #252 was delivered by PR295 on master
+`f83003ac68e27d44b2c4ad4c53d6845fc1d17ac7`. #253 implements the quota half of
+the operational-controls section: the address-based limiter stays the emergency
+high-water, a failed bearer verification is charged **before** the credential
+lookup and refunded once the secret verifies, every authenticated request is
+charged once against the **verified** user and the verified token, and token
+creation and the issuance password check have separate per-owner budgets that
+never consume the browser login budget. The counters are namespaced shared
+Redis counters that fail closed; the operational probes stay exempt; the
+tuning table and the alert signals are recorded in `docs/deploy.md` §8.1 and
+the contract in `docs/technical-spec.md` §10.6. This is implementation scope
+only: it is not authorization to enable production bearer access, not a
+statement about the real-Redis certification of a production deployment, and
+not a claim that the client, pilot or rollout gates have passed.
 
 Rows give the safe serial default. Parallel development is restricted to the
 approved waves below after prerequisites merge; every row is one deliverable/PR.

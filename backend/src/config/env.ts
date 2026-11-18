@@ -67,6 +67,27 @@ const EnvSchema = z
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
     AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
+    // The attempt window of the new personal-token controls. It is separate
+    // from the legacy window above, so the global and failed-login budgets
+    // keep their current behavior. Bounded on both ends: an extreme value is
+    // rejected at startup instead of being silently accepted.
+    RATE_LIMIT_ATTEMPT_WINDOW_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(86_400_000)
+      .default(900_000),
+    // Failed bearer verifications per client IP inside one attempt window.
+    // Charged before the database lookup and refunded after a verified secret.
+    RATE_LIMIT_BEARER_FAILURE_MAX: z.coerce.number().int().min(1).max(1_000).default(20),
+    // Sustained authenticated traffic window for the per-user/per-token quotas.
+    RATE_LIMIT_QUOTA_WINDOW_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(60_000),
+    // Verified-user and verified-token traffic quotas inside one quota window.
+    RATE_LIMIT_USER_QUOTA_MAX: z.coerce.number().int().min(1).max(100_000).default(600),
+    RATE_LIMIT_TOKEN_QUOTA_MAX: z.coerce.number().int().min(1).max(100_000).default(300),
+    // Token issuance and issuance password verification inside one attempt window.
+    RATE_LIMIT_TOKEN_ISSUANCE_MAX: z.coerce.number().int().min(1).max(1_000).default(20),
+    RATE_LIMIT_TOKEN_PASSWORD_MAX: z.coerce.number().int().min(1).max(1_000).default(20),
     RATE_LIMIT_REDIS_URL: z
       .string()
       .url()

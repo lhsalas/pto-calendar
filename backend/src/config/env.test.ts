@@ -261,6 +261,65 @@ describe('loadEnv — PORT and TRUST_PROXY_HOPS defaults', () => {
   });
 });
 
+describe('loadEnv — rate-limit quota bounds', () => {
+  beforeEach(() => {
+    resetEnvForTests();
+  });
+  afterEach(() => {
+    resetEnvForTests();
+  });
+
+  it('uses the documented quota defaults', () => {
+    const env = loadEnv({ ...BASE_ENV });
+    expect(env.RATE_LIMIT_ATTEMPT_WINDOW_MS).toBe(900_000);
+    expect(env.RATE_LIMIT_BEARER_FAILURE_MAX).toBe(20);
+    expect(env.RATE_LIMIT_QUOTA_WINDOW_MS).toBe(60_000);
+    expect(env.RATE_LIMIT_USER_QUOTA_MAX).toBe(600);
+    expect(env.RATE_LIMIT_TOKEN_QUOTA_MAX).toBe(300);
+    expect(env.RATE_LIMIT_TOKEN_ISSUANCE_MAX).toBe(20);
+    expect(env.RATE_LIMIT_TOKEN_PASSWORD_MAX).toBe(20);
+  });
+
+  it('accepts the bounded quota overrides', () => {
+    const env = loadEnv({
+      ...BASE_ENV,
+      RATE_LIMIT_ATTEMPT_WINDOW_MS: '1000',
+      RATE_LIMIT_BEARER_FAILURE_MAX: '1',
+      RATE_LIMIT_QUOTA_WINDOW_MS: '1000',
+      RATE_LIMIT_USER_QUOTA_MAX: '1',
+      RATE_LIMIT_TOKEN_QUOTA_MAX: '100000',
+      RATE_LIMIT_TOKEN_ISSUANCE_MAX: '1000',
+      RATE_LIMIT_TOKEN_PASSWORD_MAX: '1000',
+    });
+    expect(env.RATE_LIMIT_ATTEMPT_WINDOW_MS).toBe(1000);
+    expect(env.RATE_LIMIT_BEARER_FAILURE_MAX).toBe(1);
+    expect(env.RATE_LIMIT_QUOTA_WINDOW_MS).toBe(1000);
+    expect(env.RATE_LIMIT_USER_QUOTA_MAX).toBe(1);
+    expect(env.RATE_LIMIT_TOKEN_QUOTA_MAX).toBe(100_000);
+    expect(env.RATE_LIMIT_TOKEN_ISSUANCE_MAX).toBe(1000);
+    expect(env.RATE_LIMIT_TOKEN_PASSWORD_MAX).toBe(1000);
+  });
+
+  it.each([
+    ['RATE_LIMIT_ATTEMPT_WINDOW_MS', '999'],
+    ['RATE_LIMIT_ATTEMPT_WINDOW_MS', '86400001'],
+    ['RATE_LIMIT_BEARER_FAILURE_MAX', '0'],
+    ['RATE_LIMIT_BEARER_FAILURE_MAX', '1001'],
+    ['RATE_LIMIT_QUOTA_WINDOW_MS', '999'],
+    ['RATE_LIMIT_QUOTA_WINDOW_MS', '3600001'],
+    ['RATE_LIMIT_USER_QUOTA_MAX', '0'],
+    ['RATE_LIMIT_USER_QUOTA_MAX', '100001'],
+    ['RATE_LIMIT_TOKEN_QUOTA_MAX', '0'],
+    ['RATE_LIMIT_TOKEN_QUOTA_MAX', '100001'],
+    ['RATE_LIMIT_TOKEN_ISSUANCE_MAX', '0'],
+    ['RATE_LIMIT_TOKEN_ISSUANCE_MAX', '1001'],
+    ['RATE_LIMIT_TOKEN_PASSWORD_MAX', '0'],
+    ['RATE_LIMIT_TOKEN_PASSWORD_MAX', '1001'],
+  ])('rejects the out-of-range %s value %s', (name, value) => {
+    expect(() => loadEnv({ ...BASE_ENV, [name]: value })).toThrow();
+  });
+});
+
 describe('sessionSecret helpers', () => {
   it('shannonEntropy returns 0 for the empty string', () => {
     expect(shannonEntropy('')).toBe(0);

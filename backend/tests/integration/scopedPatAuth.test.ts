@@ -7,6 +7,10 @@ import { createPrismaClient } from '../../src/lib/prismaClient.js';
 import { prisma as appPrisma } from '../../src/lib/prisma.js';
 import { resetEnvForTests } from '../../src/config/env.js';
 import { __resetAuthUserCacheForTests } from '../../src/middleware/requireAuth.js';
+import {
+  __resetAgentQuotaForTests,
+  __useMemoryQuotaStoreForTests,
+} from '../../src/middleware/agentQuota.js';
 import { createTokenDatabase } from '../../src/services/tokens/tokenDatabase.js';
 import {
   changeRoleAndInvalidate,
@@ -149,10 +153,20 @@ describe('scoped PAT HTTP authorization on PostgreSQL', () => {
       CORS_ORIGIN: 'http://localhost:5173',
       AUTH_RATE_LIMIT_MAX: '1000',
       RATE_LIMIT_MAX: '10000',
+      RATE_LIMIT_BEARER_FAILURE_MAX: '1000',
+      RATE_LIMIT_USER_QUOTA_MAX: '100000',
+      RATE_LIMIT_TOKEN_QUOTA_MAX: '100000',
+      RATE_LIMIT_TOKEN_ISSUANCE_MAX: '1000',
+      RATE_LIMIT_TOKEN_PASSWORD_MAX: '1000',
     });
     delete process.env.RATE_LIMIT_REDIS_URL;
     resetEnvForTests();
     __resetAuthUserCacheForTests();
+    __resetAgentQuotaForTests();
+    // This suite substitutes the external storage adapter with the local
+    // counter, exactly as it substitutes the limiter store below. The
+    // dedicated real-Redis suite is the certification of the shared store.
+    __useMemoryQuotaStoreForTests();
     logs.length = 0;
     await db.auditLog.deleteMany({ where: { actorUserId: { in: ids } } });
     await db.pTORequest.deleteMany({ where: { userId: { in: ids } } });
