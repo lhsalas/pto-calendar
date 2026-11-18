@@ -7,14 +7,14 @@ import {
   toPublicPto,
   updatePto,
 } from '../services/pto/PTOService.js';
-import { listVisibleRange } from '../services/calendar/CalendarQuery.js';
+import { listVisiblePage, listVisibleRange } from '../services/calendar/CalendarQuery.js';
 import {
   assertPtoRecordAccess,
   assertPtoScope,
   redactPtoNote,
 } from '../services/authorization/patPolicy.js';
 import { attributedActorFromAuth } from '../services/audit/auditContext.js';
-import { CreatePtoSchema, IdParamSchema, RangeQuerySchema } from '../services/pto/schemas.js';
+import { CreatePtoSchema, IdParamSchema, PtoListQuerySchema } from '../services/pto/schemas.js';
 
 export const ptoRouter: Router = Router();
 
@@ -32,8 +32,18 @@ ptoRouter.post('/', requireAuth, async (req, res, next) => {
 ptoRouter.get('/', requireAuth, async (req, res, next) => {
   try {
     assertPtoScope(req.auth!, 'read');
-    const { start, end } = RangeQuerySchema.parse(req.query);
-    const list = await listVisibleRange(start, end);
+    const query = PtoListQuerySchema.parse(req.query);
+    const filters = { start: query.start, end: query.end, userId: query.userId };
+    if (query.format === 'page') {
+      const page = await listVisiblePage(filters, { limit: query.limit, cursor: query.cursor });
+      res.json({
+        items: page.items.map((pto) => ({ ...pto, note: null })),
+        nextCursor: page.nextCursor,
+        hasMore: page.hasMore,
+      });
+      return;
+    }
+    const list = await listVisibleRange(filters);
     res.json(list.map((pto) => ({ ...pto, note: null })));
   } catch (err) {
     next(err);
