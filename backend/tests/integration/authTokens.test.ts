@@ -7,6 +7,7 @@ import { createPrismaClient } from '../../src/lib/prismaClient.js';
 import { prisma as appPrisma } from '../../src/lib/prisma.js';
 import { resetEnvForTests } from '../../src/config/env.js';
 import { __resetAuthUserCacheForTests } from '../../src/middleware/requireAuth.js';
+import { __resetAgentQuotaForTests } from '../../src/middleware/agentQuota.js';
 import { createTokenDatabase } from '../../src/services/tokens/tokenDatabase.js';
 import { changeRoleAndInvalidate, verifyToken } from '../../src/services/tokens/tokenService.js';
 import { resetUserPassword, setupAccount } from '../../src/services/users/UserService.js';
@@ -65,8 +66,14 @@ describe('session-only personal token management on PostgreSQL', () => {
   beforeEach(async () => {
     process.env.AUTH_RATE_LIMIT_MAX = '1000';
     process.env.RATE_LIMIT_MAX = '10000';
+    process.env.RATE_LIMIT_BEARER_FAILURE_MAX = '1000';
+    process.env.RATE_LIMIT_USER_QUOTA_MAX = '100000';
+    process.env.RATE_LIMIT_TOKEN_QUOTA_MAX = '100000';
+    process.env.RATE_LIMIT_TOKEN_ISSUANCE_MAX = '1000';
+    process.env.RATE_LIMIT_TOKEN_PASSWORD_MAX = '1000';
     resetEnvForTests();
     __resetAuthUserCacheForTests();
+    __resetAgentQuotaForTests();
     await db.personalAccessToken.deleteMany({ where: { ownerId: { in: ids } } });
     for (const user of users)
       await db.user.update({
@@ -282,8 +289,9 @@ describe('session-only personal token management on PostgreSQL', () => {
         .expect(413),
     );
     confidential(await agent.get('/auth/tokens?userId=other').expect(400));
-    process.env.AUTH_RATE_LIMIT_MAX = '2';
+    process.env.RATE_LIMIT_TOKEN_PASSWORD_MAX = '2';
     resetEnvForTests();
+    __resetAgentQuotaForTests();
     const limitedApp = createApp();
     try {
       const limited = await login('member', limitedApp);
@@ -294,8 +302,11 @@ describe('session-only personal token management on PostgreSQL', () => {
         .send({ name: 'Wrong', password: 'wrong' })
         .expect(429);
       confidential(denial);
+      expect(denial.body.error.code).toBe('RATE_LIMITED');
       expect(denial.headers['retry-after']).toBeDefined();
       confidential(await limited.post('/auth/tokens/revoke-all').expect(204));
+      // The issuance password budget is separate from the browser login.
+      await login('member', limitedApp);
     } finally {
       await limitedApp.closeResources();
     }

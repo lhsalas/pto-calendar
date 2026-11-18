@@ -18,6 +18,9 @@ const fake = vi.hoisted(() => ({
 
 vi.mock('ioredis', () => ({
   Redis: class {
+    // The limiter waits for a usable socket before its first command; this
+    // synthetic connection is usable from the start.
+    status = 'ready';
     async call(...args: string[]) {
       fake.commands.push(args);
       const [command, a, , key] = args;

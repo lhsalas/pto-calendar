@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Request, Response, NextFunction } from 'express';
 import { __resetAuthUserCacheForTests, requireAuth } from './requireAuth.js';
+import { __resetAgentQuotaForTests } from './agentQuota.js';
 
 const { findUniqueMock } = vi.hoisted(() => ({
   findUniqueMock: vi.fn(),
@@ -16,12 +17,19 @@ vi.mock('../lib/logSanitizers.js', () => ({ safeRequestId: () => 'safe-unit-requ
 interface MockResponse {
   status: ReturnType<typeof vi.fn>;
   json: ReturnType<typeof vi.fn>;
+  setHeader: ReturnType<typeof vi.fn>;
+  getHeader: ReturnType<typeof vi.fn>;
 }
 
 function makeRes(): Response & MockResponse {
   const json = vi.fn().mockReturnThis();
   const status = vi.fn().mockReturnValue({ json });
-  return { status, json } as unknown as Response & MockResponse;
+  const headers = new Map<string, string>();
+  const setHeader = vi.fn((name: string, value: string) => {
+    headers.set(name, value);
+  });
+  const getHeader = vi.fn((name: string) => headers.get(name));
+  return { status, json, setHeader, getHeader } as unknown as Response & MockResponse;
 }
 
 const BASE_ENV = {
@@ -43,6 +51,8 @@ describe('requireAuth', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    __resetAgentQuotaForTests();
   });
 
   it('returns 401 UNAUTHENTICATED when req.session is missing', async () => {
@@ -235,6 +245,37 @@ describe('requireAuth', () => {
     await requireAuth(req2, res2 as Response, vi.fn() as unknown as NextFunction);
     expect(findUniqueMock).toHaveBeenCalledTimes(1);
     expect(res2.status).toHaveBeenCalledWith(401);
+  });
+
+  it('refuses a verified session that is outside its traffic budget', async () => {
+    vi.stubEnv('RATE_LIMIT_USER_QUOTA_MAX', '1');
+    const { resetEnvForTests, loadEnv } = await import('../config/env.js');
+    resetEnvForTests();
+    loadEnv();
+    __resetAgentQuotaForTests();
+    const sessionUser = { id: 'u-quota', role: 'member' as const, sessionVersion: 0 };
+    findUniqueMock
+      .mockResolvedValueOnce({ id: 'u-quota', role: 'member' })
+      .mockResolvedValueOnce({ sessionVersion: 0 })
+      .mockResolvedValueOnce({ sessionVersion: 0 });
+
+    const first = { session: { user: { ...sessionUser } } } as unknown as Request;
+    const firstNext = vi.fn() as unknown as NextFunction;
+    await requireAuth(first, makeRes() as Response, firstNext);
+    expect(firstNext).toHaveBeenCalledWith();
+
+    const req = { session: { user: { ...sessionUser } } } as unknown as Request;
+    const res = makeRes();
+    const next = vi.fn() as unknown as NextFunction;
+
+    await requireAuth(req, res as Response, next);
+
+    expect(res.status).toHaveBeenCalledWith(429);
+    expect(res.json).toHaveBeenCalledWith({
+      error: { code: 'RATE_LIMITED', message: 'Too many requests. Try again later.' },
+    });
+    expect(res.setHeader).toHaveBeenCalledWith('Retry-After', expect.any(String));
+    expect(next).not.toHaveBeenCalled();
   });
 
   it('forwards DB errors to next()', async () => {

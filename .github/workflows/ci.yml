@@ -86,9 +86,21 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # Disposable Redis for the shared rate-limit counter certification.
+      # The fixture is named explicitly so the suite never reaches another store.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       DATABASE_URL: postgresql://pto:pto@localhost:5432/pto_test?schema=public
       SESSION_SECRET: ci-session-secret-that-is-long-enough-for-tests
+      RATE_LIMIT_TEST_REDIS_URL: redis://127.0.0.1:6379/15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -290,6 +302,11 @@ jobs:
       BCRYPT_ROUNDS: '4'
       RATE_LIMIT_MAX: '10000'
       AUTH_RATE_LIMIT_MAX: '1000'
+      RATE_LIMIT_BEARER_FAILURE_MAX: '1000'
+      RATE_LIMIT_USER_QUOTA_MAX: '10000'
+      RATE_LIMIT_TOKEN_QUOTA_MAX: '10000'
+      RATE_LIMIT_TOKEN_ISSUANCE_MAX: '1000'
+      RATE_LIMIT_TOKEN_PASSWORD_MAX: '1000'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

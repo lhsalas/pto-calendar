@@ -339,6 +339,49 @@ the matching CI run succeeds.
 - Run a disposable restore drill at least quarterly and after backup-script
   changes.
 
+### 8.1 Rate-limit tuning and alerts (#253)
+
+The API enforces two families of budgets against the same shared Redis store.
+The address-based limiter is the emergency high-water for one client address;
+the per-caller budgets are charged against a **verified** user or token, so a
+team behind one office address does not share a single budget.
+
+| Variable | Default | Meaning | Raise it when |
+| --- | --- | --- | --- |
+| `RATE_LIMIT_MAX` | 100 / 15 min | High-water requests per client address. **It is the first ceiling every request meets**, so users behind one office address share it | The office address legitimately exceeds it. Raise it *before* expecting the per-caller budgets to isolate those users |
+| `AUTH_RATE_LIMIT_MAX` | 5 / 15 min | Failed browser logins per client address | Never raise it for an office address; it is a credential-guessing bound |
+| `RATE_LIMIT_ATTEMPT_WINDOW_MS` | 15 min | Window of the attempt controls (failed bearer verifications, issuance, issuance password) | Only when the observed attempt rate needs a longer average; bounded to 1 s .. 24 h |
+| `RATE_LIMIT_BEARER_FAILURE_MAX` | 20 / attempt window | Failed personal-token verifications per client address | A legitimate client retries a mistyped token; a verified secret is refunded, so this only counts real failures |
+| `RATE_LIMIT_QUOTA_WINDOW_MS` | 60 s | Window of the sustained-traffic budgets | Only when the observed agent throughput needs a longer average |
+| `RATE_LIMIT_USER_QUOTA_MAX` | 600 / window | Authenticated requests per verified user | A busy integration genuinely needs more throughput |
+| `RATE_LIMIT_TOKEN_QUOTA_MAX` | 300 / window | Authenticated requests per verified token | One token is legitimately shared by several jobs of the same owner |
+| `RATE_LIMIT_TOKEN_ISSUANCE_MAX` | 20 / attempt window | Token creations per verified owner | Never below the ten active tokens per owner |
+| `RATE_LIMIT_TOKEN_PASSWORD_MAX` | 20 / attempt window | Issuance password verifications per verified owner. The attempt is charged before the comparison and is not given back, so this bounds the comparisons themselves | Only when a legitimate owner provisions several tokens at once |
+
+Every value in that table is an operator override in `docker-compose.prod.yml` and
+`docker-compose.app.yml` (`${VARIABLE:-default}`), so an explicit bounded
+override reaches the running container. Nothing is raised automatically: with
+the conservative defaults the shared address high-water still binds first, and
+the per-caller budgets only become the effective limit below that ceiling.
+
+Alert on these signals:
+
+- A rising share of `429 RATE_LIMITED` responses with the message
+  `Too many requests. Try again later.` — the verified-user or verified-token
+  budget is exhausted. Check which account or token is affected before raising
+  a limit; a single account looping is a client bug, not a capacity problem.
+- `429` responses with `Too many failed credential attempts. Try again later.`
+  — the failed-bearer budget is exhausted for one address. This is a
+  credential-guessing signal, not a tuning signal.
+- Any `500` response while a rate-limit store is unreachable: the API fails
+  closed by design. Restore the Redis connectivity instead of lowering a limit.
+- The probes (`/health`, `/ready`) are exempt from every budget, so a probe
+  loop never consumes a user budget and never appears in these signals.
+
+Tuning is independent of the credential lifetime (`90` day default, `365` day
+hard maximum) and of the ten active tokens per owner. Change a budget, not a
+credential property, when an agent needs more throughput.
+
 ## 9. GitHub configuration retirement
 
 The repository retirement is tracked in #223, following the local-archive

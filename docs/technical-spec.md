@@ -85,7 +85,8 @@ Confirmed architecture:
 - PTO module
 - Calendar query module
 - Authorization module
-- **Rate-limit module** (`backend/src/lib/rateLimit.ts`) — factory functions for the strict login limiter and the global limiter
+- **Rate-limit module** (`backend/src/lib/rateLimit.ts`) — factory functions for the strict login limiter and the global limiter, plus the shared Redis connection and its lifecycle
+- **Agent quota module** (`backend/src/middleware/agentQuota.ts`) — the personal-token issuance and authenticated-traffic quotas: namespaced shared counters, the bounded policy, the verified-identity keys and the standard rejection response
 - **Lifecycle module** (`backend/src/lib/lifecycle.ts`) — graceful shutdown (SIGTERM/SIGINT drain + `prisma.$disconnect` + `SHUTDOWN_TIMEOUT_MS` fallback + uncaughtException/unhandledRejection handlers)
 - **Health route** (`backend/src/routes/health.ts`) — `GET /health` (liveness, no DB) and `GET /ready` (readiness, DB probe)
 - **Shared Zod schemas** (`backend/src/services/auth/schemas.ts`, `backend/src/services/pto/schemas.ts`) — request validation defined once, imported by routes and the validation layer
@@ -302,7 +303,10 @@ Global middleware order:
 6. `cookieSession(...)`
 7. `createGlobalLimiter()` — per-IP rate limiter (default 100/15min); returns `429 RATE_LIMITED` + `Retry-After` on overflow
 8. `createPatAuth(tokenRuntime)` — strict credential selection, live verification,
-   default-deny route classification and server write/scope gates; no session fallback
+   default-deny route classification and server write/scope gates; no session fallback.
+   The failed-bearer budget is charged here **before** the credential lookup and is
+   refunded as soon as the secret verifies; the verified token then pays its own
+   user and token traffic budgets once, before the scope gate
 9. `csrfOriginMiddleware()` — unchanged browser rules, verified cookie-free PAT
    exemption only, retaining foreign-Origin rejection on writes
 10. The same JSON parser handles Authorization requests that passed the limiter,
@@ -311,6 +315,9 @@ Global middleware order:
 11. `finishPreflight` returns the existing 204 for cookie-free non-bearer
     preflight; Authorization-bearing OPTIONS is denied rather than implicitly
     authenticating. CORS origins/credentials have not been widened.
+12. `requireAuth` charges the verified-user traffic budget once, after the live
+    record and session version are verified; a rejected budget answers `429`
+    with the standard envelope instead of running the route
 
 Operational probes (unauthenticated, registered before `authRouter`/`ptoRouter`):
 
@@ -372,7 +379,9 @@ tokens. `GET /auth/tokens` returns `{ tokens: [...] }` with safe metadata.
 Passwords are 1–72 characters, as for login, and are verified afresh by the
 session-derived owner ID. The live credential version used by that proof is
 passed to the serialized issuance primitive; there is no recent-auth cache.
-The existing failed-auth limiter instance/budget is shared with login/setup.
+Token issuance and the issuance password check have their own per-owner
+budgets (#253) and no longer consume the browser login budget; the browser
+login keeps its five failed attempts per address and window.
 
 Unknown properties/query fields, owner/role spoofing, invalid scope dependencies
 or lifetimes return 400 `VALIDATION_ERROR`; team scopes require live lead/admin
@@ -637,7 +646,7 @@ Standard error codes:
 - `VALIDATION_ERROR` (400) — request body fails Zod validation
 - `NOT_FOUND` (404) — referenced PTO does not exist
 - `CONFLICT` (409) — proposed PTO overlaps an existing PTO for the same user
-- `RATE_LIMITED` (429) — login limiter or global limiter tripped; `Retry-After` header carries seconds-until-reset
+- `RATE_LIMITED` (429) — login limiter, global limiter or a personal-token quota tripped; `Retry-After` header carries seconds-until-reset of the exact rejecting window
 - `NOT_READY` (503) — readiness probe only; DB unreachable or probe timed out
 - `INTERNAL_ERROR` (500) — unhandled exception
 
@@ -749,7 +758,44 @@ export function createGlobalLimiter(): RequestHandler { /* 100/15min/IP */ }
 
 Both factories call `loadEnv()` per invocation so per-test env overrides produce fresh limiter instances (a module-level constant could not pick up env resets). Both produce the same `429 RATE_LIMITED` response shape with `Retry-After`.
 
-### 10.6 Lifecycle (`backend/src/lib/lifecycle.ts`)
+The module also owns the shared Redis connection: `sharedRedisClient(url)` opens one connection per configured store URL and `acquireRateLimitResources()` / `closeRateLimitResources()` bracket the application lifetime, so `app.closeResources()` closes the limiter connection once the last application releases it. A connection that cannot be closed cleanly is discarded instead of being reused. The release is idempotent per application: `app.closeResources()` memoizes its promise, so a repeated cleanup cannot take a connection that another live application still owns.
+
+### 10.6 Personal-token quotas (`backend/src/middleware/agentQuota.ts`)
+
+The shared IP limiter above stays the emergency high-water for one client address. The per-caller budgets are charged against a **verified** identity, so office users behind one NAT address no longer share one account budget:
+
+| Control | Default | Window | Key |
+| --- | --- | --- | --- |
+| Failed bearer verification (`RATE_LIMIT_BEARER_FAILURE_MAX`) | 20 | `RATE_LIMIT_ATTEMPT_WINDOW_MS` (15 min) | client address |
+| Verified-user traffic (`RATE_LIMIT_USER_QUOTA_MAX`) | 600 | `RATE_LIMIT_QUOTA_WINDOW_MS` (60 s) | verified user id |
+| Verified-token traffic (`RATE_LIMIT_TOKEN_QUOTA_MAX`) | 300 | `RATE_LIMIT_QUOTA_WINDOW_MS` (60 s) | verified token public id |
+| Token issuance (`RATE_LIMIT_TOKEN_ISSUANCE_MAX`) | 20 | `RATE_LIMIT_ATTEMPT_WINDOW_MS` | verified owner id |
+| Issuance password verification (`RATE_LIMIT_TOKEN_PASSWORD_MAX`) | 20 | `RATE_LIMIT_ATTEMPT_WINDOW_MS` | verified owner id |
+
+Every value is bounded by the environment schema (`1..1000`, `1..100000`, `1000..3600000` for the quota window and `1000..86400000` for the attempt window). An extreme value is rejected at startup instead of being silently accepted. The attempt window is separate from the legacy `RATE_LIMIT_WINDOW_MS`, so the global and failed-login budgets keep their current behavior.
+
+**The shared address high-water still binds first.** With the defaults, `RATE_LIMIT_MAX` is 100 requests per 15 minutes for the whole address, which is lower than the per-caller budgets. Users behind one office address therefore still share that ceiling, and the per-caller budgets only take effect below it. An operator who wants the per-caller isolation to matter has to raise `RATE_LIMIT_MAX`; the Compose files expose every limiter value as an operator override for exactly that reason. Nothing is raised automatically.
+
+The issuance and password budgets are separate from the browser login budget, so failed issuance attempts never lock a browser login. Both stay above the ten active tokens per owner, so a legitimate owner can provision a full portfolio while the issuance cap remains the observable limit.
+
+Rules that the implementation guarantees:
+
+- **The key is the verified identity.** A user budget uses the user id of the verified session or the verified token owner; a token budget uses the verified token public id. An unverified `Authorization` header is never an identity, not even hashed, and the pre-verification counter is keyed by the client address only.
+- **The failure counter is charged before the credential lookup.** A syntactically valid bearer on an eligible route is charged before `verifyToken` runs, so an invalid-token flood stops at the database boundary. A secret that verifies refunds the charge immediately, before any scope decision, so a verified credential that is later denied for scope is never counted as a failed secret.
+- **The charge is compensated, not skipped.** The counter therefore tracks *failed attempts plus in-flight attempts*. A burst of concurrent legitimate requests can transiently occupy the budget while they are in flight; the documented behaviour is that the budget is given back as each attempt completes.
+- **A compensation is atomic and bound to its own window.** Every counter carries the identity of the window it belongs to. The compensation is one atomic store operation that checks that identity, so it can never credit a later window, can never compensate the same attempt twice, and never creates a counter that does not exist.
+- **Authenticated traffic is charged exactly once.** A session request is charged in `requireAuth` after the live record and session version are verified; a personal-token request is charged in `createPatAuth` after the credential verifies and before the scope gate. A personal-token request never reaches the session path.
+- **The password budget bounds the expensive comparisons.** The issuance password budget is charged before the bcrypt comparison and is **not** given back, so it bounds the number of comparisons themselves and not only the failed ones. A verified password consumes the budget like any other attempt.
+- **Issuance is bounded before it costs anything.** The issuance budget is charged before any token material is generated or any row is written, so a rejected issuance never writes an audit row.
+- **A store failure fails closed.** An unavailable shared store refuses the request instead of running unmetered, and the driver cause never reaches a log, a header or a response. A store command waits for a usable socket with a bounded delay, so an outage produces a fixed message instead of a raw driver error.
+- **Probes stay exempt.** `/health` and `/ready` are unauthenticated and outside every quota, so monitoring never consumes a user budget.
+- **Polling is bounded.** A client that polls faster than its budget receives the standard `429` with the exact `Retry-After` delay; there is no unbounded polling path and no long-lived hold that would let a caller keep a budget open.
+
+The counters live in the same production Redis deployment as the login and global limiters, each in its own namespace (`pto:rate-limit:bearer-failure:`, `pto:rate-limit:quota-user:`, `pto:rate-limit:quota-token:`, `pto:rate-limit:token-issuance:`, `pto:rate-limit:token-password:`). Every count and every compensation is one atomic script, so every instance of the API shares one budget and a restart continues the same counter. Outside production the counters fall back to a process-local store with the same window and compensation behavior; production always resolves Redis because the environment schema rejects a production configuration without `RATE_LIMIT_REDIS_URL`.
+
+The rejection response is the standard envelope `{ "error": { "code": "RATE_LIMITED", "message": "..." } }` with `Retry-After` computed from the exact rejecting window, the draft-7 `RateLimit`/`RateLimit-Policy` headers (whose `reset` is the remaining delay of that window, not an absolute timestamp) and a safe `X-Request-Id`.
+
+### 10.7 Lifecycle (`backend/src/lib/lifecycle.ts`)
 
 ```ts
 export function installShutdown(server: Server, prisma: PrismaClient): void { /* SIGTERM/SIGINT + uncaughtException/unhandledRejection */ }
@@ -865,6 +911,7 @@ function expandPTOToDates(pto) {
 - A top-level `ErrorBoundary` (`frontend/src/components/ErrorBoundary.tsx`) wraps the route tree inside `App.tsx`. Any uncaught render-time error (a malformed server payload cast to the wrong shape, a `new Date(invalidString)`-style NaN, etc.) is caught and replaced with a user-facing fallback that includes a "Back to calendar" button — no blank screen, no leaked error body
 - Self-service account setup: `POST /users` (team_lead only) creates a member with `passwordHash: null`, a one-time setup token (sha256-hashed in the DB, TTL `SETUP_TOKEN_TTL_MS` default 24h), and returns `{ user, setupToken, expiresAt }`. `POST /auth/setup-account` (public) atomically claims the token, hashes the password, increments `session_version`, clears the token columns, starts a session, and returns the user. `POST /users/:id/reset-password` (team-lead only, no self-reset, no resetting the only team_lead) increments `session_version` and issues a fresh token, revoking existing sessions. `Role` is widened to `member | team_lead | admin` (`admin` is a forward-compatible role used by `canManageUsers` / `canModifyPto`; today the team_lead gate is the active one). The `Prisma User` table gets nullable `password_hash`, `setup_token_hash VARCHAR(64)`, `setup_token_expires_at`, and `session_version INTEGER NOT NULL DEFAULT 0`. New setup links use `/setup-account#token=...`; legacy query-token links are scrubbed on load. The frontend exposes `/setup-account#token=...` and a team-lead-only `/admin/users` page
 - Per-IP rate limiting: `POST /auth/login` is subject to a strict login limiter (default 5 failed attempts per 15 min, `skipSuccessfulRequests: true`) and every route except `/health` and `/ready` is subject to a global limiter (default 100 requests per 15 min). Both return `429 RATE_LIMITED` + `Retry-After`. The `keyGenerator` uses Express's `req.ip`, which is resolved using the configured trusted proxy chain; it never parses the first raw `X-Forwarded-For` value. `app.set('trust proxy', TRUST_PROXY_HOPS)` is called in `createApp()` when `TRUST_PROXY_HOPS > 0`; the default is `0` in dev/test and the generic production default remains `1` for compatibility, while OCI Compose explicitly sets `2` for Caddy -> nginx -> backend. Production requires `RATE_LIMIT_REDIS_URL` and uses separate shared Redis prefixes for login/global counters; dev/test retain the in-memory store.
+- Per-caller quotas for personal-token traffic (#253): the address-based limiter above stays the emergency high-water, while the per-user and per-token budgets are charged against the verified identity. The shared address high-water still binds first with the conservative defaults, so the per-caller isolation only becomes effective below that ceiling or after an operator raises `RATE_LIMIT_MAX` explicitly. The defaults, the bounded environment values, the pre-verification failure counter, the atomic compensation behavior, the fail-closed store policy and the probe exemption are specified in section 10.6.
 - Structured request logging via `pino-http` with `X-Request-Id` correlation IDs on every response; `errorHandler` logs `reqId` with any unhandled error so operators can correlate. `/health` and `/ready` are skipped via `autoLogging.ignore`. The base `pino` logger applies a `redact` configuration that strips session cookies, `Set-Cookie`, `Authorization`, and `password`/`passwordHash`/`token`/`secret` fields from every log line, and the custom `req`/`res` serializers drop the `headers` field entirely. #252 adds the credential-safe transforms described in §7.0: credential keys are redacted at any depth, and the error, message and argument paths are scrubbed on success, failure and debug output.
 - Liveness `/health` and readiness `/ready` probes — readiness probes the DB with `prisma.$queryRaw\`SELECT 1\`` raced against `READY_TIMEOUT_MS` (default 5s); both return minimal payloads and do not leak environment, version, or deployment metadata
 - Production deployment uses an OCI Always Free ARM64 VM with Caddy for TLS/HSTS, nginx for the static SPA and API proxy, Node/Express for the API, PostgreSQL in a persistent container, and Upstash TLS Redis/Valkey for the shared rate-limit store. The browser uses one custom HTTPS hostname, so `CORS_ORIGIN` is the exact OCI origin, `COOKIE_SAME_SITE=lax`, `COOKIE_SECURE=true`, and `COOKIE_DOMAIN` is empty. `TRUST_PROXY_HOPS=2` matches the Caddy -> nginx -> backend chain. PostgreSQL backups are encrypted and stored off-VM in private OCI Object Storage. OCI is the only supported production/recovery target; legacy automation and runbooks are retired without changing cloud resources or the existing redirect

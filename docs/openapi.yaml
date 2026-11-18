@@ -42,6 +42,26 @@ info:
       (`AUTH_RATE_LIMIT_MAX` per window) that counts failed attempts only.
       Both return `429 Too Many Requests` with `Retry-After` and the body
       `{ "error": { "code": "RATE_LIMITED", "message": "..." } }`.
+    - Personal-token traffic is additionally bounded per verified caller. A
+      failed personal-token verification is charged before the credential
+      lookup (`RATE_LIMIT_BEARER_FAILURE_MAX` per attempt window per client
+      address) and refunded as soon as the secret verifies. Every
+      authenticated request is charged once against the verified user
+      (`RATE_LIMIT_USER_QUOTA_MAX` per `RATE_LIMIT_QUOTA_WINDOW_MS`) and, for
+      a personal token, against the verified token
+      (`RATE_LIMIT_TOKEN_QUOTA_MAX` per window). Token creation
+      (`RATE_LIMIT_TOKEN_ISSUANCE_MAX`) and the issuance password check
+      (`RATE_LIMIT_TOKEN_PASSWORD_MAX`) have their own per-owner budgets and
+      never consume the browser login budget; the password budget is charged
+      before the password comparison and is not given back, so it bounds the
+      comparisons themselves. A rejection answers `429` with `Retry-After` of
+      the exact rejecting window and the same
+      `{ "error": { "code": "RATE_LIMITED", "message": "..." } }` body. The
+      operational probes stay exempt from every quota.
+    - The global address high-water still binds first with the conservative
+      defaults, so callers behind one shared address share that ceiling until
+      an operator raises `RATE_LIMIT_MAX` explicitly. Every limiter value is
+      an operator override in the deployment files.
 servers:
   - url: https://api.example.com
     description: Production
@@ -1081,15 +1101,24 @@ components:
                 error: { code: UNAUTHENTICATED, message: Not authenticated. }
     RateLimited:
       description: |
-        Too many requests. Returned by the global limiter on every route and
-        by the stricter login limiter on `POST /auth/login`.
+        Too many requests. Returned by the global limiter on every route, by
+        the stricter login limiter on `POST /auth/login` and by the
+        personal-token quotas (failed bearer verification, verified-user
+        traffic, verified-token traffic, token issuance and the issuance
+        password check).
       headers:
         Retry-After:
-          description: Seconds until the limiter window resets.
+          description: Seconds until the exact rejecting window resets.
           schema: { type: integer, minimum: 0 }
         X-Request-Id:
           description: Correlation ID echoed from the request, or a generated UUID v4.
           schema: { type: string, format: uuid }
+        RateLimit:
+          description: Draft-7 limit, remaining requests and reset time of the rejecting budget.
+          schema: { type: string }
+        RateLimit-Policy:
+          description: Limit and window length of the rejecting budget.
+          schema: { type: string }
       content:
         application/json:
           schema:

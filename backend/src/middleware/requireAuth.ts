@@ -5,6 +5,7 @@ import { loadEnv } from '../config/env.js';
 import type { SessionUser } from './cookieSession.js';
 import type {} from '../services/auth/authContext.js';
 import { safeRequestId } from '../lib/logSanitizers.js';
+import { chargeAuthenticatedTraffic, sendRateLimited } from './agentQuota.js';
 
 declare module 'express-serve-static-core' {
   interface Request {
@@ -81,11 +82,18 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       req.session.user = authenticatedUser;
     }
     req.user = authenticatedUser;
-    req.auth = {
-      method: 'session',
+    const auth = {
+      method: 'session' as const,
       actor: { id: live.id, role: live.role },
       requestId: safeRequestId(req, res),
     };
+    req.auth = auth;
+    // Only a verified session is charged, and only once per request.
+    const traffic = await chargeAuthenticatedTraffic(auth);
+    if (traffic) {
+      sendRateLimited(req, res, traffic, 'Too many requests. Try again later.');
+      return;
+    }
     next();
   } catch (err) {
     next(err);
