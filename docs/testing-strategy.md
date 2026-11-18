@@ -272,6 +272,14 @@ Unit fixtures also exercise the shared parser at its browser and verified-PAT
 positions, invalid bearer/mixed requests before parser errors and IP limiting,
 and denied-request URL and correlation-ID redaction.
 
+#255 adds unit coverage for query validation and signed cursors, plus a YAML
+contract test for legacy arrays, bounded pages, and null-only list notes.
+`pto-pagination.test.ts` uses disposable PostgreSQL to traverse 1,050
+matching rows, verify pre-limit owner filtering and sort-key ties, and check
+deletion or movement between pages. It also checks cursor errors and
+correlation IDs, the 366-day bound, and note redaction across credential types.
+The existing Chromium tests still exercise the unchanged browser response.
+
 A coverage run fails if a **blocking** path falls below its configured threshold.
 The local integration requirement remains All files lines ≥90%; the CI coverage
 summary job currently checks report existence and publishes totals, not that

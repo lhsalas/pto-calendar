@@ -1,10 +1,11 @@
 openapi: 3.0.3
 # Scoped bearer REST is implemented behind disabled-by-default server flags.
 # docs/agent-access-delivery-plan.md, tracked by #246 and owning #249–#269 PRs.
-# Pagination, preconditions and client packages remain future deliverables.
+# #255 adds opt-in cursor pagination for GET /pto. Write preconditions and
+# the client packages remain separate deliverables.
 info:
   title: PTO / Vacation Calendar API
-  version: 1.3.0
+  version: 1.4.0
   description: |
     API for managing PTO requests in a shared team calendar.
 
@@ -562,6 +563,31 @@ paths:
       description: |
         PATs require pto:read. Shared calendar metadata includes no notes: list
         notes remain null even with pto:notes:read. Subject to the global limiter.
+
+        Two representations are available. Without `format` the response is the
+        historical JSON array, capped at 1,000 rows. With `format=page` the
+        response is the `PTOCalendarPage` envelope. Use its `hasMore` and
+        `nextCursor` to traverse more than 1,000 matching records without
+        silently truncating the result. Agent clients must use paged mode.
+
+        The optional `userId` filter is applied in the database before sorting
+        and limiting, so an unrelated owner can never consume the budget of a
+        filtered query. A syntactically valid owner that does not exist yields
+        an empty result, not an error.
+
+        Ordering is deterministic: `(startDate, userId, id)`. The continuation
+        cursor is an opaque, server-minted integrity token bound to the range
+        and the owner filter; it is not an authorization or snapshot token, and
+        a malformed, tampered or mismatched cursor is rejected with a generic
+        `400 VALIDATION_ERROR` that never echoes the cursor. Cursors stop
+        working after the active session key rotates.
+
+        Pages are not a point-in-time snapshot. Rows created, deleted or moved
+        between two page requests can be missed or repeated. Within a bounded
+        page and time budget, deduplicate by PTO id and detect repeated IDs,
+        repeated cursors or a missing cursor when `hasMore` is true. Report
+        incomplete results on these anomalies, budget exhaustion before the
+        last page, abort or error. Not all concurrent changes are detectable.
       parameters:
         - in: query
           name: start
@@ -579,23 +605,74 @@ paths:
             format: date
             example: 2026-05-31
           description: Visible calendar grid end date in YYYY-MM-DD format. The range must be valid, ordered, and no more than 366 days.
+        - in: query
+          name: userId
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: >
+            Restrict the result to one owner. The identifier is validated and
+            normalized before it is bound to the query, and the filter is
+            applied in the database before sorting and limiting.
+        - in: query
+          name: format
+          required: false
+          schema:
+            type: string
+            enum: [page]
+          description: >
+            Opt in to the paged envelope. Without this parameter the response
+            stays the historical JSON array. `limit` and `cursor` are only
+            accepted together with `format=page`.
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+          description: >
+            Page size for `format=page`. A single canonical decimal integer is
+            required: no sign, no leading zeros, no fraction, no exponent and
+            no surrounding whitespace. Only valid with `format=page`.
+        - in: query
+          name: cursor
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 512
+          description: >
+            Continuation cursor returned as `nextCursor`. It must be repeated
+            unchanged with the same `start`, `end` and normalized `userId`.
+            The `limit` may change between pages. Only valid with `format=page`.
       responses:
         '200':
-          description: PTO entries overlapping the requested visible calendar date range
+          description: >
+            The historical array when `format` is absent, otherwise the paged
+            envelope. `nextCursor` is null exactly when `hasMore` is false.
           headers:
-            X-Request-Id:
-              schema: { type: string, format: uuid }
+            X-Request-Id: { $ref: '#/components/headers/TokenRequestId' }
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/PTOWithUser'
+                oneOf:
+                  - $ref: '#/components/schemas/PTOCalendarPage'
+                  - type: array
+                    maxItems: 1000
+                    items:
+                      $ref: '#/components/schemas/PTOListItem'
         '400':
-          description: Invalid date range parameter
+          description: >
+            Invalid query: an impossible or reversed date range, a range
+            longer than 366 days, a malformed owner filter, a page size
+            outside 1..200, a page-only argument without `format=page`, or a
+            malformed, tampered or mismatched cursor. The cursor is never
+            echoed.
           headers:
-            X-Request-Id:
-              schema: { type: string, format: uuid }
+            X-Request-Id: { $ref: '#/components/headers/TokenRequestId' }
           content:
             application/json:
               schema:
@@ -1280,9 +1357,8 @@ components:
     PTOWithUser:
       type: object
       description: >
-        Returned by GET /pto (list) and GET /pto/:id (detail). The list response
-        always has `note: null`; the detail response includes `note` for the PTO
-        owner or a team lead, and `null` otherwise.
+        Calendar metadata and a nullable note. For details, the note is
+        visible only where the caller's role and credential scopes permit it.
       required: [id, user, startDate, endDate, dayPart]
       properties:
         id:
@@ -1310,7 +1386,48 @@ components:
         note:
           type: string
           nullable: true
-          description: Always null in list responses. Populated in detail responses only for the PTO owner or a team lead.
+    PTOListItem:
+      description: List metadata only. Notes are always null, for every role and scope.
+      allOf:
+        - $ref: '#/components/schemas/PTOWithUser'
+        - type: object
+          required: [note]
+          properties:
+            note:
+              type: string
+              nullable: true
+              enum: [null]
+    PTOCalendarPage:
+      type: object
+      additionalProperties: false
+      description: >
+        The opt-in paged representation of GET /pto, returned when `format=page`
+        is requested. It is not a point-in-time snapshot: rows created, deleted
+        or moved between two page requests can be missed or repeated, so a
+        client must deduplicate by PTO id and report an explicitly incomplete
+        result when its own budget, abort or error ends the traversal.
+      required: [items, nextCursor, hasMore]
+      properties:
+        items:
+          type: array
+          maxItems: 200
+          description: >
+            The rows of this page, ordered by `(startDate, userId, id)`. Every
+            item has `note: null`.
+          items:
+            $ref: '#/components/schemas/PTOListItem'
+        nextCursor:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 512
+          description: >
+            Opaque continuation cursor for the next page, or null exactly when
+            `hasMore` is false. It is an integrity token bound to the range and
+            the owner filter, not an authorization or snapshot token.
+        hasMore:
+          type: boolean
+          description: True when this read found at least one row beyond the returned items.
     LoginRequest:
       type: object
       required: [email, password]

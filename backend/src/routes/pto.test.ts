@@ -4,7 +4,7 @@ import { patFixture } from '../../tests/unit/helpers/patFixture.js';
 import { resetEnvForTests } from '../config/env.js';
 import { ptoRouter } from './pto.js';
 import { createPto, deletePto, getPtoById, updatePto } from '../services/pto/PTOService.js';
-import { listVisibleRange } from '../services/calendar/CalendarQuery.js';
+import { listVisiblePage, listVisibleRange } from '../services/calendar/CalendarQuery.js';
 import type { TokenScope } from '../services/tokens/tokenDomain.js';
 
 vi.mock('../services/pto/PTOService.js', async () => ({
@@ -14,7 +14,10 @@ vi.mock('../services/pto/PTOService.js', async () => ({
   getPtoById: vi.fn(),
   updatePto: vi.fn(),
 }));
-vi.mock('../services/calendar/CalendarQuery.js', () => ({ listVisibleRange: vi.fn() }));
+vi.mock('../services/calendar/CalendarQuery.js', () => ({
+  listVisibleRange: vi.fn(),
+  listVisiblePage: vi.fn(),
+}));
 
 const id = '00000000-0000-4000-8000-000000000001';
 const body = { startDate: '2026-12-01', endDate: '2026-12-01', dayPart: 'all_day' as const };
@@ -45,18 +48,34 @@ function fixture(options: Parameters<typeof patFixture>[0] = {}) {
   vi.mocked(createPto).mockResolvedValue(record);
   vi.mocked(updatePto).mockResolvedValue(record);
   vi.mocked(deletePto).mockResolvedValue(undefined);
+  // A rogue note proves the route redacts independently of the service type.
   vi.mocked(listVisibleRange).mockResolvedValue([
     {
       id,
       ...body,
       user: { id: record.userId, name: 'Owner', colorCode: '#123456' },
       note: 'defensive list note',
-    },
+    } as unknown as Awaited<ReturnType<typeof listVisibleRange>>[number],
   ]);
+  vi.mocked(listVisiblePage).mockResolvedValue({
+    items: [
+      {
+        id,
+        ...body,
+        user: { id: record.userId, name: 'Owner', colorCode: '#123456' },
+        note: 'defensive list note',
+      } as unknown as Awaited<ReturnType<typeof listVisiblePage>>['items'][number],
+    ],
+    nextCursor: 'next-page-cursor',
+    hasMore: true,
+  });
   return { ...f, bearer: `Bearer ${f.material.rawToken}`, record };
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv('SESSION_SECRET', 'aB1!cD2@eF3#gH4$iJ5%kL6&mN7*oP8+');
+  vi.stubEnv('DATABASE_URL', 'postgresql://pto:pto@localhost:5432/pto_test?schema=public');
+  resetEnvForTests();
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -207,5 +226,95 @@ describe('PTO HTTP scopes and note serialization', () => {
     expect(vi.mocked(deletePto).mock.calls[0]![0]).toEqual(verified);
     expect(JSON.stringify(vi.mocked(createPto).mock.calls)).not.toContain('forged');
     expect(JSON.stringify(vi.mocked(updatePto).mock.calls)).not.toContain('forged');
+  });
+
+  it('keeps the legacy array response for an unmodified caller', async () => {
+    const f = fixture({ scopes: ['pto:read'] });
+    const res = await request(f.app)
+      .get('/pto?start=2026-12-01&end=2026-12-31')
+      .set('Authorization', f.bearer)
+      .expect(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body[0].note).toBeNull();
+    expect(vi.mocked(listVisibleRange)).toHaveBeenCalledWith({
+      start: '2026-12-01',
+      end: '2026-12-31',
+      userId: null,
+    });
+    expect(vi.mocked(listVisiblePage)).not.toHaveBeenCalled();
+  });
+
+  it('applies a validated owner filter to the legacy query', async () => {
+    const f = fixture({ scopes: ['pto:read'] });
+    await request(f.app)
+      .get('/pto?start=2026-12-01&end=2026-12-31&userId=11111111-1111-4111-8111-111111111111')
+      .set('Authorization', f.bearer)
+      .expect(200);
+    expect(vi.mocked(listVisibleRange)).toHaveBeenCalledWith({
+      start: '2026-12-01',
+      end: '2026-12-31',
+      userId: '11111111-1111-4111-8111-111111111111',
+    });
+  });
+
+  it('returns the paged envelope with items, nextCursor and hasMore', async () => {
+    const f = fixture({ scopes: ['pto:read'] });
+    const res = await request(f.app)
+      .get('/pto?start=2026-12-01&end=2026-12-31&format=page&limit=25')
+      .set('Authorization', f.bearer)
+      .expect(200);
+    expect(res.body).toEqual({
+      items: [
+        {
+          id,
+          startDate: '2026-12-01',
+          endDate: '2026-12-01',
+          dayPart: 'all_day',
+          user: { id: f.record.userId, name: 'Owner', colorCode: '#123456' },
+          note: null,
+        },
+      ],
+      nextCursor: 'next-page-cursor',
+      hasMore: true,
+    });
+    expect(vi.mocked(listVisiblePage)).toHaveBeenCalledWith(
+      { start: '2026-12-01', end: '2026-12-31', userId: null },
+      { limit: 25, cursor: null },
+    );
+    expect(vi.mocked(listVisibleRange)).not.toHaveBeenCalled();
+  });
+
+  it('reports a final page with a null cursor and no further rows', async () => {
+    const f = fixture({ scopes: ['pto:read'] });
+    vi.mocked(listVisiblePage).mockResolvedValue({
+      items: [],
+      nextCursor: null,
+      hasMore: false,
+    });
+    const res = await request(f.app)
+      .get('/pto?start=2026-12-01&end=2026-12-31&format=page')
+      .set('Authorization', f.bearer)
+      .expect(200);
+    expect(res.body).toEqual({ items: [], nextCursor: null, hasMore: false });
+    expect(vi.mocked(listVisiblePage)).toHaveBeenCalledWith(
+      { start: '2026-12-01', end: '2026-12-31', userId: null },
+      { limit: undefined, cursor: null },
+    );
+  });
+
+  it('rejects an unusable page argument or cursor with a generic validation error', async () => {
+    const f = fixture({ scopes: ['pto:read'] });
+    const limit = await request(f.app)
+      .get('/pto?start=2026-12-01&end=2026-12-31&format=page&limit=0')
+      .set('Authorization', f.bearer)
+      .expect(400);
+    expect(limit.body.error.code).toBe('VALIDATION_ERROR');
+    const cursor = await request(f.app)
+      .get('/pto?start=2026-12-01&end=2026-12-31&format=page&cursor=not-a-cursor')
+      .set('Authorization', f.bearer)
+      .expect(400);
+    expect(cursor.body.error.code).toBe('VALIDATION_ERROR');
+    expect(JSON.stringify(cursor.body)).not.toContain('not-a-cursor');
+    expect(vi.mocked(listVisiblePage)).not.toHaveBeenCalled();
   });
 });

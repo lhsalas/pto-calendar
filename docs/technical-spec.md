@@ -444,7 +444,10 @@ subsequent promotion does not revive an invalidated token.
 ### 7.2 PTO APIs
 
 #### GET /pto?start=YYYY-MM-DD&end=YYYY-MM-DD
-Returns all PTO entries that overlap the requested visible calendar grid range, including adjacent-month days.
+Returns PTO entries that overlap the requested calendar range, including
+adjacent-month days. The unchanged browser request returns the legacy array,
+capped at 1,000 rows. Clients that need a complete traversal must opt in to
+`format=page`.
 
 Example request:
 `GET /pto?start=2026-04-27&end=2026-05-31`
@@ -483,7 +486,32 @@ Query behavior:
 - Return any PTO where:
   - `start_date <= requested_end`
   - `end_date >= requested_start`
-- The list endpoint (`GET /pto?start=&end=`) **never** returns the `note` field, regardless of the requester's role. Notes are only surfaced through the detail endpoint (`GET /pto/:id`) for the PTO owner or a team lead, and rendered in the `PTOViewModal` UI. The list response and the calendar chip never display notes (per MVP product decision).
+- Start and end must be real `YYYY-MM-DD` dates, ordered and at most 366 days
+  inclusive. A valid UUID `userId` can filter either representation. The filter
+  runs in PostgreSQL before ordering and limiting; a nonexistent owner yields
+  an empty result. All permitted readers see the same shared metadata.
+- Both list representations always include `note: null`; the database query
+  does not select notes. Note access through the detail endpoint is unchanged.
+
+With `format=page`, `limit` is optional (default 100, range 1–200) and the
+response is `{ items, nextCursor, hasMore }`. Ask for the next page using
+`cursor=<nextCursor>` with the same date range and normalized owner filter.
+`hasMore: false` and `nextCursor: null` indicate that this read found no later
+rows, including an empty result. `limit` and `cursor` are invalid without
+`format=page`.
+
+Pages use the ascending `(startDate, userId, id)` key and a `limit + 1` read
+instead of an offset or anchor lookup. A cursor is opaque, bounded to 512
+characters and signed with a domain-separated HMAC using the active session
+key. A key rotation invalidates prior cursors; restart without the cursor.
+Malformed or mismatched cursors return the standard `400 VALIDATION_ERROR`
+and `X-Request-Id`, without echoing the cursor. Authentication and scope checks
+still apply to each request. Signing validates integrity, not authorization.
+
+Each page queries current data, not a point-in-time snapshot. Changes ahead
+of a cursor can appear on a later page; changes at or behind the boundary
+can be missed, and moving a previously returned row forward can repeat it.
+Adapters must follow the [bounded traversal and incomplete-result rules](./agent-access-delivery-plan.md#4-adapter-distribution-and-client-acceptance-contract).
 
 #### GET /pto/:id
 Response 200:

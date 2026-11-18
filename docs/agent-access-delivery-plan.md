@@ -161,7 +161,7 @@ client packages, new routes and pilot rollout remain separate gates.
 | --- | --- | --- |
 | `GET/POST /auth/tokens`, `DELETE /auth/tokens/:id`, `POST /auth/tokens/revoke-all` | Session-only for every role; session-derived owner; POST defaults to `pto:read` and returns 201 + show-once `rawToken`/safe metadata. Foreign/unknown IDs share a not-found response; repeat own revocation is harmless. | [#250] |
 | `GET /auth/me` | Session User unchanged; PAT returns only `{ id, role, auth: { method, tokenId, scopes, expiresAt } }` behind disabled-by-default flags; no credential secrets | [#251] |
-| `GET /pto` | Keep real ISO validation and inclusive **366-day** range cap. Filter `userId` in DB **before** limiting. Explicit opt-in paged mode (for example `format=page`) returns `items`, `nextCursor`, `hasMore`; unchanged callers retain the array response. | [#255] |
+| `GET /pto` | Keep real ISO validation and inclusive **366-day** range cap. Filter `userId` in DB **before** limiting. Opt in with `format=page` for `items`, `nextCursor`, `hasMore`; unchanged callers retain the capped array response. | [#255] |
 | Paged queries | Deterministic `(startDate, userId, id)` ordering, bounded page sizes, validated filter/range-bound cursors; traverse >1,000 records without silent loss. No point-in-time snapshot claim under concurrent changes. Adapters deduplicate/detect changes and report incomplete results when bounded budgets are exhausted. | [#255], [#259] |
 | `PATCH /pto/:id` | Non-empty changed fields only; omitted keys preserve, `note: null` explicitly clears. Document empty-string compatibility. Validate the merged record, reject unknown fields/owner transfer. | [#256] |
 | Existing `PUT /pto/:id` | Preserve [#237]: both dates still required; omitted note unchanged, `note: ""` clears, text sets. Create-note normalization is unchanged. | [#237], [#256] |
@@ -197,7 +197,13 @@ expiry reconcile rather than retry with a fresh key or assume failure.
 
 ### Implementation choices still to ratify in their owning PRs
 
-Do not invent frozen values for bounded name/page/cursor sizes, cursor encoding,
+[#255] defines a default page size of 100, a maximum of 200, and a 512-character
+maximum cursor. Use opaque server-generated cursors only. The versioned
+cursor is authenticated with a domain-separated HMAC using the active session
+key and bound to the date range and normalized `userId`, not to `limit`. A
+continuation after session-key rotation must restart from the first page.
+
+Do not invent frozen values for other bounded sizes,
 exact `If-Match` wire grammar, quota windows/defaults, replay retention/cleanup,
 audit-note retention, profile/env precedence, credential backends, package
 versions/bin details, CLI JSON/exit-code schema or MCP protocol/SDK revision.
@@ -213,6 +219,15 @@ incompatible scope change. Missing precondition remains 428 and failed
   origin; reject URL userinfo, cross-origin redirects, arbitrary request URLs and
   caller-supplied arbitrary headers. Use real abort/timeouts, bounded read
   retries/backoff and `Retry-After`; no generic automatic write retry.
+  Use `format=page` for calendar reads; never fall back to the capped array.
+  Set a finite page/request budget and an overall deadline before reading.
+  Preserve the original filters, deduplicate by PTO ID, and treat duplicate
+  IDs, a repeated cursor, or inconsistent `hasMore`/`nextCursor` as detectable
+  drift or a broken traversal. On those anomalies, an error or abort, or
+  budget exhaustion before the last page, label any partial data explicitly
+  **incomplete** and do not answer as though no other records exist. A normal
+  end at `hasMore: false` means traversal completed, not that it was a
+  consistent snapshot; inserts, deletes, and moves can be undetectable.
 - [#260]: shared credential/profile module (for example `packages/agent-auth`)
   prefers a supported OS store. Owner-only file fallback needs **explicit**
   acceptance, restrictive permissions/ACLs and atomic/symlink-safe handling; no
