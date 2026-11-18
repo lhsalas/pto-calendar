@@ -108,6 +108,9 @@ function fixture(
       expiresAt: new Date(String(values[8]).replace(' ', 'T') + 'Z'),
       revokedAt: null,
       lastUsedAt: null,
+      // The service assembles the issued status; the stored row keeps the
+      // server-computed value the list returns.
+      status: 'active',
     };
     rows.push(row);
     return result([safe(row)]);
@@ -180,13 +183,27 @@ describe('session-only token HTTP adapter with real domain/auth logic', () => {
       confidential(issued);
       expect(issued.body.rawToken).toMatch(/^pto_pat_[a-f0-9-]+\.[a-f0-9]{64}$/);
       expect(issued.body.token.scopes).toEqual(['pto:read']);
+      expect(issued.body.token.status).toBe('active');
       expect(f.rows[0]?.secretDigest).not.toBe(issued.body.rawToken.split('.')[1]);
       const listed = await request(f.app).get('/auth/tokens').expect(200);
       confidential(listed);
       expect(listed.body.tokens).toHaveLength(1);
+      expect(listed.body.tokens[0].status).toBe('active');
+      expect(Object.keys(listed.body.tokens[0]).sort()).toEqual([
+        'createdAt',
+        'displayPrefix',
+        'expiresAt',
+        'id',
+        'lastUsedAt',
+        'name',
+        'revokedAt',
+        'scopes',
+        'status',
+      ]);
       expect(JSON.stringify(listed.body)).not.toContain(issued.body.rawToken);
       expect(JSON.stringify(listed.body)).not.toContain(f.rows[0]?.secretDigest);
       expect(JSON.stringify(listed.body)).not.toContain(HASH);
+      expect(JSON.stringify(listed.body)).not.toContain(f.owner.id);
       expect(JSON.stringify(issued.body)).not.toContain(PASSWORD);
       expect(
         new Date(issued.body.token.expiresAt).getTime() -
@@ -194,6 +211,27 @@ describe('session-only token HTTP adapter with real domain/auth logic', () => {
       ).toBe(90 * 86400000);
     },
   );
+
+  it('returns the server-computed status per own token instead of deriving it locally', async () => {
+    const f = fixture();
+    await request(f.app)
+      .post('/auth/tokens')
+      .send({ name: 'Laptop', password: PASSWORD })
+      .expect(201);
+    await request(f.app)
+      .post('/auth/tokens')
+      .send({ name: 'Expired', password: PASSWORD })
+      .expect(201);
+    // The server decides the state of every token; the client never guesses it.
+    f.rows[0]!.status = 'expired';
+    f.rows[1]!.status = 'invalidated';
+    const listed = await request(f.app).get('/auth/tokens').expect(200);
+    confidential(listed);
+    expect(listed.body.tokens.map((token: { status: string }) => token.status).sort()).toEqual([
+      'expired',
+      'invalidated',
+    ]);
+  });
 
   it('requires fresh passwords but not a password for revoke-one/all; isolates foreign and unknown IDs', async () => {
     const f = fixture();

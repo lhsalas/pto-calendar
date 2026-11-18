@@ -45,8 +45,9 @@ of an agent action is distinct from a PTO business approval workflow.
 ### Personal credentials ([#249]–[#254])
 
 - All roles (`member`, `team_lead`, `admin`) manage **only their own** tokens.
-  Proposed `/settings/tokens` uses normal authenticated-user protection and an
-  Account entry, not an admin/lead gate. Issuance requires a browser session and
+  `/settings/tokens`, delivered by #254, uses normal
+  authenticated-user protection and an Account entry, not an admin/lead gate.
+  Issuance requires a browser session and
   current password verification (or a documented short server-verified recent-auth
   window); revocation needs a valid session/CSRF protection, not a fresh password
   during an incident.
@@ -151,8 +152,9 @@ are recorded in `docs/deploy.md` §8.1.
 
 ## 3. Shared REST and compatibility contract
 
-Entries below remain **proposed** except #250's session-only token management
-and #251's deliberately scoped current PTO/identity methods, documented in
+Entries below remain **proposed** except #250's session-only token management,
+#251's deliberately scoped current PTO/identity methods and #255's owner
+filter/paged query rows, all documented in
 OpenAPI. The latter remain behind disabled-by-default flags, not enabled
 production bearer access. Existing cookie calendar behavior stays supported;
 client packages, new routes and pilot rollout remain separate gates.
@@ -416,6 +418,39 @@ the contract in `docs/technical-spec.md` §10.6. This is implementation scope
 only: it is not authorization to enable production bearer access, not a
 statement about the real-Redis certification of a production deployment, and
 not a claim that the client, pilot or rollout gates have passed.
+
+**Query/UI checkpoint — 2026-11-18:** #253 was delivered by PR #296 on master
+`06a6d32086387b81e899ea44048d1b52e6815105` (master CI run `44358985447`),
+and #255 by PR #297 on master `2902e5a135b322085d05ca21bef51dd59b4918cc`
+(master CI run `44368256612`). Both runs passed the ten non-waived jobs;
+the separately authorized #294 waiver skipped `Security scan`.
+#255 adds the validated `userId` filter and the signed cursor paging
+described in §3; the browser array form and its 1,000-row cap are unchanged.
+
+**Self-service UI scope — 2026-11-18:** #254 delivers the all-role own-token
+settings page: `/settings/tokens` behind ordinary signed-in-user protection
+with an **API access** entry in the calendar header, name/current
+password/expiry plus scope controls (read-only and 90 days by default), a
+copy-once reveal dialog with loss-and-replacement guidance, owned metadata with
+server-computed absolute expiry and Active/Expired/Revoked/Invalidated status,
+and revoke-one/revoke-all confirmations that need a valid session but no
+password. The Chromium acceptance suite drives that journey with disposable
+accounts and tokens only: issue, copy-once, revoke-one, revoke-all, and a
+cookie-free bearer proof on `GET /auth/me` (200 before revocation, 401 after).
+The suite refuses to run against anything but the designated local database
+and loopback API named in the environment, and it never follows a redirect for
+a synthetic credential probe. The secret stays in component memory and is
+cleared on close, navigation and unmount; no token is written to `localStorage`
+and no `VITE_*` token configuration exists. The CLI/local MCP section is
+placeholder-only — nothing is distributed, so there is no package to install
+and no configuration to paste — and it explains that an assistant can see
+whatever the tool sends it, including note text, and that this reaches the
+configured AI provider. `PAT_AUTH_ENABLED` and `PAT_WRITES_ENABLED` stay off
+by default in every environment; this page issues credentials but does not
+enable bearer traffic. Managing teammates' tokens, role administration, hosted
+MCP/OAuth and secret recovery remain out of scope. The delivery record for
+this scope lives in the issue and its pull request; this document does not
+restate a merge or CI state that would go stale.
 
 Rows give the safe serial default. Parallel development is restricted to the
 approved waves below after prerequisites merge; every row is one deliverable/PR.

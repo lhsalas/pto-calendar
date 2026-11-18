@@ -1,0 +1,1113 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { JSX } from 'react';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { AuthProvider } from '../../src/context/AuthContext';
+import { AuthContext } from '../../src/context/authContextValue';
+import type { AuthContextValue } from '../../src/context/authContextValue';
+import { ThemeProvider } from '../../src/context/ThemeContext';
+import { ToastProvider } from '../../src/context/ToastProvider';
+import { ToastViewport } from '../../src/components/common/ToastViewport';
+import { TokenSettingsPage } from '../../src/pages/settings/TokenSettingsPage';
+import { server } from '../mocks/server';
+import { STUB_RAW_TOKEN, STUB_TOKEN, tokensListEmpty } from '../mocks/handlers';
+import type { Role, TokenMetadata, TokenScope, User } from '../../src/types/api';
+
+const MEMBER: User = {
+  id: '22222222-2222-2222-2222-222222222222',
+  name: 'Developer One',
+  email: 'dev1@example.com',
+  role: 'member',
+  colorCode: '#10B981',
+};
+
+const OTHER_MEMBER: User = {
+  id: '44444444-4444-4444-4444-444444444444',
+  name: 'Developer Two',
+  email: 'dev2@example.com',
+  role: 'member',
+  colorCode: '#8B5CF6',
+};
+
+function userWithRole(role: Role): User {
+  return { ...MEMBER, role };
+}
+
+function authFor(role: Role) {
+  return http.get('/auth/me', () => HttpResponse.json(userWithRole(role)));
+}
+
+function renderPage(): ReturnType<typeof render> {
+  return render(
+    <MemoryRouter initialEntries={['/settings/tokens']}>
+      <ThemeProvider>
+        <AuthProvider>
+          <ToastProvider>
+            <Routes>
+              <Route path="/settings/tokens" element={<TokenSettingsPage />} />
+              <Route path="/calendar" element={<h1>Calendar Page</h1>} />
+            </Routes>
+            <ToastViewport />
+          </ToastProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </MemoryRouter>,
+  );
+}
+
+function authValueFor(user: User): AuthContextValue {
+  return {
+    user,
+    status: 'authenticated',
+    error: null,
+    login: vi.fn(async () => undefined),
+    logout: vi.fn(async () => undefined),
+    setupAccount: vi.fn(async () => undefined),
+  };
+}
+
+function renderWithAccount(user: User): {
+  rerender: (next: User) => void;
+} {
+  function harness(next: User): JSX.Element {
+    return (
+      <MemoryRouter initialEntries={['/settings/tokens']}>
+        <ThemeProvider>
+          <AuthContext.Provider value={authValueFor(next)}>
+            <ToastProvider>
+              <Routes>
+                <Route path="/settings/tokens" element={<TokenSettingsPage />} />
+                <Route path="/calendar" element={<h1>Calendar Page</h1>} />
+              </Routes>
+              <ToastViewport />
+            </ToastProvider>
+          </AuthContext.Provider>
+        </ThemeProvider>
+      </MemoryRouter>
+    );
+  }
+  const view = render(harness(user));
+  return { rerender: (next: User) => view.rerender(harness(next)) };
+}
+
+function stubClipboard(writeText: (text: string) => Promise<void>): ReturnType<typeof vi.fn> {
+  const writeTextMock = vi.fn(writeText);
+  Object.defineProperty(navigator, 'clipboard', {
+    value: { writeText: writeTextMock },
+    configurable: true,
+    writable: true,
+  });
+  return writeTextMock;
+}
+
+function unstubClipboard(): void {
+  Object.defineProperty(navigator, 'clipboard', {
+    value: undefined,
+    configurable: true,
+    writable: true,
+  });
+}
+
+function tokenWith(overrides: Partial<TokenMetadata>): TokenMetadata {
+  return { ...STUB_TOKEN, ...overrides };
+}
+
+async function openCreateDialog(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(await screen.findByRole('button', { name: 'Generate token' }));
+  await screen.findByRole('dialog', { name: /new personal access token/i });
+}
+
+async function issueToken(
+  user: ReturnType<typeof userEvent.setup>,
+  name = 'Laptop',
+  password = 'correct horse',
+): Promise<void> {
+  await openCreateDialog(user);
+  await user.type(screen.getByLabelText(/token name/i), name);
+  await user.type(screen.getByLabelText(/current password/i), password);
+  await user.click(screen.getByRole('button', { name: 'Create token' }));
+}
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-06-15T12:00:00.000Z'));
+});
+
+afterEach(() => {
+  unstubClipboard();
+  vi.useRealTimers();
+});
+
+describe('TokenSettingsPage', () => {
+  it('lets a member open their own token settings and shows the empty state', async () => {
+    server.use(authFor('member'), tokensListEmpty);
+    renderPage();
+    expect(
+      await screen.findByRole('heading', { name: 'Personal access tokens' }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('back-to-calendar-link')).toHaveAttribute('href', '/calendar');
+    expect(screen.getByRole('button', { name: 'Generate token' })).toBeInTheDocument();
+    expect(await screen.findByTestId('tokens-empty')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'CLI and local MCP setup' })).toHaveAttribute(
+      'href',
+      '#cli-setup',
+    );
+    expect(screen.getByText(/separate credential/i)).toBeInTheDocument();
+    expect(screen.getByText(/rolled out/i)).toBeInTheDocument();
+  });
+
+  it('does not mount any credential dialog before one is asked for', async () => {
+    server.use(authFor('member'), tokensListEmpty);
+    renderPage();
+    await screen.findByTestId('tokens-empty');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/current password/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/new token/i)).not.toBeInTheDocument();
+  });
+
+  it('shows a loading state while the list is on its way', async () => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', async () => {
+        await released;
+        return HttpResponse.json({ tokens: [] });
+      }),
+    );
+    renderPage();
+    expect(await screen.findByTestId('tokens-loading')).toHaveAttribute('aria-busy', 'true');
+    release();
+    expect(await screen.findByTestId('tokens-empty')).toBeInTheDocument();
+  });
+
+  it('shows a safe error with a retry that reloads the list', async () => {
+    let attempt = 0;
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () => {
+        attempt += 1;
+        if (attempt === 1) {
+          return HttpResponse.json(
+            { error: { code: 'INTERNAL_ERROR', message: 'boom secret detail' } },
+            { status: 500 },
+          );
+        }
+        return HttpResponse.json({ tokens: [STUB_TOKEN] });
+      }),
+    );
+    renderPage();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/something went wrong/i);
+    expect(alert).not.toHaveTextContent(/boom secret detail/);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByTestId(`token-card-${STUB_TOKEN.id}`)).toBeInTheDocument();
+    expect(attempt).toBe(2);
+  });
+
+  it('lists owned metadata with the server status and the absolute expiry', async () => {
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () =>
+        HttpResponse.json({
+          tokens: [
+            tokenWith({
+              name: 'Laptop',
+              scopes: ['pto:read', 'pto:create'],
+              lastUsedAt: '2026-06-10T08:30:00.000Z',
+              status: 'active',
+            }),
+            tokenWith({
+              id: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+              name: 'Old script',
+              displayPrefix: 'pto_pat_dddddddd-dddd-dddd-dddd-dddddddddddd',
+              status: 'expired',
+            }),
+            tokenWith({
+              id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+              name: 'Shared laptop',
+              displayPrefix: 'pto_pat_eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+              status: 'revoked',
+              revokedAt: '2026-06-14T10:00:00.000Z',
+            }),
+            tokenWith({
+              id: 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+              name: 'Former role',
+              displayPrefix: 'pto_pat_ffffffff-ffff-ffff-ffff-ffffffffffff',
+              status: 'invalidated',
+            }),
+          ],
+        }),
+      ),
+    );
+    renderPage();
+    const card = await screen.findByTestId(`token-card-${STUB_TOKEN.id}`);
+    expect(within(card).getByTestId('token-prefix')).toHaveTextContent(STUB_TOKEN.displayPrefix);
+    expect(within(card).getByTestId('token-status')).toHaveTextContent('Active');
+    expect(within(card).getByTestId('token-expiry')).toHaveTextContent(/2026/);
+    expect(within(card).getByTestId('token-expiry')).toHaveTextContent(/\(.+\)/);
+    expect(within(card).getByText(/last used/i)).toBeInTheDocument();
+    expect(within(card).getByText(/pto:create/)).toBeInTheDocument();
+    expect(screen.getByTestId('token-card-dddddddd-dddd-dddd-dddd-dddddddddddd')).toHaveTextContent(
+      'Expired',
+    );
+    expect(screen.getByTestId('token-card-eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee')).toHaveTextContent(
+      'Revoked',
+    );
+    expect(screen.getByTestId('token-card-ffffffff-ffff-ffff-ffff-ffffffffffff')).toHaveTextContent(
+      'Invalidated',
+    );
+  });
+
+  it('warns about a live token that lapses within seven days', async () => {
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () =>
+        HttpResponse.json({
+          tokens: [
+            tokenWith({ expiresAt: '2026-06-18T12:00:00.000Z', status: 'active' }),
+            tokenWith({
+              id: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+              name: 'Later token',
+              displayPrefix: 'pto_pat_dddddddd-dddd-dddd-dddd-dddddddddddd',
+              expiresAt: '2026-09-15T12:00:00.000Z',
+              status: 'active',
+            }),
+          ],
+        }),
+      ),
+    );
+    renderPage();
+    expect(await screen.findByTestId('token-near-expiry')).toHaveTextContent(/expires in 3 days/i);
+    expect(
+      screen.getByTestId('token-card-dddddddd-dddd-dddd-dddd-dddddddddddd'),
+    ).not.toHaveTextContent(/expires in/i);
+  });
+
+  it('starts read-only, expires in 90 days and offers 30, 90, 180 and 365 days', async () => {
+    server.use(authFor('member'), tokensListEmpty);
+    const user = userEvent.setup();
+    renderPage();
+    await openCreateDialog(user);
+    const read = screen.getByRole('checkbox', { name: /pto:read/i });
+    expect(read).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /pto:create/i })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /pto:update:self/i })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /pto:delete:self/i })).not.toBeChecked();
+    const expiry = screen.getByLabelText(/expires after/i);
+    expect(expiry).toHaveValue('90');
+    expect(
+      Array.from((expiry as HTMLSelectElement).options).map((option) => option.textContent),
+    ).toEqual(['30 days', '90 days', '180 days', '365 days']);
+  });
+
+  it('applies the Manage my PTO preset without notes or team writes', async () => {
+    server.use(authFor('member'), tokensListEmpty);
+    const user = userEvent.setup();
+    renderPage();
+    await openCreateDialog(user);
+    await user.click(screen.getByRole('button', { name: 'Manage my PTO' }));
+    expect(screen.getByRole('checkbox', { name: /pto:read/i })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /pto:create/i })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /pto:update:self/i })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /pto:delete:self/i })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /pto:notes:read/i })).not.toBeChecked();
+    expect(screen.queryByRole('checkbox', { name: /pto:update:team/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /pto:delete:team/i })).not.toBeInTheDocument();
+  });
+
+  it('keeps note reads dependent on the read scope', async () => {
+    server.use(authFor('member'), tokensListEmpty);
+    const user = userEvent.setup();
+    renderPage();
+    await openCreateDialog(user);
+    const read = screen.getByRole('checkbox', { name: /pto:read/i });
+    const notes = screen.getByRole('checkbox', { name: /pto:notes:read/i });
+    // Read is granted by default, so the note scope is offered.
+    expect(read).toBeChecked();
+    expect(notes).toBeEnabled();
+    await user.click(read);
+    expect(notes).toBeDisabled();
+    expect(notes).not.toBeChecked();
+  });
+
+  it('resets the note scope when the read scope is switched off', async () => {
+    server.use(authFor('member'), tokensListEmpty);
+    const user = userEvent.setup();
+    renderPage();
+    await openCreateDialog(user);
+    const read = screen.getByRole('checkbox', { name: /pto:read/i });
+    await user.click(read);
+    expect(read).not.toBeChecked();
+    await user.click(read);
+    const notes = screen.getByRole('checkbox', { name: /pto:notes:read/i });
+    expect(notes).toBeEnabled();
+    await user.click(notes);
+    expect(notes).toBeChecked();
+    await user.click(read);
+    expect(notes).not.toBeChecked();
+    expect(notes).toBeDisabled();
+  });
+
+  it('offers team writes to a team lead only', async () => {
+    server.use(authFor('team_lead'), tokensListEmpty);
+    const user = userEvent.setup();
+    renderPage();
+    await openCreateDialog(user);
+    expect(screen.getByRole('checkbox', { name: /pto:update:team/i })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /pto:delete:team/i })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /pto:update:team/i })).not.toBeChecked();
+  });
+
+  it('refuses to send a token without a name', async () => {
+    const issue = vi.fn(() => HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }));
+    server.use(authFor('member'), tokensListEmpty, http.post('/auth/tokens', issue));
+    const user = userEvent.setup();
+    renderPage();
+    await openCreateDialog(user);
+    await user.type(screen.getByLabelText(/current password/i), 'correct horse');
+    await user.click(screen.getByRole('button', { name: 'Create token' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/enter a name/i);
+    expect(issue).not.toHaveBeenCalled();
+  });
+
+  it('refuses to send a token without the current password', async () => {
+    const issue = vi.fn(() => HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }));
+    server.use(authFor('member'), tokensListEmpty, http.post('/auth/tokens', issue));
+    const user = userEvent.setup();
+    renderPage();
+    await openCreateDialog(user);
+    await user.type(screen.getByLabelText(/token name/i), 'Laptop');
+    await user.click(screen.getByRole('button', { name: 'Create token' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/current password/i);
+    expect(issue).not.toHaveBeenCalled();
+  });
+
+  it('refuses to send a token without any scope', async () => {
+    const issue = vi.fn(() => HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }));
+    server.use(authFor('member'), tokensListEmpty, http.post('/auth/tokens', issue));
+    const user = userEvent.setup();
+    renderPage();
+    await openCreateDialog(user);
+    await user.type(screen.getByLabelText(/token name/i), 'Laptop');
+    await user.type(screen.getByLabelText(/current password/i), 'correct horse');
+    await user.click(screen.getByRole('checkbox', { name: /pto:read/i }));
+    await user.click(screen.getByRole('button', { name: 'Create token' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/at least one scope/i);
+    expect(issue).not.toHaveBeenCalled();
+  });
+
+  it('creates a token and shows the secret exactly once', async () => {
+    const issue = vi.fn(async ({ request }: { request: Request }) => {
+      const body = (await request.json()) as {
+        name: string;
+        password: string;
+        scopes: string[];
+        expiresInDays: number;
+      };
+      expect(body).toEqual({
+        name: 'Laptop',
+        password: 'correct horse',
+        scopes: ['pto:read'],
+        expiresInDays: 90,
+      });
+      return HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 });
+    });
+    server.use(authFor('member'), tokensListEmpty, http.post('/auth/tokens', issue));
+    const user = userEvent.setup();
+    renderPage();
+    await issueToken(user);
+    const dialog = await screen.findByRole('dialog', { name: /copy your token/i });
+    expect(within(dialog).getByLabelText(/new token/i)).toHaveValue(STUB_RAW_TOKEN);
+    expect(within(dialog).getByTestId('token-reveal-expiry')).toHaveTextContent(/2026/);
+    expect(issue).toHaveBeenCalledTimes(1);
+    expect(screen.getByDisplayValue(STUB_RAW_TOKEN)).toBeInTheDocument();
+  });
+
+  it('never echoes the submitted password or the server message on a failure', async () => {
+    server.use(
+      authFor('member'),
+      tokensListEmpty,
+      http.post('/auth/tokens', () =>
+        HttpResponse.json(
+          { error: { code: 'UNAUTHENTICATED', message: 'wrong password hunter2' } },
+          { status: 401 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await issueToken(user);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/current password or session was not accepted/i);
+    expect(alert).not.toHaveTextContent(/hunter2/);
+    expect(alert).not.toHaveTextContent(/wrong password/);
+    expect(screen.queryByRole('dialog', { name: /copy your token/i })).not.toBeInTheDocument();
+  });
+
+  it('explains a rate limit without echoing anything', async () => {
+    server.use(
+      authFor('member'),
+      tokensListEmpty,
+      http.post('/auth/tokens', () =>
+        HttpResponse.json(
+          { error: { code: 'RATE_LIMITED', message: 'too many attempts for hunter2' } },
+          { status: 429 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await issueToken(user);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/too many attempts/i);
+    expect(alert).not.toHaveTextContent(/hunter2/);
+  });
+
+  it('copies the secret on request and reports the result', async () => {
+    const user = userEvent.setup();
+    // The clipboard stub has to be installed after userEvent.setup(), which
+    // attaches its own clipboard stub to the view.
+    const writeText = stubClipboard(async () => undefined);
+    server.use(
+      authFor('member'),
+      tokensListEmpty,
+      http.post('/auth/tokens', () =>
+        HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 }),
+      ),
+    );
+    renderPage();
+    await issueToken(user);
+    const dialog = await screen.findByRole('dialog', { name: /copy your token/i });
+    await user.click(within(dialog).getByRole('button', { name: 'Copy token' }));
+    expect(writeText).toHaveBeenCalledWith(STUB_RAW_TOKEN);
+    expect(await screen.findByTestId('token-copy-status')).toHaveTextContent(
+      /copied to your clipboard/i,
+    );
+    const toast = await screen.findByTestId('toast-success');
+    expect(toast).toHaveTextContent(/token copied/i);
+    expect(toast).not.toHaveTextContent(STUB_RAW_TOKEN);
+  });
+
+  it('falls back to a manual copy when the clipboard is blocked', async () => {
+    const user = userEvent.setup();
+    stubClipboard(async () => {
+      throw new Error('denied');
+    });
+    server.use(
+      authFor('member'),
+      tokensListEmpty,
+      http.post('/auth/tokens', () =>
+        HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 }),
+      ),
+    );
+    renderPage();
+    await issueToken(user);
+    const dialog = await screen.findByRole('dialog', { name: /copy your token/i });
+    await user.click(within(dialog).getByRole('button', { name: 'Copy token' }));
+    expect(await screen.findByTestId('token-copy-status')).toHaveTextContent(
+      /copying was blocked/i,
+    );
+    expect(within(dialog).getByLabelText(/new token/i)).toHaveValue(STUB_RAW_TOKEN);
+  });
+
+  it('drops the secret when the reveal dialog is dismissed', async () => {
+    server.use(
+      authFor('member'),
+      tokensListEmpty,
+      http.post('/auth/tokens', () =>
+        HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await issueToken(user);
+    const dialog = await screen.findByRole('dialog', { name: /copy your token/i });
+    await user.click(within(dialog).getByRole('button', { name: 'Done' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /copy your token/i })).not.toBeInTheDocument();
+    });
+    expect(screen.queryByDisplayValue(STUB_RAW_TOKEN)).not.toBeInTheDocument();
+  });
+
+  it('never shows a secret that arrives after the page was left', async () => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      authFor('member'),
+      tokensListEmpty,
+      http.post('/auth/tokens', async () => {
+        await released;
+        return HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await openCreateDialog(user);
+    await user.type(screen.getByLabelText(/token name/i), 'Laptop');
+    await user.type(screen.getByLabelText(/current password/i), 'correct horse');
+    await user.click(screen.getByRole('button', { name: 'Create token' }));
+    await user.click(screen.getByTestId('back-to-calendar-link'));
+    await screen.findByRole('heading', { name: 'Calendar Page' });
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByRole('dialog', { name: /copy your token/i })).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue(STUB_RAW_TOKEN)).not.toBeInTheDocument();
+  });
+
+  it('drops the secret and the pending issuance when the page is frozen', async () => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const requestSignal: { current: AbortSignal | null } = { current: null };
+    const issue = vi.fn(async ({ request }: { request: Request }) => {
+      requestSignal.current = request.signal;
+      await released;
+      return HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 });
+    });
+    server.use(authFor('member'), tokensListEmpty, http.post('/auth/tokens', issue));
+    const user = userEvent.setup();
+    renderPage();
+    await openCreateDialog(user);
+    const password = screen.getByLabelText(/current password/i) as HTMLInputElement;
+    await user.type(screen.getByLabelText(/token name/i), 'Laptop');
+    await user.type(password, 'correct horse');
+    expect(password.value).toBe('correct horse');
+    await user.click(screen.getByRole('button', { name: 'Create token' }));
+    await waitFor(() => {
+      expect(issue).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent(window, new Event('pagehide'));
+    // The password field is emptied synchronously, so a frozen page cannot
+    // replay it from the back/forward cache.
+    expect(password.value).toBe('');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(requestSignal.current?.aborted).toBe(true);
+    expect(screen.queryByRole('dialog', { name: /copy your token/i })).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue(STUB_RAW_TOKEN)).not.toBeInTheDocument();
+    await openCreateDialog(user);
+    expect(screen.getByLabelText(/current password/i)).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Create token' })).toBeEnabled();
+    expect(issue).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a pending issuance when the account changes on the same route', async () => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const requestSignal: { current: AbortSignal | null } = { current: null };
+    const issue = vi.fn(async ({ request }: { request: Request }) => {
+      requestSignal.current = request.signal;
+      await released;
+      return HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 });
+    });
+    let listCalls = 0;
+    server.use(
+      http.get('/auth/tokens', () => {
+        listCalls += 1;
+        return HttpResponse.json({ tokens: listCalls === 1 ? [STUB_TOKEN] : [] });
+      }),
+      http.post('/auth/tokens', issue),
+    );
+    const user = userEvent.setup();
+    const { rerender } = renderWithAccount(MEMBER);
+    await screen.findByTestId(`token-card-${STUB_TOKEN.id}`);
+    await openCreateDialog(user);
+    await user.type(screen.getByLabelText(/token name/i), 'Laptop');
+    await user.type(screen.getByLabelText(/current password/i), 'correct horse');
+    await user.click(screen.getByRole('button', { name: 'Create token' }));
+    await waitFor(() => {
+      expect(issue).toHaveBeenCalledTimes(1);
+    });
+
+    rerender(OTHER_MEMBER);
+    await screen.findByTestId('tokens-empty');
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(requestSignal.current?.aborted).toBe(true);
+    expect(screen.queryByRole('dialog', { name: /copy your token/i })).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue(STUB_RAW_TOKEN)).not.toBeInTheDocument();
+    expect(listCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  it('confirms before revoking one token and refreshes the list', async () => {
+    const revoke = vi.fn((_args: unknown) => new HttpResponse(null, { status: 204 }));
+    let listCalls = 0;
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () => {
+        listCalls += 1;
+        return HttpResponse.json({ tokens: listCalls === 1 ? [STUB_TOKEN] : [] });
+      }),
+      http.delete('/auth/tokens/:id', revoke),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId(`token-card-${STUB_TOKEN.id}`);
+    await user.click(screen.getByRole('button', { name: 'Revoke Laptop' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Revoke token' });
+    expect(within(dialog).queryByLabelText(/current password/i)).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Revoke token' })).not.toBeInTheDocument();
+    });
+    expect(revoke).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Revoke Laptop' }));
+    const confirmDialog = await screen.findByRole('dialog', { name: 'Revoke token' });
+    await user.click(within(confirmDialog).getByRole('button', { name: 'Confirm revocation' }));
+    await waitFor(() => {
+      expect(revoke).toHaveBeenCalledTimes(1);
+    });
+    const call = revoke.mock.calls[0]?.[0] as { params: { id: string } } | undefined;
+    expect(call?.params.id).toBe(STUB_TOKEN.id);
+    expect(await screen.findByTestId('tokens-empty')).toBeInTheDocument();
+  });
+
+  it('confirms before revoking every token and never asks for a password', async () => {
+    const revokeAll = vi.fn(() => new HttpResponse(null, { status: 204 }));
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () => HttpResponse.json({ tokens: [STUB_TOKEN] })),
+      http.post('/auth/tokens/revoke-all', revokeAll),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId(`token-card-${STUB_TOKEN.id}`);
+    await user.click(screen.getByRole('button', { name: 'Revoke all tokens' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Revoke all tokens' });
+    expect(within(dialog).queryByLabelText(/current password/i)).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Confirm revocation' }));
+    await waitFor(() => {
+      expect(revokeAll).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('blocks a duplicate revocation while the request is running', async () => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const revoke = vi.fn(async () => {
+      await released;
+      return new HttpResponse(null, { status: 204 });
+    });
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () => HttpResponse.json({ tokens: [STUB_TOKEN] })),
+      http.delete('/auth/tokens/:id', revoke),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId(`token-card-${STUB_TOKEN.id}`);
+    await user.click(screen.getByRole('button', { name: 'Revoke Laptop' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Revoke token' });
+    const confirm = within(dialog).getByRole('button', { name: 'Confirm revocation' });
+    await user.click(confirm);
+    await waitFor(() => {
+      expect(confirm).toBeDisabled();
+    });
+    await user.click(confirm);
+    expect(revoke).toHaveBeenCalledTimes(1);
+    release();
+  });
+
+  it('returns focus to the trigger when the dialog is closed with Escape', async () => {
+    server.use(authFor('member'), tokensListEmpty);
+    const user = userEvent.setup();
+    renderPage();
+    const trigger = await screen.findByRole('button', { name: 'Generate token' });
+    await user.click(trigger);
+    await screen.findByRole('dialog', { name: /new personal access token/i });
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: /new personal access token/i }),
+      ).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(trigger).toHaveFocus();
+    });
+  });
+
+  it('returns focus to the generate trigger after the reveal dialog is closed', async () => {
+    server.use(
+      authFor('member'),
+      tokensListEmpty,
+      http.post('/auth/tokens', () =>
+        HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    const trigger = await screen.findByRole('button', { name: 'Generate token' });
+    await issueToken(user);
+    const dialog = await screen.findByRole('dialog', { name: /copy your token/i });
+    await user.click(within(dialog).getByRole('button', { name: 'Done' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /copy your token/i })).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(trigger).toHaveFocus();
+    });
+  });
+
+  it('keeps the keyboard inside the dialog and closes it with Escape', async () => {
+    server.use(authFor('member'), tokensListEmpty);
+    const user = userEvent.setup();
+    renderPage();
+    await openCreateDialog(user);
+    const name = screen.getByLabelText(/token name/i);
+    await waitFor(() => {
+      expect(name).toHaveFocus();
+    });
+    await user.keyboard('{Tab}');
+    expect(screen.getByLabelText(/current password/i)).toHaveFocus();
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: /new personal access token/i }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows the empty state when the server sends no token list', async () => {
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () => HttpResponse.json({})),
+    );
+    renderPage();
+    expect(await screen.findByTestId('tokens-empty')).toBeInTheDocument();
+  });
+
+  it('keeps the error visible when a retry also fails', async () => {
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () =>
+        HttpResponse.json({ error: { code: 'INTERNAL_ERROR', message: 'down' } }, { status: 500 }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole('alert');
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/something went wrong/i);
+    });
+    expect(screen.queryByTestId('tokens-loading')).not.toBeInTheDocument();
+  });
+
+  it('renders a token without scopes and a token with an unknown scope', async () => {
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () =>
+        HttpResponse.json({
+          tokens: [
+            tokenWith({
+              id: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+              name: 'No scopes',
+              displayPrefix: 'pto_pat_dddddddd-dddd-dddd-dddd-dddddddddddd',
+              scopes: [],
+            }),
+            tokenWith({
+              id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+              name: 'Odd scope',
+              displayPrefix: 'pto_pat_eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+              scopes: ['pto:mystery' as TokenScope],
+            }),
+          ],
+        }),
+      ),
+    );
+    renderPage();
+    const empty = await screen.findByTestId('token-card-dddddddd-dddd-dddd-dddd-dddddddddddd');
+    expect(within(empty).getByText('None')).toBeInTheDocument();
+    const odd = await screen.findByTestId('token-card-eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee');
+    expect(within(odd).getAllByText(/pto:mystery/).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('warns about a token that lapses in exactly one day', async () => {
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () =>
+        HttpResponse.json({
+          tokens: [tokenWith({ expiresAt: '2026-06-16T12:00:00.000Z', status: 'active' })],
+        }),
+      ),
+    );
+    renderPage();
+    expect(await screen.findByTestId('token-near-expiry')).toHaveTextContent(/expires in 1 day\b/i);
+  });
+
+  it('falls back to a manual copy when the browser has no clipboard at all', async () => {
+    const user = userEvent.setup();
+    // The clipboard API is missing entirely, not just refusing the write.
+    Object.defineProperty(navigator, 'clipboard', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+    server.use(
+      authFor('member'),
+      tokensListEmpty,
+      http.post('/auth/tokens', () =>
+        HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 }),
+      ),
+    );
+    renderPage();
+    await issueToken(user);
+    const dialog = await screen.findByRole('dialog', { name: /copy your token/i });
+    await user.click(within(dialog).getByRole('button', { name: 'Copy token' }));
+    expect(await screen.findByTestId('token-copy-status')).toHaveTextContent(
+      /copying was blocked/i,
+    );
+    expect(within(dialog).getByLabelText(/new token/i)).toHaveValue(STUB_RAW_TOKEN);
+  });
+
+  it('closes the confirmation without revoking when the backdrop is clicked', async () => {
+    const revoke = vi.fn((_args: unknown) => new HttpResponse(null, { status: 204 }));
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () => HttpResponse.json({ tokens: [STUB_TOKEN] })),
+      http.delete('/auth/tokens/:id', revoke),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId(`token-card-${STUB_TOKEN.id}`);
+    await user.click(screen.getByRole('button', { name: 'Revoke Laptop' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Revoke token' });
+    fireEvent.click(dialog);
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Revoke token' })).not.toBeInTheDocument();
+    });
+    expect(revoke).not.toHaveBeenCalled();
+  });
+
+  it('sends the lifetime that was chosen', async () => {
+    const issue = vi.fn(async ({ request }: { request: Request }) => {
+      const body = (await request.json()) as { expiresInDays: number };
+      expect(body.expiresInDays).toBe(30);
+      return HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 });
+    });
+    server.use(authFor('member'), tokensListEmpty, http.post('/auth/tokens', issue));
+    const user = userEvent.setup();
+    renderPage();
+    await openCreateDialog(user);
+    await user.selectOptions(screen.getByLabelText(/expires after/i), '30');
+    await user.type(screen.getByLabelText(/token name/i), 'Laptop');
+    await user.type(screen.getByLabelText(/current password/i), 'correct horse');
+    await user.click(screen.getByRole('button', { name: 'Create token' }));
+    await waitFor(() => {
+      expect(issue).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('reports a failed revocation with safe copy', async () => {
+    const revoke = vi.fn((_args: unknown) =>
+      HttpResponse.json(
+        { error: { code: 'FORBIDDEN', message: 'not allowed for hunter2' } },
+        { status: 403 },
+      ),
+    );
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () => HttpResponse.json({ tokens: [STUB_TOKEN] })),
+      http.delete('/auth/tokens/:id', revoke),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId(`token-card-${STUB_TOKEN.id}`);
+    await user.click(screen.getByRole('button', { name: 'Revoke Laptop' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Revoke token' });
+    await user.click(within(dialog).getByRole('button', { name: 'Confirm revocation' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/role does not allow those scopes/i);
+    expect(alert).not.toHaveTextContent(/hunter2/);
+    expect(screen.getByRole('dialog', { name: 'Revoke token' })).toBeInTheDocument();
+  });
+
+  it('signs the account out', async () => {
+    const logout = vi.fn(() => new HttpResponse(null, { status: 204 }));
+    server.use(authFor('member'), tokensListEmpty, http.post('/auth/logout', logout));
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Sign out' }));
+    await waitFor(() => {
+      expect(logout).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('returns to the read-only grant with the Read only preset', async () => {
+    server.use(authFor('member'), tokensListEmpty);
+    const user = userEvent.setup();
+    renderPage();
+    await openCreateDialog(user);
+    await user.click(screen.getByRole('button', { name: 'Manage my PTO' }));
+    expect(screen.getByRole('checkbox', { name: /pto:create/i })).toBeChecked();
+    await user.click(screen.getByRole('button', { name: 'Read only' }));
+    expect(screen.getByRole('checkbox', { name: /pto:read/i })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /pto:create/i })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /pto:update:self/i })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /pto:delete:self/i })).not.toBeChecked();
+  });
+
+  it('clears the password when the form is cancelled', async () => {
+    server.use(authFor('member'), tokensListEmpty);
+    const user = userEvent.setup();
+    renderPage();
+    await openCreateDialog(user);
+    const password = screen.getByLabelText(/current password/i) as HTMLInputElement;
+    await user.type(password, 'correct horse');
+    expect(password.value).toBe('correct horse');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: /new personal access token/i }),
+      ).not.toBeInTheDocument();
+    });
+    await openCreateDialog(user);
+    expect((screen.getByLabelText(/current password/i) as HTMLInputElement).value).toBe('');
+  });
+
+  it('closes the reveal dialog when the backdrop is clicked', async () => {
+    server.use(
+      authFor('member'),
+      tokensListEmpty,
+      http.post('/auth/tokens', () =>
+        HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await issueToken(user);
+    const dialog = await screen.findByRole('dialog', { name: /copy your token/i });
+    fireEvent.click(dialog);
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /copy your token/i })).not.toBeInTheDocument();
+    });
+    expect(screen.queryByDisplayValue(STUB_RAW_TOKEN)).not.toBeInTheDocument();
+  });
+
+  it('shows the granted scopes of the new token', async () => {
+    server.use(
+      authFor('member'),
+      tokensListEmpty,
+      http.post('/auth/tokens', () =>
+        HttpResponse.json(
+          {
+            rawToken: STUB_RAW_TOKEN,
+            token: tokenWith({ scopes: ['pto:mystery' as TokenScope] }),
+          },
+          { status: 201 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await issueToken(user);
+    const dialog = await screen.findByRole('dialog', { name: /copy your token/i });
+    expect(within(dialog).getByText(/pto:mystery/)).toBeInTheDocument();
+  });
+
+  it('empties the secret from the document when the page is frozen', async () => {
+    server.use(
+      authFor('member'),
+      tokensListEmpty,
+      http.post('/auth/tokens', () =>
+        HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await issueToken(user);
+    const dialog = await screen.findByRole('dialog', { name: /copy your token/i });
+    const value = within(dialog).getByLabelText(/new token/i) as HTMLInputElement;
+    expect(value.value).toBe(STUB_RAW_TOKEN);
+    fireEvent(window, new Event('pagehide'));
+    // The field is emptied synchronously, so a frozen page cannot replay the
+    // secret from the back/forward cache.
+    expect(value.value).toBe('');
+    expect(dialog).not.toBeInTheDocument();
+  });
+
+  it('lets the reader select the secret for a manual copy', async () => {
+    server.use(
+      authFor('member'),
+      tokensListEmpty,
+      http.post('/auth/tokens', () =>
+        HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await issueToken(user);
+    const dialog = await screen.findByRole('dialog', { name: /copy your token/i });
+    const value = within(dialog).getByLabelText(/new token/i) as HTMLInputElement;
+    await user.click(value);
+    expect(value).toHaveFocus();
+  });
+
+  it('falls back to a manual copy when the clipboard cannot write text', async () => {
+    const user = userEvent.setup();
+    // A clipboard object without a write method is as good as no clipboard.
+    Object.defineProperty(navigator, 'clipboard', {
+      value: {},
+      configurable: true,
+      writable: true,
+    });
+    server.use(
+      authFor('member'),
+      tokensListEmpty,
+      http.post('/auth/tokens', () =>
+        HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 }),
+      ),
+    );
+    renderPage();
+    await issueToken(user);
+    const dialog = await screen.findByRole('dialog', { name: /copy your token/i });
+    await user.click(within(dialog).getByRole('button', { name: 'Copy token' }));
+    expect(await screen.findByTestId('token-copy-status')).toHaveTextContent(
+      /copying was blocked/i,
+    );
+  });
+
+  it('stops a revocation that lands after the account page was left', async () => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const revokeAll = vi.fn(async () => {
+      await released;
+      return new HttpResponse(null, { status: 204 });
+    });
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () => HttpResponse.json({ tokens: [STUB_TOKEN] })),
+      http.post('/auth/tokens/revoke-all', revokeAll),
+    );
+    const user = userEvent.setup();
+    const view = renderPage();
+    await screen.findByTestId(`token-card-${STUB_TOKEN.id}`);
+    await user.click(screen.getByRole('button', { name: 'Revoke all tokens' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Revoke all tokens' });
+    await user.click(within(dialog).getByRole('button', { name: 'Confirm revocation' }));
+    await waitFor(() => {
+      expect(revokeAll).toHaveBeenCalledTimes(1);
+    });
+    view.unmount();
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(revokeAll).toHaveBeenCalledTimes(1);
+  });
+});

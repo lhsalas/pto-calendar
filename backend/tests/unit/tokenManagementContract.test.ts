@@ -2,10 +2,17 @@ import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
 import { TOKEN_SCOPES } from '../../src/services/tokens/tokenDomain.js';
+import { TOKEN_STATUSES } from '../../src/services/tokens/tokenService.js';
 
+interface MediaType {
+  schema?: Record<string, unknown>;
+}
 interface Operation {
   security?: Record<string, unknown[]>[];
-  responses: Record<string, { headers?: Record<string, { $ref: string }> }>;
+  responses: Record<
+    string,
+    { headers?: Record<string, { $ref: string }>; content?: Record<string, MediaType> }
+  >;
 }
 const api = parse(readFileSync(new URL('../../../docs/openapi.yaml', import.meta.url), 'utf8')) as {
   security: { cookieAuth: unknown[] }[];
@@ -100,5 +107,45 @@ describe('personal token OpenAPI contract', () => {
     for (const key of ['secretDigest', 'rawToken', 'password', 'issuedSessionVersion', 'ownerId']) {
       expect(api.components.schemas.PersonalTokenMetadata!.properties).not.toHaveProperty(key);
     }
+  });
+
+  it('publishes the server-computed token status on the list and issuance responses', () => {
+    const metadata = api.components.schemas.PersonalTokenMetadata!;
+    expect(metadata.required).toEqual([
+      'id',
+      'name',
+      'displayPrefix',
+      'scopes',
+      'createdAt',
+      'expiresAt',
+      'lastUsedAt',
+      'revokedAt',
+      'status',
+    ]);
+    expect(Object.keys(metadata.properties).sort()).toEqual([
+      'createdAt',
+      'displayPrefix',
+      'expiresAt',
+      'id',
+      'lastUsedAt',
+      'name',
+      'revokedAt',
+      'scopes',
+      'status',
+    ]);
+    expect(metadata.properties.status?.enum).toEqual([...TOKEN_STATUSES]);
+    expect(metadata.properties.status?.enum).toEqual([
+      'active',
+      'expired',
+      'revoked',
+      'invalidated',
+    ]);
+    // The status is required, so every response that returns metadata carries it.
+    const list = api.paths['/auth/tokens']!.get!.responses['200']!.content!['application/json']!
+      .schema! as { properties: { tokens: { items: { $ref: string } } } };
+    expect(list.properties.tokens.items.$ref).toBe('#/components/schemas/PersonalTokenMetadata');
+    const issued = api.paths['/auth/tokens']!.post!.responses['201']!.content!['application/json']!
+      .schema! as { properties: { token: { $ref: string } } };
+    expect(issued.properties.token.$ref).toBe('#/components/schemas/PersonalTokenMetadata');
   });
 });

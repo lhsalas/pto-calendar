@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { LoginPage } from '../pages/LoginPage';
 import { SetupAccountPage } from '../pages/SetupAccountPage';
 import { CalendarPage } from '../pages/CalendarPage';
+import { TokenSettingsPage } from '../pages/settings/TokenSettingsPage';
 import { AdminUsersPage } from '../pages/admin/AdminUsersPage';
 import { AdminHolidaysPage } from '../pages/admin/AdminHolidaysPage';
 import { RequireAuth } from './RequireAuth';
@@ -18,6 +19,14 @@ export function AppRoutes(): JSX.Element {
         element={
           <RequireAuth>
             <CalendarPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/settings/tokens"
+        element={
+          <RequireAuth>
+            <TokenSettingsPage />
           </RequireAuth>
         }
       />

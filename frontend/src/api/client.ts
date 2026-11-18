@@ -23,6 +23,17 @@ interface RequestOptions {
   signal?: AbortSignal;
   /** Per-request timeout in ms. Falls back to VITE_API_TIMEOUT_MS (default 15000). */
   timeoutMs?: number;
+  /**
+   * Fetch cache mode. Only forwarded when a caller opts in, so every existing
+   * call keeps the browser default. Credential endpoints use `no-store` so a
+   * secret response is never written to the HTTP cache.
+   */
+  cache?: RequestCache;
+  /**
+   * Fetch redirect mode. Only forwarded when a caller opts in. Credential
+   * endpoints use `error` so a redirect is never followed with cookies.
+   */
+  redirect?: RequestRedirect;
 }
 
 /**
@@ -45,7 +56,14 @@ interface RequestOptions {
  * work for a robust signal story across node/browser/SSR.
  */
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, signal: externalSignal, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
+  const {
+    method = 'GET',
+    body,
+    signal: externalSignal,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    cache,
+    redirect,
+  } = options;
   const headers: Record<string, string> = {};
   let payload: BodyInit | undefined;
   if (body !== undefined) {
@@ -79,6 +97,8 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
         body: payload,
         credentials: 'include',
         ...(externalSignal ? { signal: externalSignal } : {}),
+        ...(cache ? { cache } : {}),
+        ...(redirect ? { redirect } : {}),
       });
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {

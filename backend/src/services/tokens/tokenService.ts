@@ -27,7 +27,24 @@ export class TokenLimitError extends TokenOperationError {
   }
 }
 
+/** The closed vocabulary of owner-visible token states. */
+export const TOKEN_STATUSES = ['active', 'expired', 'revoked', 'invalidated'] as const;
+export type TokenStatus = (typeof TOKEN_STATUSES)[number];
+
 export interface TokenMetadata {
+  id: string;
+  name: string;
+  displayPrefix: string;
+  scopes: string[];
+  createdAt: Date;
+  expiresAt: Date;
+  lastUsedAt: Date | null;
+  revokedAt: Date | null;
+  status: TokenStatus;
+}
+
+/** The safe columns every owner-visible read returns; never a credential. */
+interface TokenMetadataRow {
   id: string;
   name: string;
   displayPrefix: string;
@@ -47,6 +64,37 @@ const metadataColumns = `
   last_used_at AT TIME ZONE 'UTC' AS "lastUsedAt",
   revoked_at AT TIME ZONE 'UTC' AS "revokedAt"
 `;
+
+/**
+ * The status is computed in the same read as the row it describes, so a client
+ * never has to guess it from stale local state. Revoked wins, then expiry at
+ * the database's UTC wall clock (the same clock the verifier uses), then
+ * invalidation against the live owner: a session-version, account/password or
+ * live team-scope mismatch. The owner is consulted through a correlated
+ * subquery on the quoted users table, so no owner, session-version, password
+ * or digest column is ever selected and no second query is issued.
+ */
+function statusColumn(tables: TokenDatabase['tables']): string {
+  return `
+    CASE
+      WHEN revoked_at IS NOT NULL THEN 'revoked'
+      WHEN expires_at <= (clock_timestamp() AT TIME ZONE 'UTC') THEN 'expired'
+      WHEN EXISTS (
+        SELECT 1 FROM ${tables.users} u
+        WHERE u.id = owner_id
+          AND (
+            u.session_version IS DISTINCT FROM issued_session_version
+            OR u.password_hash IS NULL
+            OR (
+              u.role::text NOT IN ('team_lead', 'admin')
+              AND ('pto:update:team' = ANY(scopes) OR 'pto:delete:team' = ANY(scopes))
+            )
+          )
+      ) THEN 'invalidated'
+      ELSE 'active'
+    END AS "status"
+  `;
+}
 
 interface LockedOwner {
   id: string;
@@ -95,7 +143,7 @@ export async function issueToken(
       if (!active.rows[0]) throw new TokenOperationError();
       // Return a safe result through the driver boundary, not a sensitive cause.
       if (active.rows[0].count >= 10) return null;
-      const created = await tx.query<TokenMetadata>(
+      const created = await tx.query<TokenMetadataRow>(
         `INSERT INTO ${db.tables.tokens}
            (id, owner_id, name, display_prefix, secret_digest, scopes,
             issued_session_version, created_at, expires_at)
@@ -125,7 +173,9 @@ export async function issueToken(
       return row;
     });
     if (token === null) throw new TokenLimitError();
-    return { rawToken: material.rawToken, token };
+    // A just issued token is live by construction: the owner was locked and
+    // verified, the lifetime is in the future and the scopes fit the live role.
+    return { rawToken: material.rawToken, token: { ...token, status: 'active' } };
   } catch (error) {
     if (error instanceof TokenLimitError) throw error;
     throw new TokenOperationError();
@@ -135,7 +185,7 @@ export async function issueToken(
 export async function listTokens(db: TokenDatabase, ownerId: string): Promise<TokenMetadata[]> {
   try {
     const result = await db.query<TokenMetadata>(
-      `SELECT ${metadataColumns} FROM ${db.tables.tokens}
+      `SELECT ${metadataColumns}, ${statusColumn(db.tables)} FROM ${db.tables.tokens}
        WHERE owner_id = $1::uuid ORDER BY created_at DESC, id DESC`,
       [ownerId],
     );

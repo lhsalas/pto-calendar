@@ -319,6 +319,11 @@ jobs:
       - run: PGPASSWORD=pto psql -h localhost -U pto -d pto_test -c "TRUNCATE pto_requests, audit_logs RESTART IDENTITY CASCADE;"
       - run: npm run db:seed -w backend
       - name: Start backend in the background
+        # Disposable Playwright service only. Prove a freshly issued read token
+        # works and is denied after revocation, without enabling any PAT writes.
+        env:
+          PAT_AUTH_ENABLED: 'true'
+          PAT_WRITES_ENABLED: 'false'
         run: |
           mkdir -p /tmp/e2e-logs
           nohup npm run dev -w backend > /tmp/e2e-logs/backend.log 2>&1 &

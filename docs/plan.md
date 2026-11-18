@@ -16,9 +16,20 @@ Build a small internal app where team members can record planned PTO/vacation da
 > operational-controls wave: failed bearer verifications are bounded before the
 > credential lookup, authenticated traffic is bounded per verified user and
 > verified token, and token creation plus the issuance password check have
-> their own per-owner budgets.
-> Token settings UI and agent adapters remain planned, not shipped here;
-> hosted MCP/OAuth remains out of scope.
+> their own per-owner budgets. Complete owner-filtered and cursor-paginated PTO
+> queries (#255) are delivered. The self-service token settings page (#254)
+> lets members, team leads and administrators manage only their own tokens
+> from `/settings/tokens`. The raw secret is shown once and then discarded.
+> The CLI and MCP clients are not yet distributed; hosted MCP/OAuth remains
+> out of scope.
+>
+> **Dated status — 2026-11-18:** #253 was delivered by PR #296 (merge
+> `06a6d32086387b81e899ea44048d1b52e6815105`, master CI run `44358985447`)
+> and #255 by PR #297 (merge `2902e5a135b322085d05ca21bef51dd59b4918cc`,
+> master CI run `44368256612`). Both runs passed the ten non-waived jobs;
+> `Security scan` did not run under the existing #294 waiver. None of this work
+> enables production bearer traffic: `PAT_AUTH_ENABLED` and `PAT_WRITES_ENABLED`
+> stay off by default, and rollout gates remain separate.
 
 ## 2. Core Users
 - **Team member**
@@ -181,6 +192,15 @@ Each displayed PTO item should show:
 
 ### 7.5 Toast notifications (feedback)
 - All page-level feedback (create / update / delete / list-fetch errors) is delivered through a unified toast system (`success` + `error` tones), not inline banners. The viewport is a fixed top-right region with a 3-item cap, slide+fade enter/exit, and a hairline progress bar that pauses on hover or focus-within. Error toasts can carry a `Retry` action (e.g. for `usePtoList` load failures).
+
+### 7.6 Personal access token settings (self-service, #254)
+- Entry point: an **API access** link in the calendar header, visible to every signed-in member, team lead and administrator. It is an account page, not an administration area.
+- Page `/settings/tokens`, heading **Personal access tokens**, behind the ordinary signed-in-user protection; no team-lead or admin guard.
+- Issue a token: name, current password (verified on the server, never stored, logged or echoed), expiry (30/90/180/365 days, 90 by default) and scope controls. Read-only is the default, note reading is an explicit opt-in, and the "Manage my PTO" preset grants only the caller's own records.
+- The raw secret is shown exactly once in a copy-once dialog with explicit loss/replacement guidance ("if you lose it, revoke it and create another — it cannot be recovered"), accessible copy success/failure feedback, and no storage in `localStorage` or any `VITE_*` variable.
+- The token list shows owned metadata only — name, prefix, scopes, created/expiry/last-used and the Active/Expired/Revoked/Invalidated status — plus a near-expiry warning. An existing secret is never revealed.
+- Revoke one token or every token from a confirmation dialog. A valid session is enough, no password is asked for, and signing out stays a separate action that does not revoke tokens.
+- The CLI/local MCP section is placeholder-only: no client is distributed yet, so there is nothing to install and nothing to paste. It also explains that an assistant can see whatever the tool sends it, including note text, and that this reaches the configured AI provider — never paste a token into a chat or a shared document.
 
 ## 8. Recommended Technical Design
 
@@ -386,6 +406,7 @@ Recommendation:
 - Calendar month navigation works
 - PTO entries render in correct days
 - Single-day half-day selection appears only when applicable
+- Own-token settings (#254): issue a read-only 90-day token, copy the one-time secret, see it cleared on dismissal and on navigation, revoke one token and revoke all tokens, and prove a fresh bearer token authorizes `GET /auth/me` without browser cookies and is rejected with 401 after revocation (Chromium E2E, disposable accounts and tokens only)
 
 ## 15. Confirmed Product Decisions
 - PTO is informational only; no approval workflow for MVP

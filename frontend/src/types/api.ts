@@ -61,6 +61,55 @@ export interface LoginRequest {
   password: string;
 }
 
+/**
+ * Vocabulary of personal access token scopes. The server validates the same
+ * set; `pto:notes:read` depends on `pto:read`, and the team scopes are only
+ * available to a live team lead or administrator.
+ */
+export type TokenScope =
+  | 'pto:read'
+  | 'pto:notes:read'
+  | 'pto:create'
+  | 'pto:update:self'
+  | 'pto:delete:self'
+  | 'pto:update:team'
+  | 'pto:delete:team';
+
+/** Server-computed lifecycle status of an owned token. */
+export type TokenStatus = 'active' | 'expired' | 'revoked' | 'invalidated';
+
+/**
+ * Safe metadata for one owned token. The raw secret is never part of this
+ * shape; it is returned exactly once, at issuance time.
+ */
+export interface TokenMetadata {
+  id: string;
+  name: string;
+  displayPrefix: string;
+  scopes: TokenScope[];
+  createdAt: string;
+  expiresAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+  status: TokenStatus;
+}
+
+export interface IssueTokenRequest {
+  name: string;
+  password: string;
+  scopes: TokenScope[];
+  expiresInDays: number;
+}
+
+export interface TokenListResponse {
+  tokens: TokenMetadata[];
+}
+
+export interface IssueTokenResponse {
+  rawToken: string;
+  token: TokenMetadata;
+}
+
 export interface LoginResponse {
   user: User;
 }
