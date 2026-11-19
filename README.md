@@ -8,6 +8,7 @@ This repository contains planning and technical documentation for a small intern
 pto-calendar/
 ├── backend/     # Node.js + Express + TypeScript + Prisma + PostgreSQL
 ├── frontend/    # React + TypeScript (Vite) + Tailwind CSS
+├── cli/         # Private read-only PTO terminal client (#261)
 ├── packages/
 │   ├── api-client/  # Shared typed HTTP client for the REST API (#259)
 │   └── agent-auth/  # Origin-bound local profiles for agent adapters (#260)
@@ -249,7 +250,14 @@ the approved delivery contract.
 [`packages/agent-auth`](packages/agent-auth/README.md) holds the separate local
 credential resolver. It prefers a supported OS keyring, requires explicit
 opt-in for owner-only Linux plaintext files, and never sends a token to a
-different origin. This does not activate or release a CLI or MCP server.
+different origin.
+
+The [private CLI workspace](cli/README.md) builds the versioned `pto`
+executable. It supports local credential setup, status and removal, plus
+read-only `list` and `get` with human or versioned JSON output. It identifies
+`--mine` through the service, and marks incomplete paginated results explicitly.
+This is workspace source, not a distributed artifact, a production activation,
+or an MCP server.
 
 ## Seeded Dev Users
 

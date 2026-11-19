@@ -268,6 +268,14 @@ and failed `If-Match` remains 412 regardless of the chosen version encoding.
   store. This adds no live release, adapter command or server activation.
 - [#261], [#262]: `cli` provides auth set/status/local remove, list/get, human and
   stable JSON output/exit codes; data-only stdout and diagnostics on stderr.
+
+  [#261] builds the private `pto` executable with read-only queries. Auth
+  status verifies the bound credential at `/auth/me`; setup is the only
+  command that reads a secret. Per-query budgets and structured incomplete
+  results are documented in [`cli/README.md`](../cli/README.md), without a
+  published artifact or activation.
+
+  [#262] owns CLI writes.
   Writes preview exact actor/owner/ID/dates/diff, require interactive confirmation
   or explicit host-approved noninteractive `--yes`, and cancel without mutation.
   Read exact detail before update/delete; use PATCH and expected version.

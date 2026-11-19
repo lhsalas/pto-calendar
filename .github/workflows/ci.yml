@@ -161,6 +161,16 @@ jobs:
           name: agent-auth-coverage
           path: packages/agent-auth/coverage
           if-no-files-found: error
+      - run: npm run test:coverage -w cli
+      - name: Verify CLI unit reports
+        run: test -s cli/coverage/lcov.info && test -s cli/coverage/coverage-summary.json
+      - name: Upload CLI coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cli-coverage
+          path: cli/coverage
+          if-no-files-found: error
 
   build:
     name: Build
@@ -481,6 +491,11 @@ jobs:
         with:
           name: agent-auth-coverage
           path: packages/agent-auth/coverage
+      - name: Download CLI coverage
+        uses: actions/download-artifact@v8
+        with:
+          name: cli-coverage
+          path: cli/coverage
       - name: Verify lcov reports exist
         run: |
           test -f backend/coverage/lcov.info
@@ -489,6 +504,8 @@ jobs:
           test -s packages/api-client/coverage/coverage-summary.json
           test -s packages/agent-auth/coverage/lcov.info
           test -s packages/agent-auth/coverage/coverage-summary.json
+          test -s cli/coverage/lcov.info
+          test -s cli/coverage/coverage-summary.json
       - name: Post coverage summary comment
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -530,6 +547,7 @@ jobs:
           frontend = parse_lcov("frontend/coverage/lcov.info")
           api_client = parse_lcov("packages/api-client/coverage/lcov.info")
           agent_auth = parse_lcov("packages/agent-auth/coverage/lcov.info")
+          cli = parse_lcov("cli/coverage/lcov.info")
 
           lines = []
           lines.append("### Coverage summary")
@@ -541,6 +559,7 @@ jobs:
               ("frontend", frontend),
               ("api-client", api_client),
               ("agent-auth", agent_auth),
+              ("cli", cli),
           ):
               lp = (data["lines"][1] / data["lines"][0] * 100) if data["lines"][0] else 100
               bp = (data["branches"][1] / data["branches"][0] * 100) if data["branches"][0] else 100
