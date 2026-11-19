@@ -32,12 +32,13 @@ This document defines the testing and automation strategy for the PTO calendar M
 | Shared API client unit | Vitest | Runtime-neutral Node suite; service-free loopback fixtures only |
 | Local agent credential unit | Vitest | Fake store/terminal ports, private Linux temporary directories; never a real user keychain |
 | Read-only CLI unit and command process | Vitest | Compiled entry point, isolated loopback service and temporary home, synthetic tokens only |
+| Local MCP unit and protocol process | Vitest | Classic initialization over actual stdio, loopback-only fake API, synthetic credentials |
 | API mocking in component tests | MSW | Reuses OpenAPI schemas where possible |
 | E2E | Playwright | Strong cookie/session support, trace viewer, cross-browser |
 | Coverage | `@vitest/coverage-v8` | `text`, `lcov`, `json-summary` reporters |
 | Lint | ESLint | TypeScript + React plugins |
 | Format | Prettier | Hooked via lint-staged |
-| Type check | `tsc --noEmit` | Backend, frontend, API client, agent credentials and CLI in CI |
+| Type check | `tsc --noEmit` | Backend, frontend, API client, agent credentials, CLI and MCP in CI |
 | Mutation (post-MVP) | Stryker | Optional, not enforced for MVP |
 
 React and React DOM use the same 19.x runtime line in the frontend and root
@@ -98,6 +99,19 @@ lines, statements and functions and 80% branches overall. The existing
 verification additionally uses a disposable pseudo-terminal and a compiled
 backend with synthetic session-generated PATs: verify cookie-free CLI reads
 and 401s after revoke and expiry, with no production access.
+
+**Local read-only MCP (#263):** `npm run test:coverage -w mcp` first builds the
+private dependencies and versioned stdio executable. It tests advertised and
+runtime schemas, bounded tool calls, notes and credential handling, request
+cancellation and closure, and negotiation with the pinned classic SDK across
+real local processes. Framing, validation, launch and credential handling
+require 100% of all four metrics; package totals require at least 90% lines,
+statements and functions and 80% branches. The `Frontend tests` job
+uploads `mcp-coverage` and the existing `Coverage gate` verifies it. Local
+verification also connects to a compiled disposable backend with
+session-issued PATs to test owner filtering, authorized note access and
+rejection after revocation or expiry without a reconnect. Actual user-client
+installation and approval certification remain separate work.
 
 **Known baseline diagnostic (2026-11-15):** the coordinator reproduced
 `npm run test:coverage -w backend` failure on unchanged master `156cc6f` and the
@@ -544,13 +558,13 @@ Jobs (run in order, with `needs:` dependencies):
 | 2 | `typecheck` | ubuntu-latest | — | install, `tsc --noEmit` across all workspaces |
 | 3 | `test-backend-unit` | ubuntu-latest | — | backend unit suite with coverage and separate unit artifact |
 | 4 | `test-backend-integration` | ubuntu-latest + postgres + redis services | — | vitest run backend integration suite, coverage |
-| 5 | `test-frontend` | ubuntu-latest | — | frontend and private workspace suites; includes compiled CLI process tests and the API client, agent-auth and CLI coverage artifacts |
-| 6 | `build` | ubuntu-latest | lint, typecheck | build backend + frontend + api-client + agent-auth + CLI |
+| 5 | `test-frontend` | ubuntu-latest | — | frontend and private workspace suites; includes compiled CLI/MCP process tests and API client, agent-auth, CLI and MCP coverage artifacts |
+| 6 | `build` | ubuntu-latest | lint, typecheck | build backend + frontend + api-client + agent-auth + CLI + MCP |
 | 7 | `deployment-config` | ubuntu-latest | lint, typecheck | validate OCI Compose/Caddy headers, deployment scripts, workflow guards, retirement isolation, supply-chain pins, and the Node.js runtime baseline |
 | 8 | `security` | ubuntu-latest | — | audit the locked npm graphs, scan the pinned production base images for OS and runtime vulnerabilities |
 | 9 | `e2e` | ubuntu-latest + postgres service | build | playwright install, playwright test, upload trace/video on failure |
 | 10 | `docker-smoke` | ubuntu-latest | build | start the all-in-one compose stack, poll `/health`, assert the images run the supported Node.js baseline, login + validate auto-seeded holidays + validate the seed endpoint, tear down with `-v` |
-| 11 | `coverage-gate` | ubuntu-latest | 3, 4, 5 | check integration/frontend/api-client/agent-auth/CLI reports; post coverage summary as PR comment |
+| 11 | `coverage-gate` | ubuntu-latest | 3, 4, 5 | check integration/frontend/api-client/agent-auth/CLI/MCP reports; post coverage summary as PR comment |
 
 The API client (#259), agent credentials (#260) and CLI (#261) are
 verified inside the existing `Frontend tests` job rather than in new jobs,
