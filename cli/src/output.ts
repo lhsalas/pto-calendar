@@ -247,9 +247,17 @@ function field(label: string, value: string): string {
   return `${label}: ${value}`;
 }
 
-/** The human rendering of one record of the calendar. */
+/**
+ * The human rendering of one record of the calendar.
+ *
+ * Both identifiers of the row are labelled, so the identifier of the record
+ * can never be mistaken for the identifier of its owner: the record
+ * identifier is the one a caller passes to `pto get`, and the owner
+ * identifier names the member the record belongs to. Both are the sanitized
+ * projections of the record.
+ */
 function renderRecordLine(record: RenderedRecord): string {
-  return `${record.startDate}..${record.endDate}  ${record.dayPart}  ${record.user.name} <${record.user.id}>`;
+  return `${record.startDate}..${record.endDate}  ${record.dayPart}  ${record.user.name} (owner <${record.user.id}>)  record <${record.id}>`;
 }
 
 /** The human rendering of one page of the calendar. */

@@ -349,9 +349,33 @@ describe('the human output', () => {
   it('shows the slot, the dates, the owner and the status of a list', () => {
     const rendered = renderResult(success('list', LIST), false);
     expect(rendered.stdout).toBe(
-      `2026-12-01..2026-12-02  all_day  Jane Doe <${OWNER}>\n\nRecords: 1\nStatus: complete\nPages: 1\n`,
+      `2026-12-01..2026-12-02  all_day  Jane Doe (owner <${OWNER}>)  record <${RECORD}>\n` +
+        '\nRecords: 1\nStatus: complete\nPages: 1\n',
     );
     expect(rendered.stderr).toBe('');
+  });
+
+  it('labels the record identifier of every row so it cannot be read as the owner', () => {
+    const rendered = renderResult(success('list', LIST), false);
+    const row = rendered.stdout.split('\n')[0] ?? '';
+    expect(row).toContain(`record <${RECORD}>`);
+    expect(row).toContain(`owner <${OWNER}>`);
+    expect(row.indexOf(`record <${RECORD}>`)).toBeGreaterThan(row.indexOf(`owner <${OWNER}>`));
+    expect(row).not.toContain(` ${RECORD}>`);
+  });
+
+  it('shows the sanitized record identifier of a row', () => {
+    const rendered = renderResult(
+      success('list', {
+        items: [{ ...ITEM, id: 'id\u001B[31m-2' }],
+        complete: true,
+        reason: 'complete',
+        pages: 1,
+      }),
+      false,
+    );
+    expect(rendered.stdout).toContain('record <id-2>');
+    expect(rendered.stdout).not.toContain('\u001B');
   });
 
   it('never presents an incomplete list as a complete one', () => {
@@ -359,9 +383,13 @@ describe('the human output', () => {
       success('list', { items: [ITEM], complete: false, reason: 'budget', pages: 3 }),
       false,
     );
-    expect(rendered.stdout).toContain('Status: incomplete');
-    expect(rendered.stdout).toContain('Reason: budget');
-    expect(rendered.stdout).not.toContain('\u001B');
+    expect(rendered.stdout).toBe(
+      'Partial results (incomplete):\n\n' +
+        `2026-12-01..2026-12-02  all_day  Jane Doe (owner <${OWNER}>)  record <${RECORD}>\n` +
+        '\nRecords: 1\nStatus: incomplete\nReason: budget\nPages: 3\n',
+    );
+    expect(rendered.stderr).toBe('The calendar read is incomplete.\n');
+    expect(rendered.exitCode).toBe(9);
   });
 
   it('shows an empty list', () => {
@@ -457,10 +485,11 @@ describe('the human output', () => {
       }),
       false,
     );
-    expect(rendered.stdout).toContain('Partial results (incomplete):');
-    expect(rendered.stdout).toContain('Status: incomplete');
-    expect(rendered.stdout).toContain('Reason: budget');
-    expect(rendered.stdout).not.toContain('\u001B');
+    expect(rendered.stdout).toBe(
+      'Partial results (incomplete):\n\n' +
+        `2026-12-01..2026-12-02  all_day  Jane Doe (owner <${OWNER}>)  record <${RECORD}>\n` +
+        '\nRecords: 1\nStatus: incomplete\nReason: budget\nPages: 3\n',
+    );
     expect(rendered.stderr).toBe('The traversal stopped early.\n');
     expect(rendered.exitCode).toBe(9);
   });
