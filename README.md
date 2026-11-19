@@ -8,6 +8,8 @@ This repository contains planning and technical documentation for a small intern
 pto-calendar/
 ├── backend/     # Node.js + Express + TypeScript + Prisma + PostgreSQL
 ├── frontend/    # React + TypeScript (Vite) + Tailwind CSS
+├── packages/
+│   └── api-client/  # Shared typed HTTP client for the REST API (#259)
 └── docs/        # Project documentation (see below)
 ```
 
@@ -193,13 +195,14 @@ The standalone host flow (`npm run dev`) and the dev-only Postgres (`npm run db:
 | Command                       | Effect                                              |
 | ----------------------------- | --------------------------------------------------- |
 | `npm run dev`                 | Run backend + frontend together (concurrently)      |
-| `npm run build`               | Production build for both workspaces                |
+| `npm run build`               | Production build for all three workspaces           |
 | `npm run start`               | Start the compiled backend (`node dist/index.js`)   |
-| `npm run lint`                | ESLint across both workspaces                       |
-| `npm run typecheck`           | `tsc --noEmit` in both workspaces                   |
+| `npm run lint`                | ESLint across all three workspaces                  |
+| `npm run typecheck`           | `tsc --noEmit` in all three workspaces              |
 | `npm run format`              | Prettier write                                      |
 | `npm run format:check`        | Prettier check                                      |
-| `npm run test:coverage`       | Vitest with coverage for both workspaces            |
+| `npm run test`                | Vitest unit suites in all three workspaces          |
+| `npm run test:coverage`       | Vitest with coverage for all three workspaces       |
 | `npm run test:e2e`            | Playwright E2E suite                                |
 | `npm run db:up` / `db:down`   | Docker compose for local Postgres                   |
 | `npm run db:migrate`          | `prisma migrate dev` (creates new migrations)       |
@@ -209,7 +212,38 @@ The standalone host flow (`npm run dev`) and the dev-only Postgres (`npm run db:
 | `npm run app:up` / `app:down` | Docker compose all-in-one (db + backend + frontend) |
 | `npm run app:reset`           | All-in-one, plus drop the DB volume                 |
 
+Per-workspace commands take the same shape, for example
+`npm run test -w packages/api-client`.
+
 The backend reads `backend/.env` automatically on `npm run dev` and `npm run test:integration`. No `source` step is required. Existing shell env vars (e.g. production overrides) always win over the file.
+
+## Shared API Client Package
+
+`packages/api-client` holds the shared, runtime-neutral typed HTTP client for
+the REST API (issue [#259](https://github.com/lhsalas/pto-calendar/issues/259)).
+It is the single place where the API contract is encoded, so the planned CLI
+and local MCP adapters can share one tested implementation instead of shelling
+out to each other.
+
+- Explicit base URL and credential injection; the credential is bound to one
+  normalized trusted origin. HTTPS is required, with an explicit loopback-only
+  HTTP opt-in for development.
+- No Vite, browser globals, cookie jar or database dependency, and no way for
+  a caller to supply a request URL, a header map or a redirect target.
+- Real abort signals and deadlines, bounded read retries with `Retry-After`
+  handling, and **no automatic write retry**. Only a create has a replay
+  contract: an explicit repeat uses the same key, payload and credential.
+- Sanitized errors: a machine-readable `code`, the HTTP `status`, the
+  `requestId` and completeness metadata, never the upstream body, URL, headers
+  or token.
+
+The package is **private and unpublished**: it is not released to any registry
+and carries no public SDK, versioning or support promise. It is consumed from
+the local workspace source. See
+[`packages/api-client/README.md`](packages/api-client/README.md) for the public
+surface and the coverage policy, and
+[`docs/agent-access-delivery-plan.md`](docs/agent-access-delivery-plan.md) for
+the approved delivery contract.
 
 ## Seeded Dev Users
 
