@@ -32,6 +32,27 @@ function fixture() {
   f.finish();
   return f;
 }
+
+/**
+ * The same router, but the session it wrote is captured after the response.
+ * The nonce only ever lives in the signed cookie, never in a response body.
+ */
+function sessionFixture() {
+  const f = patFixture();
+  let captured: unknown;
+  f.app.use((req, res, next) => {
+    res.on('finish', () => {
+      captured = req.session;
+    });
+    next();
+  });
+  f.app.use(
+    '/auth',
+    createAuthRouter((_req, _res, next) => next()),
+  );
+  f.finish();
+  return { ...f, session: () => captured as { user?: { replayNonce?: string } } | undefined };
+}
 beforeEach(() => {
   vi.clearAllMocks();
   __resetAuthUserCacheForTests();
@@ -65,6 +86,35 @@ describe('auth HTTP alternatives without expanding PAT privileges', () => {
     expect(me.body).toEqual(user);
     expect(me.body).not.toHaveProperty('sessionVersion');
     await request(f.app).post('/auth/logout').expect(204);
+  });
+
+  it('gives every login and setup a fresh replay nonce that never leaves the session', async () => {
+    const f = sessionFixture();
+    const loggedIn = await request(f.app)
+      .post('/auth/login')
+      .send({ email: user.email, password: 'password' })
+      .expect(200);
+    const loginNonce = f.session()?.user?.replayNonce;
+    const noncePattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    expect(loginNonce).toMatch(noncePattern);
+    expect(JSON.stringify(loggedIn.body)).not.toContain('replayNonce');
+    expect(loggedIn.body.user).not.toHaveProperty('replayNonce');
+
+    const setup = await request(f.app)
+      .post('/auth/setup-account')
+      .send({ token: 'x'.repeat(64), password: 'new-password' })
+      .expect(200);
+    const setupNonce = f.session()?.user?.replayNonce;
+    expect(setupNonce).toMatch(noncePattern);
+    expect(setupNonce).not.toBe(loginNonce);
+    expect(JSON.stringify(setup.body)).not.toContain('replayNonce');
+    expect(setup.body.user).not.toHaveProperty('replayNonce');
+
+    // The identity response never carries the nonce either.
+    f.setSession({ id: user.id, role: user.role, sessionVersion: 4, replayNonce: loginNonce });
+    const me = await request(f.app).get('/auth/me').expect(200);
+    expect(JSON.stringify(me.body)).not.toContain('replayNonce');
+    expect(me.body).not.toHaveProperty('replayNonce');
   });
 
   it('returns only safe PAT identity/status metadata without running session identity lookup', async () => {

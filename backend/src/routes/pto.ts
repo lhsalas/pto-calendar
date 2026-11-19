@@ -1,7 +1,8 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { requireAuth } from '../middleware/requireAuth.js';
 import {
   createPto,
+  createPtoIdempotently,
   deletePto,
   getPtoById,
   patchPto,
@@ -23,15 +24,51 @@ import {
   ReplacePtoSchema,
 } from '../services/pto/schemas.js';
 import { parseExpectedVersion } from '../services/pto/preconditions.js';
+import { parseIdempotencyKey } from '../services/pto/idempotencyKey.js';
+import { preparePtoReplay } from '../services/pto/replayCredential.js';
 
 export const ptoRouter: Router = Router();
 
+/**
+ * The raw occurrences of the `Idempotency-Key` header.
+ *
+ * The joined header value cannot tell a repeated header from a single one, so
+ * the occurrences are counted from the raw header list: a repeated header is
+ * refused even when both occurrences carry the same text.
+ */
+function rawIdempotencyKeys(req: Request): string[] | undefined {
+  const values: string[] = [];
+  const raw = req.rawHeaders;
+  for (let index = 0; index + 1 < raw.length; index += 2) {
+    if (raw[index]?.toLowerCase() === 'idempotency-key') {
+      values.push(raw[index + 1]!);
+    }
+  }
+  return values.length > 0 ? values : undefined;
+}
+
 ptoRouter.post('/', requireAuth, async (req, res, next) => {
   try {
+    // The scope is checked before the key or any saved state is looked at, so
+    // an unauthorized caller learns nothing about the key format.
     assertPtoScope(req.auth!, 'create');
+    // A personal token must always name its create intent; a browser session
+    // may still create without a key exactly as before.
+    const key = parseIdempotencyKey(rawIdempotencyKeys(req), req.auth!.method === 'pat');
     const input = CreatePtoSchema.parse(req.body);
-    const created = await createPto(attributedActorFromAuth(req.auth!), input);
-    res.status(201).json(redactPtoNote(req.auth!, toPublicPto(created)));
+    if (!key) {
+      const created = await createPto(attributedActorFromAuth(req.auth!), input);
+      res.status(201).json(redactPtoNote(req.auth!, toPublicPto(created)));
+      return;
+    }
+    const credential = preparePtoReplay(req.auth!, req.user);
+    const result = await createPtoIdempotently(input, key, credential);
+    // A keyed outcome carries the replay state and is never stored anywhere
+    // a cache could keep it.
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Idempotency-Replayed', result.replayed ? 'true' : 'false');
+    res.setHeader('Idempotency-Key-Expires-At', result.expiresAt.toISOString());
+    res.status(201).json(redactPtoNote(result.auth, toPublicPto(result.row)));
   } catch (err) {
     next(err);
   }

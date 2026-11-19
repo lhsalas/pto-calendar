@@ -3,9 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { patFixture } from '../../tests/unit/helpers/patFixture.js';
 import { resetEnvForTests } from '../config/env.js';
 import { HttpError } from '../middleware/errorHandler.js';
+import { __resetAuthUserCacheForTests } from '../middleware/requireAuth.js';
+import { prisma } from '../lib/prisma.js';
 import { ptoRouter } from './pto.js';
 import {
   createPto,
+  createPtoIdempotently,
   deletePto,
   getPtoById,
   patchPto,
@@ -14,9 +17,11 @@ import {
 import { listVisiblePage, listVisibleRange } from '../services/calendar/CalendarQuery.js';
 import type { TokenScope } from '../services/tokens/tokenDomain.js';
 
+vi.mock('../lib/prisma.js', () => ({ prisma: { user: { findUnique: vi.fn() } } }));
 vi.mock('../services/pto/PTOService.js', async () => ({
   ...(await vi.importActual('../services/pto/PTOService.js')),
   createPto: vi.fn(),
+  createPtoIdempotently: vi.fn(),
   deletePto: vi.fn(),
   getPtoById: vi.fn(),
   patchPto: vi.fn(),
@@ -44,6 +49,8 @@ const raw = {
 /** The precondition every write has to name. */
 const IF_MATCH = 'If-Match';
 const VERSION = '"1"';
+/** A canonical create key: the version, the issued time and a client nonce. */
+const IDEMPOTENCY_KEY = 'v1.1700000000000.9f1c2d3e-4a5b-4c6d-8e9f-0a1b2c3d4e5f';
 
 function fixture(options: Parameters<typeof patFixture>[0] = {}) {
   const f = patFixture(options);
@@ -60,6 +67,19 @@ function fixture(options: Parameters<typeof patFixture>[0] = {}) {
     user: { id: record.userId, name: 'Owner', colorCode: '#123456' },
   });
   vi.mocked(createPto).mockResolvedValue(record);
+  vi.mocked(createPtoIdempotently).mockResolvedValue({
+    row: record,
+    auth: {
+      method: 'pat',
+      actor: { id: f.owner.id, role: options.role ?? 'member' },
+      requestId: 'req-keyed',
+      tokenId: f.token.id,
+      scopes: options.scopes ?? ['pto:read'],
+      expiresAt: new Date(),
+    },
+    replayed: false,
+    expiresAt: new Date('2026-12-02T03:04:05.678Z'),
+  });
   vi.mocked(updatePto).mockResolvedValue(record);
   vi.mocked(patchPto).mockResolvedValue(record);
   vi.mocked(deletePto).mockResolvedValue(undefined);
@@ -89,6 +109,7 @@ function fixture(options: Parameters<typeof patFixture>[0] = {}) {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  __resetAuthUserCacheForTests();
   vi.stubEnv('SESSION_SECRET', 'aB1!cD2@eF3#gH4$iJ5%kL6&mN7*oP8+');
   vi.stubEnv('DATABASE_URL', 'postgresql://pto:pto@localhost:5432/pto_test?schema=public');
   resetEnvForTests();
@@ -130,18 +151,22 @@ describe('PTO HTTP scopes and note serialization', () => {
     const created = await request(f.app)
       .post('/pto')
       .set('Authorization', f.bearer)
+      .set('Idempotency-Key', IDEMPOTENCY_KEY)
       .send({ ...body, note: 'submitted', userId: 'other' })
       .expect(201);
     expect(created.body.note).toBeNull();
-    expect(createPto).toHaveBeenCalledWith(
-      {
-        id: f.owner.id,
-        role: 'member',
-        credential: { type: 'personal_access_token', tokenId: f.token.id },
-        requestId: expect.any(String),
-      },
-      { ...body, note: 'submitted' },
-    );
+    // A keyed create goes through the replay-aware service; the forged owner
+    // never reaches it.
+    expect(createPto).not.toHaveBeenCalled();
+    expect(vi.mocked(createPtoIdempotently).mock.calls[0]![0]).toEqual({
+      ...body,
+      note: 'submitted',
+    });
+    expect(vi.mocked(createPtoIdempotently).mock.calls[0]![2]).toMatchObject({
+      ownerId: f.owner.id,
+      kind: 'pat',
+      credentialId: f.token.id,
+    });
     const updated = await request(f.app)
       .put(`/pto/${id}`)
       .set('Authorization', f.bearer)
@@ -169,6 +194,7 @@ describe('PTO HTTP scopes and note serialization', () => {
         await request(notes.app)
           .post('/pto')
           .set('Authorization', notes.bearer)
+          .set('Idempotency-Key', IDEMPOTENCY_KEY)
           .send(body)
           .expect(201)
       ).body.note,
@@ -270,7 +296,12 @@ describe('PTO HTTP scopes and note serialization', () => {
       credential: { type: 'personal_access_token', tokenId: f.token.id },
       requestId: expect.any(String),
     };
-    await request(f.app).post('/pto').set('Authorization', f.bearer).send(forged).expect(201);
+    await request(f.app)
+      .post('/pto')
+      .set('Authorization', f.bearer)
+      .set('Idempotency-Key', IDEMPOTENCY_KEY)
+      .send(forged)
+      .expect(201);
     await request(f.app)
       .put(`/pto/${id}`)
       .set('Authorization', f.bearer)
@@ -282,14 +313,20 @@ describe('PTO HTTP scopes and note serialization', () => {
       .set('Authorization', f.bearer)
       .set(IF_MATCH, VERSION)
       .expect(204);
-    expect(vi.mocked(createPto).mock.calls[0]![0]).toEqual(verified);
+    expect(createPto).not.toHaveBeenCalled();
+    // The keyed create is attributed to the verified token, not to the body.
+    expect(vi.mocked(createPtoIdempotently).mock.calls[0]![2]).toMatchObject({
+      ownerId: f.owner.id,
+      kind: 'pat',
+      credentialId: f.token.id,
+    });
     expect(vi.mocked(updatePto).mock.calls[0]![0]).toEqual(verified);
     expect(vi.mocked(deletePto).mock.calls[0]![0]).toEqual(verified);
     // Every write names the owner the route just authorized, so a record
     // that disappears before the write is a stale write, not a missing one.
     expect(vi.mocked(updatePto).mock.calls[0]![4]).toBe(f.record.userId);
     expect(vi.mocked(deletePto).mock.calls[0]![3]).toBe(f.record.userId);
-    expect(JSON.stringify(vi.mocked(createPto).mock.calls)).not.toContain('forged');
+    expect(JSON.stringify(vi.mocked(createPtoIdempotently).mock.calls)).not.toContain('forged');
     expect(JSON.stringify(vi.mocked(updatePto).mock.calls)).not.toContain('forged');
     // A replacement write refuses the forged keys instead of ignoring them.
     const refused = await request(f.app)
@@ -547,5 +584,197 @@ describe('PTO HTTP scopes and note serialization', () => {
       .expect(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
     expect(updatePto).not.toHaveBeenCalled();
+  });
+});
+
+describe('keyed PTO create', () => {
+  /** A canonical key: the version, the issued time and a client nonce. */
+  const KEY = 'v1.1700000000000.9f1c2d3e-4a5b-4c6d-8e9f-0a1b2c3d4e5f';
+
+  function liveAuth(f: ReturnType<typeof fixture>, scopes: TokenScope[]) {
+    return {
+      method: 'pat' as const,
+      actor: { id: f.owner.id, role: 'member' as const },
+      requestId: 'req-keyed',
+      tokenId: f.token.id,
+      scopes,
+      expiresAt: new Date('2027-01-01T00:00:00.000Z'),
+    };
+  }
+
+  it('requires a key from a personal token and refuses a malformed or repeated one', async () => {
+    const f = fixture({ scopes: ['pto:read', 'pto:create'] });
+
+    const missing = await request(f.app)
+      .post('/pto')
+      .set('Authorization', f.bearer)
+      .send(body)
+      .expect(400);
+    expect(missing.body.error.code).toBe('IDEMPOTENCY_KEY_REQUIRED');
+    expect(createPto).not.toHaveBeenCalled();
+
+    const malformed = await request(f.app)
+      .post('/pto')
+      .set('Authorization', f.bearer)
+      .set('Idempotency-Key', 'v1.not-a-key')
+      .send(body)
+      .expect(400);
+    expect(malformed.body.error.code).toBe('VALIDATION_ERROR');
+    expect(JSON.stringify(malformed.body)).not.toContain('not-a-key');
+    expect(createPto).not.toHaveBeenCalled();
+
+    // A repeated header is refused even when both occurrences carry the same
+    // text, and so is a list of values in one header.
+    const repeated = await request(f.app)
+      .post('/pto')
+      .set('Authorization', f.bearer)
+      .set('Idempotency-Key', [KEY, KEY] as unknown as string)
+      .send(body)
+      .expect(400);
+    expect(repeated.body.error.code).toBe('VALIDATION_ERROR');
+    expect(JSON.stringify(repeated.body)).not.toContain(KEY);
+    expect(createPtoIdempotently).not.toHaveBeenCalled();
+
+    const listed = await request(f.app)
+      .post('/pto')
+      .set('Authorization', f.bearer)
+      .set('Idempotency-Key', `${KEY}, ${KEY}`)
+      .send(body)
+      .expect(400);
+    expect(listed.body.error.code).toBe('VALIDATION_ERROR');
+    expect(createPtoIdempotently).not.toHaveBeenCalled();
+  });
+
+  it('checks the scope before it looks at the key', async () => {
+    const f = fixture({ scopes: ['pto:read'] });
+    const res = await request(f.app)
+      .post('/pto')
+      .set('Authorization', f.bearer)
+      .send(body)
+      .expect(403);
+    expect(res.body.error.code).toBe('FORBIDDEN');
+    expect(createPto).not.toHaveBeenCalled();
+    expect(createPtoIdempotently).not.toHaveBeenCalled();
+  });
+
+  it('returns the replay headers and the current redaction for a keyed create', async () => {
+    const f = fixture({ scopes: ['pto:read', 'pto:create'] });
+    vi.mocked(createPtoIdempotently).mockResolvedValue({
+      row: { ...f.record, userId: f.owner.id },
+      auth: liveAuth(f, ['pto:read', 'pto:create']),
+      replayed: false,
+      expiresAt: new Date('2026-12-02T03:04:05.678Z'),
+    });
+
+    const res = await request(f.app)
+      .post('/pto')
+      .set('Authorization', f.bearer)
+      .set('Idempotency-Key', KEY)
+      .send(body)
+      .expect(201);
+    expect(res.headers['idempotency-replayed']).toBe('false');
+    expect(res.headers['idempotency-key-expires-at']).toBe('2026-12-02T03:04:05.678Z');
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.body.id).toBe(id);
+    // The note is redacted for a credential without note-read.
+    expect(res.body.note).toBeNull();
+    expect(createPto).not.toHaveBeenCalled();
+  });
+
+  it('marks a replayed create and keeps the note hidden from a credential without note-read', async () => {
+    const f = fixture({ scopes: ['pto:read', 'pto:create'] });
+    vi.mocked(createPtoIdempotently).mockResolvedValue({
+      row: { ...f.record, userId: f.owner.id },
+      auth: liveAuth(f, ['pto:read', 'pto:create']),
+      replayed: true,
+      expiresAt: new Date('2026-12-02T03:04:05.678Z'),
+    });
+
+    const res = await request(f.app)
+      .post('/pto')
+      .set('Authorization', f.bearer)
+      .set('Idempotency-Key', KEY)
+      .send(body)
+      .expect(201);
+    expect(res.headers['idempotency-replayed']).toBe('true');
+    expect(res.body.note).toBeNull();
+    expect(JSON.stringify(res.body)).not.toContain('stored private note');
+  });
+
+  it('keeps the key-less browser create unchanged', async () => {
+    const f = fixture();
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({
+      id: f.owner.id,
+      role: 'member',
+      sessionVersion: 0,
+      passwordHash: 'hash',
+    } as never);
+    f.setSession({
+      id: f.owner.id,
+      role: 'member',
+      sessionVersion: 0,
+      replayNonce: '33333333-3333-4333-8333-333333333333',
+    });
+
+    const res = await request(f.app).post('/pto').send(body).expect(201);
+    expect(res.body.id).toBe(id);
+    expect(res.headers['idempotency-replayed']).toBeUndefined();
+    expect(res.headers['idempotency-key-expires-at']).toBeUndefined();
+    expect(res.headers['cache-control']).toBeUndefined();
+    expect(createPtoIdempotently).not.toHaveBeenCalled();
+  });
+
+  it('lets a browser session use a key when it signed in with a replay nonce', async () => {
+    const f = fixture();
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({
+      id: f.owner.id,
+      role: 'member',
+      sessionVersion: 0,
+      passwordHash: 'hash',
+    } as never);
+    f.setSession({
+      id: f.owner.id,
+      role: 'member',
+      sessionVersion: 0,
+      replayNonce: '33333333-3333-4333-8333-333333333333',
+    });
+    vi.mocked(createPtoIdempotently).mockResolvedValue({
+      row: { ...f.record, userId: f.owner.id },
+      auth: {
+        method: 'session',
+        actor: { id: f.owner.id, role: 'member' },
+        requestId: 'req-keyed',
+      },
+      replayed: false,
+      expiresAt: new Date('2026-12-02T03:04:05.678Z'),
+    });
+
+    const res = await request(f.app)
+      .post('/pto')
+      .set('Idempotency-Key', KEY)
+      .send(body)
+      .expect(201);
+    expect(res.headers['idempotency-replayed']).toBe('false');
+    expect(res.body.note).toBe('stored private note');
+  });
+
+  it('refuses a keyed browser create from a session without a replay nonce', async () => {
+    const f = fixture();
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({
+      id: f.owner.id,
+      role: 'member',
+      sessionVersion: 0,
+      passwordHash: 'hash',
+    } as never);
+    // An older cookie: it still creates without a key, but not with one.
+    f.setSession({ id: f.owner.id, role: 'member', sessionVersion: 0 });
+
+    const res = await request(f.app)
+      .post('/pto')
+      .set('Idempotency-Key', KEY)
+      .send(body)
+      .expect(401);
+    expect(res.body.error.code).toBe('UNAUTHENTICATED');
+    expect(createPtoIdempotently).not.toHaveBeenCalled();
   });
 });

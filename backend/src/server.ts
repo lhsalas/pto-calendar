@@ -70,6 +70,12 @@ export function createApp(): ManagedApp {
       origin: env.CORS_ORIGIN,
       credentials: true,
       preflightContinue: true,
+      // The two replay headers of a keyed create are part of the wire
+      // contract. A split-origin browser client can only read them when the
+      // server names them, so they are exposed. Nothing else changes: the
+      // allowed origin, the allowed methods and the credential policy stay
+      // exactly as they were.
+      exposedHeaders: ['Idempotency-Replayed', 'Idempotency-Key-Expires-At'],
     }),
   );
   const jsonParser = express.json({ limit: '100kb' });

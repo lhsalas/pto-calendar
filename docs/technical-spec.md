@@ -808,6 +808,39 @@ friendly preflight may still run first, but the database enforces the rule.
 - The owner can never be transferred by either method, and a personal token
   needs the same scope, live role and record authority as the legacy PUT.
 
+### 9.1b Create replay (#258)
+
+`POST /pto` requires `Idempotency-Key` for an authorized PAT and accepts it
+optionally for a cookie session. A key is `v1.<UTC Unix milliseconds, 13 digits>.<lowercase UUIDv4>`.
+The server rejects duplicate/list headers and timestamps over 120 seconds
+ahead of database time. The absolute deadline is the key's timestamp plus
+24 hours. At or after that deadline `409 IDEMPOTENCY_EXPIRED` is returned,
+even when bounded cleanup has already removed an expired replay entry.
+The deadline controls replay eligibility, not physical retention: expired
+rows are pruned in bounded batches, and normal encrypted backup retention
+still applies. No other write uses this key.
+
+Keys are scoped to trusted owner, credential and operation. PAT identity
+is its public ID; a keyed cookie request uses the signed per-login nonce
+and checks current session version. Existing keyless cookies still work;
+for a keyed request from an older session, sign in again. New login or
+token replacement is a different replay scope, not a retry credential.
+
+The database claim, PTO write, original note-free result and create audit
+commit or roll back together. An identical authorized retry receives the
+same `201` with `Idempotency-Replayed: true` and the original expiry
+header. A different canonical payload yields `409 IDEMPOTENCY_CONFLICT`
+after current credential and scope checks. The claim does not replace
+the #257 overlap guard for distinct intents. No stored note copy is used:
+an authorized note is read only from the unchanged original revision.
+Neither a replay nor an error generates another mutation audit.
+
+Persist a key and its deadline with one approved client intent. If the
+reply is lost, reuse that exact key and payload with the original
+credential before expiry. After expiry, changed credentials or unresolved
+conflict, reconcile the result with current records; do not automatically
+submit a fresh create. The server does not retry failed transactions.
+
 ### 9.2 Auth validation
 - Email must be unique
 - Role must be one of allowed enum values

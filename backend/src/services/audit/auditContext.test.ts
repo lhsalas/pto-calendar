@@ -32,6 +32,15 @@ describe('safeAuditRequestId', () => {
     expect(safeAuditRequestId('pto_pat_00000000-0000-4000-8000-000000000000')).toBeNull();
     expect(safeAuditRequestId('prefix-PTO_PAT_secret')).toBeNull();
   });
+
+  it('never stores a canonical create key as a correlation ID', () => {
+    const key = 'v1.1700000000000.9f1c2d3e-4a5b-4c6d-8e9f-0a1b2c3d4e5f';
+    expect(safeAuditRequestId(key)).toBeNull();
+    expect(safeAuditRequestId(`prefix-${key}`)).toBeNull();
+    expect(safeAuditRequestId(`${key}-suffix`)).toBeNull();
+    expect(attributedActorFromAuth({ ...SESSION, requestId: key }).requestId).toBeNull();
+    expect(attributedActorFromAuth({ ...PAT, requestId: key }).requestId).toBeNull();
+  });
 });
 
 describe('attributedActorFromAuth', () => {

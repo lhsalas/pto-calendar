@@ -11,6 +11,7 @@ import { __resetAuthUserCacheForTests } from '../../src/middleware/requireAuth.j
 import { createApp, type ManagedApp } from '../../src/server.js';
 import { createTokenDatabase } from '../../src/services/tokens/tokenDatabase.js';
 import { issueToken } from '../../src/services/tokens/tokenService.js';
+import { clearFixtureCreateKeys, ptoCreateKey } from '../helpers/ptoCreateKey.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('Overlap integration requires an explicit disposable DB.');
@@ -156,6 +157,7 @@ function ptoAudits() {
 }
 
 async function clearFixtures() {
+  await clearFixtureCreateKeys(db, ownerIds);
   await db.auditLog.deleteMany({ where: { actorUserId: { in: ownerIds } } });
   await db.pTORequest.deleteMany({ where: { userId: { in: ownerIds } } });
   await db.personalAccessToken.deleteMany({ where: { ownerId: { in: ownerIds } } });
@@ -212,6 +214,7 @@ describe('concurrent PTO overlap integrity on PostgreSQL', () => {
         request(app)
           .post('/pto')
           .set('Authorization', `Bearer ${issued.rawToken}`)
+          .set('Idempotency-Key', ptoCreateKey())
           .send(day(collision, 'evening')),
     );
     expect(created!.status).toBe(201);

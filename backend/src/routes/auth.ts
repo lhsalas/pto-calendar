@@ -1,4 +1,5 @@
 import { Router, type RequestHandler } from 'express';
+import { randomUUID } from 'node:crypto';
 import { getCurrentUser, login } from '../services/auth/AuthService.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { LoginSchema } from '../services/auth/schemas.js';
@@ -14,7 +15,7 @@ export function createAuthRouter(loginLimiter: RequestHandler): Router {
       const authenticated = await login(email, password);
       const { sessionVersion, ...user } = authenticated;
       req.session = {
-        user: { id: user.id, role: user.role, sessionVersion },
+        user: { id: user.id, role: user.role, sessionVersion, replayNonce: randomUUID() },
       } as typeof req.session;
       res.json({ user });
     } catch (err) {
@@ -32,7 +33,12 @@ export function createAuthRouter(loginLimiter: RequestHandler): Router {
         { requestId: safeRequestId(req, res) },
       );
       req.session = {
-        user: { id: user.id, role: user.role, sessionVersion: user.sessionVersion },
+        user: {
+          id: user.id,
+          role: user.role,
+          sessionVersion: user.sessionVersion,
+          replayNonce: randomUUID(),
+        },
       } as typeof req.session;
       res.json({
         user: {
