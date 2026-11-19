@@ -8,8 +8,11 @@ import { AdminUsersPage } from '../pages/admin/AdminUsersPage';
 import { AdminHolidaysPage } from '../pages/admin/AdminHolidaysPage';
 import { RequireAuth } from './RequireAuth';
 import { RequireRole } from '../components/guards/RequireRole';
+import { useTokenIssuanceGuard } from '../hooks/useTokenIssuanceGuard';
 
 export function AppRoutes(): JSX.Element {
+  // The non-secret retry guard belongs to the router, not the settings pane.
+  const tokenIssuance = useTokenIssuanceGuard();
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
@@ -26,7 +29,7 @@ export function AppRoutes(): JSX.Element {
         path="/settings/tokens"
         element={
           <RequireAuth>
-            <TokenSettingsPage />
+            <TokenSettingsPage guard={tokenIssuance} />
           </RequireAuth>
         }
       />

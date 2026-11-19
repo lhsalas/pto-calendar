@@ -1,8 +1,9 @@
 import type { JSX } from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/useAuth';
+import type { TokenIssuanceGuard } from '../../hooks/useTokenIssuanceGuard';
 import { useToast } from '../../hooks/useToast';
 import { useTokens } from '../../hooks/useTokens';
 import { issueToken } from '../../api/tokens';
@@ -36,7 +37,7 @@ type ConfirmState = { kind: 'one'; token: TokenMetadata } | { kind: 'all' } | nu
  * memory for the length of the reveal dialog only — never in storage, the
  * URL, a toast or a log.
  */
-export function TokenSettingsPage(): JSX.Element {
+export function TokenSettingsPage({ guard }: { guard: TokenIssuanceGuard }): JSX.Element {
   const { user } = useAuth();
 
   if (!user) {
@@ -47,14 +48,15 @@ export function TokenSettingsPage(): JSX.Element {
     );
   }
 
-  return <TokenSettingsPane key={user.id} user={user} />;
+  return <TokenSettingsPane key={user.id} user={user} guard={guard} />;
 }
 
 interface TokenSettingsPaneProps {
   user: User;
+  guard: TokenIssuanceGuard;
 }
 
-function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
+function TokenSettingsPane({ user, guard }: TokenSettingsPaneProps): JSX.Element {
   const { logout } = useAuth();
   const { push: pushToast } = useToast();
   const { tokens, loading, error, refetch, revoke, revokeAll } = useTokens(user.id);
@@ -70,13 +72,15 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
   const [confirm, setConfirm] = useState<ConfirmState>(null);
   const [revoking, setRevoking] = useState<boolean>(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
-  /**
-   * Set when an issuance could not be confirmed. The server may have created
-   * the token, so no further issuance is allowed until the list has been
-   * refreshed and the refresh has succeeded.
-   */
-  const [issuanceUnknown, setIssuanceUnknown] = useState<boolean>(false);
   const [refreshFailed, setRefreshFailed] = useState<boolean>(false);
+
+  /**
+   * The reconciliation marker lives above the route, so it survives
+   * navigating away and back. It is true while an issuance attempt of this
+   * account is unsettled: the server may have created that token.
+   */
+  const pendingAttempt = guard.pendingAttempt(user.id);
+  const issuanceUnknown = pendingAttempt !== undefined;
 
   const issueGeneration = useRef<number>(0);
   const issueAbort = useRef<AbortController | null>(null);
@@ -91,35 +95,30 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
     issuingRef.current = false;
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      // A late issuance response must never be rendered: the request is
-      // aborted and its result is ignored once the pane is left.
-      issueGeneration.current += 1;
-      issueAbort.current?.abort();
-      issueAbort.current = null;
-      issuingRef.current = false;
+      // Invalidate the pane during the unmount commit, before an old
+      // issuance or refresh can settle this account's marker.
+      cancelIssuance();
     };
-  }, []);
+  }, [cancelIssuance]);
 
   // A native navigation or a frozen back/forward cache must not keep the
   // secret or a half-finished issuance alive, so both are dropped at once.
   useEffect(() => {
     function handlePageHide(): void {
-      const wasIssuing = issuingRef.current;
       cancelIssuance();
       // React must commit the removal before a browser freezes this document.
-      // A cancelled request cannot reset its own pending state later.
+      // A cancelled request cannot reset its own pending state later. The
+      // reconciliation marker is kept: the server may have committed the
+      // token before the answer was lost.
       flushSync(() => {
         setRevealed(null);
         setCreateOpen(false);
         setSubmitting(false);
         setIssueError(null);
-        // The server may have committed the token before the answer was lost,
-        // so the pane stays in the unknown state until the list is refreshed.
-        if (wasIssuing) setIssuanceUnknown(true);
       });
     }
     window.addEventListener('pagehide', handlePageHide);
@@ -130,13 +129,16 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
     // One issuance at a time: a second submit is refused before the first
     // request has even answered.
     if (issuingRef.current) return;
-    // An unconfirmed issuance keeps the pane blocked until the list has
+    // An unconfirmed issuance keeps the account blocked until the list has
     // been refreshed; closing and reopening the form does not lift that.
     if (issuanceUnknown) {
       setIssueError(ISSUE_BLOCKED_MESSAGE);
       return;
     }
     issuingRef.current = true;
+    // The marker is set before anything is awaited, so a cancelled attempt,
+    // a route change or a lost answer still leaves the account blocked.
+    const attempt = guard.begin(user.id);
     const generation = ++issueGeneration.current;
     const controller = new AbortController();
     issueAbort.current = controller;
@@ -155,16 +157,20 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
       if (generation !== issueGeneration.current || !mountedRef.current) return;
       setCreateOpen(false);
       setRevealed({ rawToken: response.rawToken, token: response.token });
-      setIssuanceUnknown(false);
+      // A confirmed issuance settles the attempt.
+      guard.settle(user.id, attempt);
       await refetch({ silent: true });
     } catch (err) {
       if (generation !== issueGeneration.current || !mountedRef.current) return;
       const failure = classifyIssueFailure(err);
-      if (failure.kind === 'unknown') {
-        // The server may have created the token. No further issuance is
-        // allowed until the list has been refreshed successfully.
-        setIssuanceUnknown(true);
+      if (failure.kind === 'rejected') {
+        // The server explained the refusal, so nothing was created and the
+        // account may try again.
+        guard.settle(user.id, attempt);
       }
+      // An unknown outcome keeps the marker: the server may have created the
+      // token, so no further issuance is allowed until the list has been
+      // refreshed successfully.
       setIssueError(failure.message);
     } finally {
       if (generation === issueGeneration.current) {
@@ -176,21 +182,24 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
   }
 
   function handleCloseCreate(): void {
-    const wasIssuing = issuingRef.current;
+    // A cancelled attempt keeps the marker: it may still have reached the
+    // server.
     cancelIssuance();
     setSubmitting(false);
     setIssueError(null);
     setCreateOpen(false);
-    // A cancelled issuance may still have reached the server.
-    if (wasIssuing) setIssuanceUnknown(true);
   }
 
   async function handleRefreshList(): Promise<void> {
+    if (pendingAttempt === undefined || issuingRef.current) return;
+    const generation = issueGeneration.current;
     setRefreshFailed(false);
     const refreshed = await refetch();
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || generation !== issueGeneration.current) return;
     if (refreshed) {
-      setIssuanceUnknown(false);
+      // An explicit, successful and authoritative refresh settles the
+      // attempt it was started for, not any newer attempt.
+      guard.settle(user.id, pendingAttempt);
       setIssueError(null);
     } else {
       // The list could not be confirmed, so the issuance stays blocked.
@@ -326,7 +335,7 @@ function TokenSettingsPane({ user }: TokenSettingsPaneProps): JSX.Element {
             </p>
           </div>
 
-          {issuanceUnknown ? (
+          {issuanceUnknown && !submitting ? (
             <div
               role="alert"
               data-testid="issuance-unknown"

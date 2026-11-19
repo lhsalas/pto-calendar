@@ -1,16 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JSX } from 'react';
-import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Link, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from '../../src/context/AuthContext';
 import { AuthContext } from '../../src/context/authContextValue';
 import type { AuthContextValue } from '../../src/context/authContextValue';
 import { ThemeProvider } from '../../src/context/ThemeContext';
 import { ToastProvider } from '../../src/context/ToastProvider';
+import { useTokenIssuanceGuard } from '../../src/hooks/useTokenIssuanceGuard';
 import { ToastViewport } from '../../src/components/common/ToastViewport';
 import { TokenSettingsPage } from '../../src/pages/settings/TokenSettingsPage';
+import { AppRoutes } from '../../src/routes/AppRoutes';
 import { server } from '../mocks/server';
 import { STUB_RAW_TOKEN, STUB_TOKEN, tokensListEmpty } from '../mocks/handlers';
 import type { Role, TokenMetadata, TokenScope, User } from '../../src/types/api';
@@ -39,16 +41,36 @@ function authFor(role: Role) {
   return http.get('/auth/me', () => HttpResponse.json(userWithRole(role)));
 }
 
+/**
+ * The calendar route is stubbed with the same entry point the real calendar
+ * offers, so a test can leave the token settings and come back.
+ */
+function CalendarStub(): JSX.Element {
+  return (
+    <div>
+      <h1>Calendar Page</h1>
+      <Link to="/settings/tokens">API access</Link>
+    </div>
+  );
+}
+
+function TokenSettingsRoutes(): JSX.Element {
+  const guard = useTokenIssuanceGuard();
+  return (
+    <Routes>
+      <Route path="/settings/tokens" element={<TokenSettingsPage guard={guard} />} />
+      <Route path="/calendar" element={<CalendarStub />} />
+    </Routes>
+  );
+}
+
 function renderPage(): ReturnType<typeof render> {
   return render(
     <MemoryRouter initialEntries={['/settings/tokens']}>
       <ThemeProvider>
         <AuthProvider>
           <ToastProvider>
-            <Routes>
-              <Route path="/settings/tokens" element={<TokenSettingsPage />} />
-              <Route path="/calendar" element={<h1>Calendar Page</h1>} />
-            </Routes>
+            <TokenSettingsRoutes />
             <ToastViewport />
           </ToastProvider>
         </AuthProvider>
@@ -77,10 +99,7 @@ function renderWithAccount(user: User): {
         <ThemeProvider>
           <AuthContext.Provider value={authValueFor(next)}>
             <ToastProvider>
-              <Routes>
-                <Route path="/settings/tokens" element={<TokenSettingsPage />} />
-                <Route path="/calendar" element={<h1>Calendar Page</h1>} />
-              </Routes>
+              <TokenSettingsRoutes />
               <ToastViewport />
             </ToastProvider>
           </AuthContext.Provider>
@@ -112,6 +131,14 @@ function unstubClipboard(): void {
 
 function tokenWith(overrides: Partial<TokenMetadata>): TokenMetadata {
   return { ...STUB_TOKEN, ...overrides };
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((ready) => {
+    resolve = ready;
+  });
+  return { promise, resolve };
 }
 
 async function openCreateDialog(user: ReturnType<typeof userEvent.setup>): Promise<void> {
@@ -821,33 +848,33 @@ describe('TokenSettingsPage', () => {
     expect(screen.queryByTestId('tokens-loading')).not.toBeInTheDocument();
   });
 
-  it('renders a token without scopes and a token with an unknown scope', async () => {
+  it('refuses a list with unusable metadata and keeps the reconciliation block', async () => {
+    const issue = vi.fn(() =>
+      HttpResponse.json({ error: { code: 'INTERNAL_ERROR', message: 'boom' } }, { status: 500 }),
+    );
     server.use(
       authFor('member'),
+      // A list element the adapter must refuse: the whole answer is
+      // rejected, so it never counts as an authoritative list.
       http.get('/auth/tokens', () =>
-        HttpResponse.json({
-          tokens: [
-            tokenWith({
-              id: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
-              name: 'No scopes',
-              displayPrefix: 'pto_pat_dddddddd-dddd-dddd-dddd-dddddddddddd',
-              scopes: [],
-            }),
-            tokenWith({
-              id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
-              name: 'Odd scope',
-              displayPrefix: 'pto_pat_eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
-              scopes: ['pto:mystery' as TokenScope],
-            }),
-          ],
-        }),
+        HttpResponse.json({ tokens: [tokenWith({ scopes: ['pto:mystery' as TokenScope] })] }),
       ),
+      http.post('/auth/tokens', issue),
     );
+    const user = userEvent.setup();
     renderPage();
-    const empty = await screen.findByTestId('token-card-dddddddd-dddd-dddd-dddd-dddddddddddd');
-    expect(within(empty).getByText('None')).toBeInTheDocument();
-    const odd = await screen.findByTestId('token-card-eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee');
-    expect(within(odd).getAllByText(/pto:mystery/).length).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/something went wrong/i);
+
+    await user.click(screen.getByRole('button', { name: 'Generate token' }));
+    await user.type(screen.getByLabelText(/token name/i), 'Laptop');
+    await user.type(screen.getByLabelText(/current password/i), 'correct horse');
+    await user.click(screen.getByRole('button', { name: 'Create token' }));
+    expect(await screen.findByTestId('issuance-unknown')).toBeInTheDocument();
+
+    // A refused refresh does not lift the block either.
+    await user.click(screen.getByTestId('refresh-token-list-button'));
+    expect(await screen.findByTestId('refresh-token-list-failed')).toBeInTheDocument();
+    expect(screen.getByTestId('issuance-unknown')).toBeInTheDocument();
   });
 
   it('warns about a token that lapses in exactly one day', async () => {
@@ -1020,7 +1047,7 @@ describe('TokenSettingsPage', () => {
         HttpResponse.json(
           {
             rawToken: STUB_RAW_TOKEN,
-            token: tokenWith({ scopes: ['pto:mystery' as TokenScope] }),
+            token: tokenWith({ scopes: ['pto:read', 'pto:create'] }),
           },
           { status: 201 },
         ),
@@ -1030,7 +1057,8 @@ describe('TokenSettingsPage', () => {
     renderPage();
     await issueToken(user);
     const dialog = await screen.findByRole('dialog', { name: /copy your token/i });
-    expect(within(dialog).getByText(/pto:mystery/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/read the team calendar/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/create your own time off/i)).toBeInTheDocument();
   });
 
   it('empties the secret from the document when the page is frozen', async () => {
@@ -1201,6 +1229,7 @@ describe('TokenSettingsPage', () => {
     { rawToken: '', token: STUB_TOKEN },
     { rawToken: STUB_RAW_TOKEN },
     { rawToken: STUB_RAW_TOKEN, token: { id: STUB_TOKEN.id } },
+    { rawToken: STUB_RAW_TOKEN, token: { id: STUB_TOKEN.id, scopes: ['pto:read'] } },
   ])('never reveals a credential from an incomplete issuance response', async (payload) => {
     server.use(
       authFor('member'),
@@ -1284,5 +1313,190 @@ describe('TokenSettingsPage', () => {
       screen.getByText(/unusable for api calls until bearer access is enabled/i),
     ).toBeInTheDocument();
     expect(screen.queryByText(/creates nothing/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps a cancelled issuance blocked after the same account leaves and comes back', async () => {
+    const release = deferred();
+    const replied = deferred();
+    const requestSignal: { current: AbortSignal | null } = { current: null };
+    const issue = vi.fn(async ({ request }: { request: Request }) => {
+      requestSignal.current = request.signal;
+      await release.promise;
+      replied.resolve();
+      return HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 });
+    });
+    let listCalls = 0;
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () => {
+        listCalls += 1;
+        return HttpResponse.json({ tokens: [] });
+      }),
+      http.post('/auth/tokens', issue),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId('tokens-empty');
+    await openCreateDialog(user);
+    await user.type(screen.getByLabelText(/token name/i), 'Laptop');
+    await user.type(screen.getByLabelText(/current password/i), 'correct horse');
+    await user.click(screen.getByRole('button', { name: 'Create token' }));
+    await waitFor(() => {
+      expect(issue).toHaveBeenCalledTimes(1);
+    });
+
+    // Leave the route while the request is in flight.
+    await user.click(screen.getByTestId('back-to-calendar-link'));
+    await screen.findByRole('heading', { name: 'Calendar Page' });
+    expect(requestSignal.current?.aborted).toBe(true);
+    await act(async () => {
+      release.resolve();
+      await replied.promise;
+    });
+    // The late answer is discarded: no secret and no password reappear.
+    expect(screen.queryByDisplayValue(STUB_RAW_TOKEN)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/current password/i)).not.toBeInTheDocument();
+
+    // The same account comes back. The initial list succeeds, but the
+    // account is still blocked because the attempt was never confirmed.
+    await user.click(screen.getByRole('link', { name: 'API access' }));
+    await screen.findByTestId('tokens-empty');
+    expect(listCalls).toBeGreaterThanOrEqual(2);
+    expect(await screen.findByTestId('issuance-unknown')).toBeInTheDocument();
+    await openCreateDialog(user);
+    expect(screen.getByRole('button', { name: 'Create token' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Create token' }));
+    expect(issue).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    // Only an explicit, successful refresh lifts the block.
+    await user.click(screen.getByTestId('refresh-token-list-button'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('issuance-unknown')).not.toBeInTheDocument();
+    });
+    await openCreateDialog(user);
+    expect(screen.getByRole('button', { name: 'Create token' })).toBeEnabled();
+    await user.type(screen.getByLabelText(/token name/i), 'Second');
+    await user.type(screen.getByLabelText(/current password/i), 'correct horse');
+    await user.click(screen.getByRole('button', { name: 'Create token' }));
+    expect(await screen.findByRole('dialog', { name: /copy your token/i })).toBeInTheDocument();
+    expect(issue).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps an unknown issuance blocked after the same account leaves and comes back', async () => {
+    const issue = vi.fn(() =>
+      HttpResponse.json({ error: { code: 'INTERNAL_ERROR', message: 'boom' } }, { status: 500 }),
+    );
+    let listCalls = 0;
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () => {
+        listCalls += 1;
+        return HttpResponse.json({ tokens: [] });
+      }),
+      http.post('/auth/tokens', issue),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId('tokens-empty');
+    await issueToken(user);
+    expect(await screen.findByTestId('issuance-unknown')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('back-to-calendar-link'));
+    await screen.findByRole('heading', { name: 'Calendar Page' });
+    await user.click(screen.getByRole('link', { name: 'API access' }));
+    await screen.findByTestId('tokens-empty');
+    expect(listCalls).toBeGreaterThanOrEqual(2);
+    // The initial list succeeded, but the unknown attempt still blocks.
+    expect(screen.getByTestId('issuance-unknown')).toBeInTheDocument();
+    await openCreateDialog(user);
+    expect(screen.getByRole('button', { name: 'Create token' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Create token' }));
+    expect(issue).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the marker across a route change in the real router', async () => {
+    const issue = vi.fn(() =>
+      HttpResponse.json({ error: { code: 'INTERNAL_ERROR', message: 'boom' } }, { status: 500 }),
+    );
+    server.use(
+      http.get('/auth/me', () => HttpResponse.json(userWithRole('member'))),
+      http.get('/pto', () => HttpResponse.json([])),
+      http.get('/holidays', () => HttpResponse.json([])),
+      http.get('/auth/tokens', () => HttpResponse.json({ tokens: [] })),
+      http.post('/auth/tokens', issue),
+    );
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/settings/tokens']}>
+        <ThemeProvider>
+          <AuthProvider>
+            <ToastProvider>
+              <AppRoutes />
+              <ToastViewport />
+            </ToastProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByRole('heading', { name: 'Personal access tokens' });
+    await issueToken(user);
+    expect(await screen.findByTestId('issuance-unknown')).toBeInTheDocument();
+
+    // The real calendar offers the account entry point.
+    await user.click(screen.getByTestId('back-to-calendar-link'));
+    await screen.findByRole('heading', { name: 'Calendar' });
+    await user.click(screen.getByTestId('api-access-link'));
+    await screen.findByRole('heading', { name: 'Personal access tokens' });
+    // The marker is still there: it belongs to the router, not the page.
+    expect(screen.getByTestId('issuance-unknown')).toBeInTheDocument();
+    await openCreateDialog(user);
+    expect(screen.getByRole('button', { name: 'Create token' })).toBeDisabled();
+    expect(issue).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the marker per account across an account switch and back', async () => {
+    const release = deferred();
+    const replied = deferred();
+    const issue = vi.fn(async () => {
+      await release.promise;
+      replied.resolve();
+      return HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 });
+    });
+    server.use(
+      http.get('/auth/tokens', () => HttpResponse.json({ tokens: [] })),
+      http.post('/auth/tokens', issue),
+    );
+    const user = userEvent.setup();
+    const { rerender } = renderWithAccount(MEMBER);
+    await screen.findByTestId('tokens-empty');
+    await openCreateDialog(user);
+    await user.type(screen.getByLabelText(/token name/i), 'Laptop');
+    await user.type(screen.getByLabelText(/current password/i), 'correct horse');
+    await user.click(screen.getByRole('button', { name: 'Create token' }));
+    await waitFor(() => {
+      expect(issue).toHaveBeenCalledTimes(1);
+    });
+
+    // Another account is not blocked by the first account's attempt.
+    rerender(OTHER_MEMBER);
+    await screen.findByTestId('tokens-empty');
+    expect(screen.queryByTestId('issuance-unknown')).not.toBeInTheDocument();
+    await openCreateDialog(user);
+    expect(screen.getByRole('button', { name: 'Create token' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    // Back to the first account: it is still blocked, and the late answer of
+    // its cancelled attempt changes nothing.
+    rerender(MEMBER);
+    await act(async () => {
+      release.resolve();
+      await replied.promise;
+    });
+    expect(await screen.findByTestId('issuance-unknown')).toBeInTheDocument();
+    await openCreateDialog(user);
+    expect(screen.getByRole('button', { name: 'Create token' })).toBeDisabled();
+    expect(issue).toHaveBeenCalledTimes(1);
+    expect(screen.queryByDisplayValue(STUB_RAW_TOKEN)).not.toBeInTheDocument();
   });
 });
