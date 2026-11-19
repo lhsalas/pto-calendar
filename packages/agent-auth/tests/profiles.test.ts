@@ -544,6 +544,57 @@ describe('resolving a credential', () => {
     );
   });
 
+  it('refuses a malformed environment record before any store is touched', async () => {
+    const { auth, files, keyring, events } = createHarness();
+    // The local default profile and its credential are really there, so a
+    // fall back would have succeeded.
+    await auth.setProfile({ profile: 'default', baseUrl: ORIGIN, token: TOKEN });
+    expect(keyring.entries.get(entryKey('default', ORIGIN))).toBe(TOKEN);
+    expect(files.records.get('default')?.record).not.toBeNull();
+
+    const malformed: Array<[string, unknown]> = [
+      ['null', null],
+      ['an empty array', []],
+      ['an array that carries a credential', [TOKEN]],
+      ['a number', 42],
+    ];
+    for (const [name, value] of malformed) {
+      events.length = 0;
+      await expectCode(auth.resolve({ env: value as AgentAuthEnvironment }), 'INVALID_OPTIONS');
+      // No file record and no credential store were asked.
+      expect(events, name).toEqual([]);
+      events.length = 0;
+      await expectCode(auth.status({ env: value as AgentAuthEnvironment }), 'INVALID_OPTIONS');
+      expect(events, name).toEqual([]);
+    }
+  });
+
+  it('still selects the local profile for an absent or empty record', async () => {
+    const { auth, events } = createHarness();
+    await auth.setProfile({ profile: 'default', baseUrl: ORIGIN, token: TOKEN });
+
+    events.length = 0;
+    const absent = await auth.resolve({ env: undefined });
+    expect(absent.profile).toBe('default');
+    expect(absent.source).toBe('keyring');
+    expect(absent.credential.token).toBe(TOKEN);
+
+    events.length = 0;
+    const empty = await auth.resolve({ env: {} });
+    expect(empty.profile).toBe('default');
+    expect(empty.source).toBe('keyring');
+    expect(empty.credential.token).toBe(TOKEN);
+
+    events.length = 0;
+    const without = await auth.resolve();
+    expect(without.profile).toBe('default');
+    expect(without.source).toBe('keyring');
+
+    const status = await auth.status({ env: {} });
+    expect(status.ready).toBe(true);
+    expect(status.source).toBe('keyring');
+  });
+
   it('never reads the ambient environment on its own', async () => {
     const { auth } = createHarness();
     const previousOrigin = process.env.PTO_API_ORIGIN;

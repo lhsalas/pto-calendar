@@ -260,6 +260,10 @@ function loopbackOptIn(value: unknown): boolean {
 /**
  * The environment pair of an explicit record.
  *
+ * Only an absent record is no record. An explicit `null`, an array or any
+ * other malformed value is refused before a single store is touched, so a
+ * malformed record can never select an unintended local profile.
+ *
  * The record is read by the keys it carries, never by the values it happens
  * to hold: a field that is supplied but empty or malformed is a supplied
  * field, and it is refused instead of being read as an absent one. A record
@@ -278,8 +282,14 @@ function environmentPair(
   env: AgentAuthEnvironment | undefined,
   hasExplicitProfile: boolean,
 ): EnvironmentPair | null {
-  if (env === undefined || env === null) return null;
-  if (typeof env !== 'object') throw new AgentAuthError('INVALID_OPTIONS');
+  // Only an absent record is no record. An explicit `null`, an array or any
+  // other value is a malformed record, and it is refused before a single
+  // store is touched: a malformed record must never select an unintended
+  // local profile.
+  if (env === undefined) return null;
+  if (env === null || typeof env !== 'object' || Array.isArray(env)) {
+    throw new AgentAuthError('INVALID_OPTIONS');
+  }
   const hasOriginField = Object.hasOwn(env, 'PTO_API_ORIGIN');
   const hasTokenField = Object.hasOwn(env, 'PTO_API_TOKEN');
   // The raw presence of a field is what makes the record ambiguous: a field
