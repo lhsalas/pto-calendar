@@ -605,6 +605,10 @@ paths:
         filtered query. A syntactically valid owner that does not exist yields
         an empty result, not an error.
 
+        The owner/date non-overlap invariant is enforced by a database
+        exclusion constraint, so it holds for concurrent writes. A violation is
+        the same safe `409 CONFLICT` envelope as the friendly overlap check.
+
         Ordering is deterministic: `(startDate, userId, id)`. The continuation
         cursor is an opaque, server-minted integrity token bound to the range
         and the owner filter; it is not an authorization or snapshot token, and
@@ -772,7 +776,12 @@ paths:
         '403':
           $ref: '#/components/responses/PatForbidden'
         '409':
-          description: PTO overlaps an existing PTO entry for the same user
+          description: >
+            PTO overlaps an existing PTO entry for the same user. The owner/date
+            exclusion constraint decides this at the database boundary, so the
+            answer is the same for concurrent writes and for every credential
+            type. A database transaction write conflict can also return 409,
+            without claiming an overlap; no raw driver error is returned.
           headers:
             X-Request-Id:
               schema: { type: string, format: uuid }
@@ -927,7 +936,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
-          description: PTO overlaps an existing PTO entry for the same user
+          description: >
+            PTO overlaps an existing PTO entry for the same user. The owner/date
+            exclusion constraint decides this at the database boundary, so the
+            answer is the same for concurrent writes and for every credential
+            type. A database transaction write conflict can also return 409,
+            without claiming an overlap; no raw driver error is returned.
           headers:
             X-Request-Id:
               schema: { type: string, format: uuid }
@@ -1043,7 +1057,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
-          description: PTO overlaps an existing PTO entry for the same user
+          description: >
+            PTO overlaps an existing PTO entry for the same user. The owner/date
+            exclusion constraint decides this at the database boundary, so the
+            answer is the same for concurrent writes and for every credential
+            type. A database transaction write conflict can also return 409,
+            without claiming an overlap; no raw driver error is returned.
           headers:
             X-Request-Id:
               schema: { type: string, format: uuid }

@@ -553,6 +553,47 @@ unexpected archive members, wrong/weak keys, SQL failure, temporary-file cleanup
 and explicit plaintext retention are covered without cloud credentials. The
 PostgreSQL backup roundtrip integration test remains the real database check.
 
+**Backup/restore coverage for the exclusion constraint (#257):**
+`backend/tests/integration/backupRestore.test.ts` dumps with the very same
+arguments the production backup uses (public schema, no owner, no ACL and the
+`btree_gist` extension **only when the source has it**), and both dumps read
+**one exported PostgreSQL snapshot**, exactly like the production backup: a
+migration that commits between the two dumps can no longer produce a schema
+without the constraint next to a data file with a finished migration marker.
+The roundtrip proves that the restored database
+
+- carries the `btree_gist` extension and the named
+  `pto_requests_no_owner_overlap` exclusion constraint,
+- keeps the restored row's dates, day part, note and `version` identical to
+  the source, and
+- really refuses an overlapping PTO for the same owner (the insert fails with
+  the exclusion violation and the row count does not change).
+
+The restored schema and the restored data must also agree about the #257
+migration: the data file records the migration as applied exactly when the
+schema file carries the constraint it installed. The same file keeps the
+pre-existing baseline tests intact (the encrypted roundtrip and the sanitizer
+rules) and adds focused checks: a database without the extension is still
+dumped without it, so an older backup is never blocked, and a schema dump
+that carries the constraint without the extension is the shape the backup
+script must refuse.
+
+The script itself needs the container and the object store, so its behaviour is
+checked against a recording stand-in that answers with a fixed snapshot:
+both dumps must name the **same** snapshot, the exporting session must be open
+while both dumps run and closed afterwards, an archive whose schema does not
+match the snapshot or records an unfinished migration must be refused
+**without an upload**, a failing dump must still close the exporter, and a database that predates the migration must
+still be backed up. The guard the script adds (the fixed existence queries,
+the narrow extension selection, the fail-closed rules and the unchanged
+encryption/upload settings) is asserted statically as well. The
+database-backed tests keep the existing conditional local skip; CI requires
+them.
+The missing-ledger regression test runs the backup script's snapshot query
+against real disposable PostgreSQL. An empty `public` schema can be backed
+up for recovery; a schema containing an object with no migration ledger is
+refused before dumping or uploading.
+
 ### 10.3 Caching
 - Cache `node_modules` and Playwright browsers keyed on lockfile hashes.
 

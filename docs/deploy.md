@@ -287,6 +287,101 @@ every browser session; losing `OCI_DB_PASSWORD` requires recovering
 `/opt/pto-calendar/.env` from backup or restoring the database into a new
 container with a fresh password.
 
+### 5.1 The exclusion constraint and the backup archive (#257)
+
+The owner/date non-overlap invariant is enforced by a PostgreSQL exclusion
+constraint (`pto_requests_no_owner_overlap`) over the owner and an inclusive
+`daterange`. It needs the trusted `btree_gist` extension, and a schema dump
+that only covers the `public` schema omits the extension declaration: such an
+archive carries the constraint without the extension it needs and cannot be
+applied on a target.
+
+The archive also has to be **consistent**. A schema dump taken before the
+#257 migration and a data dump taken after it leave the data with a finished
+`_prisma_migrations` marker and the schema without the constraint that
+migration installed. Restoring that archive succeeds and looks healthy while
+the guard is missing — the ledger says the migration ran, the schema says
+otherwise. Such an archive must never be uploaded.
+
+`infra/deploy/backup.sh` therefore:
+
+- exports **one** PostgreSQL snapshot from a dedicated read-only,
+  repeatable-read session of its own and passes the same `--snapshot` to both
+  the schema dump and the data dump, so both files describe the same database
+  state. A migration that commits between the two dumps can no longer split
+  the archive;
+- reads the extension, the constraint and the Prisma migration status
+  **inside the exporting transaction**. It refuses to back up an unfinished
+  #257 migration or a schema that disagrees with its recorded migration
+  status, including the window between the DDL commit and Prisma's final
+  ledger update. No row data, connection detail or snapshot ID is logged;
+- when there is no Prisma ledger, accepts only an existing `public` schema
+  with no dependent objects. The restore script creates `public` if needed
+  and still requires an encrypted pre-restore backup. Do not remove or
+  fabricate a ledger to make a populated target pass this check;
+- adds `--extension=btree_gist` to the schema dump **only when the snapshot
+  has the extension**. A database that predates the migration is dumped
+  exactly as before, so an older backup is never blocked;
+- refuses to continue when the dumped state does not match the snapshot — the
+  schema dump has no constraint the snapshot had, or has one the snapshot did
+  not have — and when a dump carries the constraint without the extension.
+  The backup fails with a clear error and **nothing is uploaded**;
+- keeps the exporter alive for both dumps, then closes the connection before
+  encryption or upload. Failure or a caught interrupt closes the exporter
+  and removes incomplete local artifacts;
+- changes nothing else: the encryption, the instance-principal upload, the
+  target confirmation, the secret handling and the file permissions are
+  untouched, the archive still holds exactly `schema.sql` and `data.sql`, and
+  the extension selection stays limited to the one known extension.
+
+Restoring such an archive re-creates the extension before the constraint, so
+the restored database enforces the invariant exactly like the source. The
+restore order (schema, then data) and the shared SQL sanitizers are unchanged.
+
+### 5.2 Applying the exclusion-constraint migration safely
+
+The migration that adds the constraint needs the `btree_gist` extension:
+
+- `btree_gist` is a **trusted** extension, so the database owner — or a role
+  with `CREATE` on the target database — can install it without superuser
+  rights. The `pto` role owns the OCI database and can create it.
+- The role that applies the migration must own `pto_requests` (or be a member
+  of the role that owns it) and needs `CREATE` on the database when the
+  extension is not installed yet. A pre-installed extension must be in
+  `public` so a schema-only `public` archive can restore it.
+- The extension must exist in the target's PostgreSQL installation. The pinned
+  `postgres:16-alpine` image ships the `contrib` extensions, including
+  `btree_gist`; a self-built or non-contrib PostgreSQL must have it
+  installed first, otherwise the migration stops with a clear error.
+- The migration **preflights** the existing rows. If two PTO entries of one
+  owner already overlap, it stops with a sanitized, actionable report: how
+  many stored entries end before they start and how many overlap another entry
+  of the same owner. No entry data is listed, nothing is deleted, rewritten
+  or merged, and no automatic SQL clean-up runs.
+- Before an approved rollout, install the extension-aware backup script,
+  verify an encrypted pre-migration backup, and schedule a maintenance
+  window. The migration holds `ACCESS EXCLUSIVE` on `pto_requests` through
+  the preflight and index build. It fails if it cannot acquire a lock within
+  five seconds; that bound is for lock acquisition, not index build time.
+- If preflight fails, have the data steward identify and resolve conflicts in
+  an authorized workflow. Once an operator verifies the failed migration
+  rolled back and the invariant can be installed, mark the failed Prisma
+  migration `--rolled-back` before retrying `migrate deploy`. Do not mark a
+  failed migration applied or repair records automatically.
+
+An application rollback does not require removing this constraint; it
+enforces the earlier application's overlap rule as well. Removing it or
+restoring a pre-migration backup is a separately approved database operation:
+it would discard the concurrent-write guarantee, and restoring an older
+backup can lose later changes. Rehearse recovery on a disposable database,
+keep writes stopped during recovery, and verify both the migration history
+and constraint before reopening writes.
+
+Verification uses disposable PostgreSQL 16.14 and the production dump and
+restore arguments. Offline inspection found the trusted extension and UUID
+GiST operator class in the pinned `linux/arm64` image. This is not an ARM64
+runtime test, a production restore certification, or rollout approval.
+
 ## 6. Disaster recovery and rollback
 
 ### Application rollback

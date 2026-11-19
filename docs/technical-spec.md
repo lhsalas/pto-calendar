@@ -187,12 +187,46 @@ CREATE TABLE pto_requests (
   end_date DATE NOT NULL,
   day_part VARCHAR(20) NOT NULL CHECK (day_part IN ('morning', 'evening', 'all_day')),
   note TEXT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
   CHECK (end_date >= start_date),
   CHECK (start_date = end_date OR day_part = 'all_day')
 );
 ```
+
+### 6.1a Owner/date exclusion constraint (#257)
+```sql
+-- Trusted extension: the database owner (or a role with CREATE on the
+-- database) installs it without superuser rights.
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+ALTER TABLE pto_requests
+  ADD CONSTRAINT pto_requests_no_owner_overlap
+  EXCLUDE USING gist (
+    user_id WITH =,
+    daterange(start_date, end_date, '[]') WITH &&
+  );
+```
+
+- The invariant is enforced **at the database boundary**, so it holds for
+  every write path — browser session, personal token and future adapter — and
+  not only for the preflight check.
+- `daterange(start_date, end_date, '[]')` is inclusive on both ends: a
+  single-day entry and a range that starts on the same day overlap. Two
+  half-day entries of one owner on the same date therefore conflict, while
+  entries of different owners never do.
+- `btree_gist` provides the UUID equality operator class the constraint needs.
+- The migration preflights the existing rows first. If two entries of one
+  owner already overlap, the migration stops with a sanitized, actionable
+  report (how many stored entries end before they start and how many overlap
+  another entry of the same owner; no entry data is listed). It never rewrites
+  or deletes PTO.
+- The role that applies the migration must own `pto_requests` and needs
+  `CREATE` on the database when the extension is not installed yet.
+- The backup archive must carry the extension declaration: a schema dump
+  that only covers the `public` schema omits it, and such an archive cannot be
+  restored. See [`deploy.md`](deploy.md) §5.1.
 
 ### 6.2 Recommended indexes
 ```sql
@@ -716,7 +750,7 @@ Standard error codes:
 - `CSRF_REJECTED` (403) — state-changing request has an untrusted Origin or Referer
 - `VALIDATION_ERROR` (400) — request body fails Zod validation, or the `If-Match` precondition is malformed
 - `NOT_FOUND` (404) — referenced PTO does not exist
-- `CONFLICT` (409) — proposed PTO overlaps an existing PTO for the same user
+- `CONFLICT` (409) — proposed PTO overlaps an existing PTO for the same user or the write transaction could not complete due to a concurrent write
 - `STALE_WRITE` (412) — the `If-Match` version no longer matches the stored record; the record is unchanged
 - `PRECONDITION_REQUIRED` (428) — a write reached the server without the required `If-Match` version
 - `RATE_LIMITED` (429) — login limiter, global limiter or a personal-token quota tripped; `Retry-After` header carries seconds-until-reset of the exact rejecting window
@@ -726,6 +760,14 @@ Standard error codes:
 A failed precondition is never reported as a business conflict: `412`/`428` mean
 "the expected version did not hold", `409` means "the business rules refuse
 this change".
+
+The owner/date exclusion constraint of #257 is a business rule, so its
+violation is the same safe `409 CONFLICT` envelope as the preflight overlap
+check: the raw driver error, the constraint name and the conflicting rows
+never reach the client. A serialization failure or deadlock reported by the
+write transaction is also `409 CONFLICT`, with a distinct fixed message that
+does not claim an overlap; the server does not retry the transaction. The
+friendly preflight may still run first, but the database enforces the rule.
 
 ## 9. Validation Rules
 
@@ -739,6 +781,7 @@ this change".
 - Weekends inside multi-day PTO ranges count and are displayed
 - PTO entries cannot overlap another PTO entry for the same user
 - `note` max length recommended: 500 chars
+- The non-overlap invariant is enforced by the exclusion constraint of §6.1a, so it holds for concurrent writes and for every credential type; a violation is the safe `409 CONFLICT` envelope
 
 ### 9.1a Write preconditions and partial updates (#256)
 - `PUT`, `PATCH` and `DELETE` on `/pto/:id` require exactly one `If-Match`
