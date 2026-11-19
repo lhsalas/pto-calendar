@@ -26,6 +26,34 @@ export const CreatePtoSchema = z.object({
   note: z.string().max(500).optional(),
 });
 
+/**
+ * A replacement write names every field the record needs. Unknown keys are
+ * refused instead of being dropped, so a typo can never leave a field
+ * unchanged without an answer.
+ */
+export const ReplacePtoSchema = z.strictObject({
+  startDate: z.string().regex(ISO_DATE),
+  endDate: z.string().regex(ISO_DATE),
+  dayPart: DayPartSchema.optional(),
+  note: z.string().max(500).optional(),
+});
+
+/**
+ * A partial write names only the fields that change. The body must be a
+ * non-empty object of the known fields; `note: null` clears the note and an
+ * omitted note keeps the stored one.
+ */
+export const PatchPtoSchema = z
+  .strictObject({
+    startDate: z.string().regex(ISO_DATE).optional(),
+    endDate: z.string().regex(ISO_DATE).optional(),
+    dayPart: DayPartSchema.optional(),
+    note: z.string().max(500).nullable().optional(),
+  })
+  .refine((patch) => Object.keys(patch).length > 0, {
+    message: 'at least one field must be provided',
+  });
+
 export const RangeQuerySchema = CalendarRangeSchema;
 
 /**
@@ -102,6 +130,8 @@ export const PtoListQuerySchema = RangeQuerySchema.extend({
 export const IdParamSchema = z.string().regex(UUID_REGEX);
 
 export type CreatePtoInput = z.infer<typeof CreatePtoSchema>;
+export type ReplacePtoInput = z.infer<typeof ReplacePtoSchema>;
+export type PatchPtoInput = z.infer<typeof PatchPtoSchema>;
 export type RangeQueryInput = z.infer<typeof RangeQuerySchema>;
 export type PtoListQuery = z.infer<typeof PtoListQuerySchema>;
 export type IdParam = z.infer<typeof IdParamSchema>;

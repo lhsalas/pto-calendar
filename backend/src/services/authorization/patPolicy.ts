@@ -15,7 +15,8 @@ export function classifyPatRoute(method: string, path: string): PatRoute | null 
   }
   if (PTO_RECORD.test(path)) {
     if (method === 'GET') return 'read';
-    if (method === 'PUT') return 'update';
+    // A partial write is the same scoped write as the replacement write.
+    if (method === 'PUT' || method === 'PATCH') return 'update';
     if (method === 'DELETE') return 'delete';
   }
   return null;

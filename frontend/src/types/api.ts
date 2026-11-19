@@ -25,6 +25,12 @@ export interface PTO {
   note: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Optimistic concurrency version of the record. It is returned with a
+   * detail and with every mutation, and it is the only accepted source for
+   * the `If-Match` precondition of a write.
+   */
+  version: number;
 }
 
 export interface PTOWithUser {
@@ -40,6 +46,8 @@ export interface PTODetail extends PTOWithUser {
   userId: string;
   createdAt: string;
   updatedAt: string;
+  /** The version of the loaded record; a write must quote it. */
+  version: number;
 }
 
 export interface CreatePTORequest {

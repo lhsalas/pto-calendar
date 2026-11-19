@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { server } from '../mocks/server';
 import { http, HttpResponse } from 'msw';
 import { usePtoList } from '../../src/hooks/usePtoList';
-import { STUB_PTO } from '../mocks/handlers';
+import { STUB_PTO, STUB_PTO_DETAIL } from '../mocks/handlers';
 
 describe('usePtoList', () => {
   it('fetches the list for the given range on mount', async () => {
@@ -53,7 +53,7 @@ describe('usePtoList', () => {
         return HttpResponse.json([STUB_PTO]);
       }),
       http.post('/pto', () =>
-        HttpResponse.json({ ...STUB_PTO, id: 'newly-created' }, { status: 201 }),
+        HttpResponse.json({ ...STUB_PTO_DETAIL, id: 'newly-created', version: 1 }, { status: 201 }),
       ),
     );
 
@@ -76,17 +76,25 @@ describe('usePtoList', () => {
 
   it('update() PUTs to /pto/:id and refetches the list', async () => {
     let listCallCount = 0;
+    let ifMatch: string | null = null;
     server.use(
       http.get('/pto', () => {
         listCallCount += 1;
         return HttpResponse.json([STUB_PTO]);
       }),
-      http.put('/pto/:id', () =>
-        HttpResponse.json(
-          { ...STUB_PTO, startDate: '2026-05-12', endDate: '2026-05-12', dayPart: 'evening' },
+      http.put('/pto/:id', ({ request }) => {
+        ifMatch = request.headers.get('If-Match');
+        return HttpResponse.json(
+          {
+            ...STUB_PTO_DETAIL,
+            startDate: '2026-05-12',
+            endDate: '2026-05-12',
+            dayPart: 'evening',
+            version: 8,
+          },
           { status: 200 },
-        ),
-      ),
+        );
+      }),
     );
 
     const { result } = renderHook(() => usePtoList('2026-05-01', '2026-05-31'));
@@ -96,26 +104,29 @@ describe('usePtoList', () => {
     const before = listCallCount;
 
     await act(async () => {
-      await result.current.update(STUB_PTO.id, {
-        startDate: '2026-05-12',
-        endDate: '2026-05-12',
-        dayPart: 'evening',
-      });
+      await result.current.update(
+        STUB_PTO.id,
+        { startDate: '2026-05-12', endDate: '2026-05-12', dayPart: 'evening' },
+        STUB_PTO_DETAIL.version,
+      );
     });
 
     expect(listCallCount).toBe(before + 1);
+    expect(ifMatch).toBe('"7"');
   });
 
   it('remove() DELETEs /pto/:id and refetches the list', async () => {
     let listCallCount = 0;
     let deleteCalled = false;
+    let ifMatch: string | null = null;
     server.use(
       http.get('/pto', () => {
         listCallCount += 1;
         return HttpResponse.json([STUB_PTO]);
       }),
-      http.delete('/pto/:id', () => {
+      http.delete('/pto/:id', ({ request }) => {
         deleteCalled = true;
+        ifMatch = request.headers.get('If-Match');
         return new HttpResponse(null, { status: 204 });
       }),
     );
@@ -127,10 +138,11 @@ describe('usePtoList', () => {
     const before = listCallCount;
 
     await act(async () => {
-      await result.current.remove(STUB_PTO.id);
+      await result.current.remove(STUB_PTO.id, STUB_PTO_DETAIL.version);
     });
 
     expect(deleteCalled).toBe(true);
+    expect(ifMatch).toBe('"7"');
     expect(listCallCount).toBe(before + 1);
   });
 

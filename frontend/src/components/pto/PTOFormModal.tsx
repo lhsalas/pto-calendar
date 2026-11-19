@@ -3,6 +3,7 @@ import { useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { CreatePTORequest, DayPart, PTOWithUser } from '../../types/api';
+import { isStalePtoWriteError } from '../../lib/ptoEdit';
 import { useModalA11y } from '../../hooks/useModalA11y';
 
 const NOTE_MAX = 500;
@@ -43,6 +44,12 @@ export function PTOFormModal({
   const [note, setNote] = useState<string>(initialPto?.note ?? '');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
+  /**
+   * Set when the server refused the write because the record changed. The
+   * editor is then invalidated: the form cannot be submitted again with the
+   * stale version, and the user has to load the current details.
+   */
+  const [conflict, setConflict] = useState<string | null>(null);
   const unknownNote = initialPto !== undefined && !initialNoteLoaded;
 
   const [previousSource, setPreviousSource] = useState({ open, initialPto, defaultStartDate });
@@ -54,6 +61,7 @@ export function PTOFormModal({
     setPreviousSource({ open, initialPto, defaultStartDate });
     if (open) {
       setError(null);
+      setConflict(null);
       setStartDate(initialPto?.startDate ?? defaultStartDate ?? today);
       setEndDate(initialPto?.endDate ?? defaultStartDate ?? today);
       setDayPart(initialPto?.dayPart ?? 'all_day');
@@ -83,6 +91,9 @@ export function PTOFormModal({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    // A refused write invalidates this editor: it cannot be submitted
+    // again with the same, now stale, version.
+    if (conflict) return;
     const validationError = validate();
     if (validationError) {
       setError(validationError);
@@ -99,7 +110,11 @@ export function PTOFormModal({
       };
       await onSubmit(payload);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save PTO.');
+      if (isStalePtoWriteError(err)) {
+        setConflict(err.message);
+      } else {
+        setError(err instanceof Error ? err.message : 'Could not save PTO.');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -200,7 +215,11 @@ export function PTOFormModal({
               </label>
             </fieldset>
 
-            {error || unknownNote ? (
+            {conflict ? (
+              <p role="alert" data-testid="pto-write-conflict" className="mb-3 text-sm text-danger">
+                {conflict}
+              </p>
+            ) : error || unknownNote ? (
               <p role="alert" className="mb-3 text-sm text-danger">
                 {error ?? 'Load the PTO note before editing.'}
               </p>
@@ -217,7 +236,7 @@ export function PTOFormModal({
               </button>
               <button
                 type="submit"
-                disabled={submitting || unknownNote}
+                disabled={submitting || unknownNote || conflict !== null}
                 className="min-h-11 rounded bg-accent px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60 dark:focus-visible:ring-offset-surface-dark"
               >
                 {submitting ? 'Saving…' : 'Save PTO'}

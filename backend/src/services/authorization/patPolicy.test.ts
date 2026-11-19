@@ -39,6 +39,8 @@ describe('default-deny PAT route and scope policy', () => {
       ['POST', '/pto/', 'create'],
       ['GET', path, 'read'],
       ['PUT', path + '/', 'update'],
+      ['PATCH', path, 'update'],
+      ['PATCH', path + '/', 'update'],
       ['DELETE', path.toUpperCase(), 'delete'],
     ])
       expect(classifyPatRoute(method!, url!)).toBe(operation);
@@ -49,7 +51,6 @@ describe('default-deny PAT route and scope policy', () => {
       ['PUT', '/pto'],
       ['DELETE', '/pto'],
       ['POST', path],
-      ['PATCH', path],
       ['HEAD', path],
       ['GET', '/pto/new-route'],
       ['GET', path + '/extra'],

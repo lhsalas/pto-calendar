@@ -24,6 +24,7 @@ function row(overrides: Record<string, unknown> = {}) {
     startDate: new Date('2026-05-11T00:00:00.000Z'),
     endDate: new Date('2026-05-12T00:00:00.000Z'),
     dayPart: 'all_day',
+    version: 1,
     user: { id: OWNER, name: 'Alice', colorCode: '#3B82F6' },
     ...overrides,
   };
@@ -114,10 +115,24 @@ describe('CalendarQuery', () => {
           note: null,
         },
       ]);
+      // The legacy array keeps its historical fields and has no version.
+      expect(result[0]).not.toHaveProperty('version');
     });
   });
 
   describe('listVisiblePage', () => {
+    it('carries the version of every entry in the paged representation', async () => {
+      mockFindMany.mockResolvedValueOnce([row({ version: 5 })]);
+      const page = await listVisiblePage(
+        { start: '2026-05-01', end: '2026-05-31', userId: null },
+        { limit: 50, cursor: null },
+      );
+      expect(page.items[0]!.version).toBe(5);
+      expect(mockFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({ select: expect.objectContaining({ version: true }) }),
+      );
+    });
+
     it('requests one extra row to answer hasMore without a second query', async () => {
       mockFindMany.mockResolvedValueOnce([row()]);
       await listVisiblePage(

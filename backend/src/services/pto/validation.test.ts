@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { HttpError } from '../../middleware/errorHandler.js';
-import { isWeekend, normalizeDayPart, validatePtoPayload, type DayPart } from './validation.js';
+import {
+  isWeekend,
+  normalizeDayPart,
+  validatePtoPatch,
+  validatePtoPayload,
+  type DayPart,
+} from './validation.js';
 import type { CreatePtoInput } from './schemas.js';
 
 const VALID_SINGLE = { startDate: '2026-05-11', endDate: '2026-05-11' } as const; // Monday
@@ -148,5 +154,78 @@ describe('validatePtoPayload', () => {
   it('accepts note at the 500-character boundary', () => {
     const result = validatePtoPayload(build({ dayPart: 'morning', note: 'x'.repeat(500) }));
     expect(result.note).toHaveLength(500);
+  });
+});
+
+describe('validatePtoPatch', () => {
+  const STORED = {
+    startDate: '2026-05-11',
+    endDate: '2026-05-11',
+    dayPart: 'morning' as DayPart,
+    note: 'Stored note',
+  };
+
+  it('keeps every omitted field and changes only the named one', () => {
+    expect(validatePtoPatch({ dayPart: 'evening' }, STORED)).toEqual({
+      startDate: '2026-05-11',
+      endDate: '2026-05-11',
+      dayPart: 'evening',
+      note: 'Stored note',
+    });
+  });
+
+  it('merges a longer range with an inherited all-day day part', () => {
+    const stored = { ...STORED, dayPart: 'all_day' as DayPart };
+    expect(validatePtoPatch({ endDate: '2026-05-13' }, stored)).toEqual({
+      startDate: '2026-05-11',
+      endDate: '2026-05-13',
+      dayPart: 'all_day',
+      note: 'Stored note',
+    });
+  });
+
+  it('clears the stored note for null and for an empty string', () => {
+    expect(validatePtoPatch({ note: null }, STORED).note).toBeNull();
+    expect(validatePtoPatch({ note: '' }, STORED).note).toBeNull();
+  });
+
+  it('sets an explicit note text', () => {
+    expect(validatePtoPatch({ note: 'Replacement' }, STORED).note).toBe('Replacement');
+  });
+
+  it('keeps a stored note that the caller never mentioned', () => {
+    expect(validatePtoPatch({ dayPart: 'evening' }, STORED).note).toBe('Stored note');
+  });
+
+  it('applies an explicit day part to a merged record', () => {
+    expect(validatePtoPatch({ dayPart: 'evening' }, STORED).dayPart).toBe('evening');
+    expect(validatePtoPatch({ dayPart: 'all_day', endDate: '2026-05-13' }, STORED).dayPart).toBe(
+      'all_day',
+    );
+  });
+
+  it('refuses a retained half-day day part that cannot describe a longer range', () => {
+    expect(() => validatePtoPatch({ endDate: '2026-05-13' }, STORED)).toThrow(HttpError);
+    expect(() => validatePtoPatch({ endDate: '2026-05-13' }, STORED)).toThrow(/stored day part/i);
+  });
+
+  it('allows an inherited all-day day part when a range becomes a single day', () => {
+    const stored = { ...STORED, dayPart: 'all_day' as DayPart, endDate: '2026-05-13' };
+    expect(validatePtoPatch({ endDate: '2026-05-11' }, stored)).toEqual({
+      startDate: '2026-05-11',
+      endDate: '2026-05-11',
+      dayPart: 'all_day',
+      note: 'Stored note',
+    });
+  });
+
+  it('validates the merged record with the shared date rules', () => {
+    expect(() => validatePtoPatch({ endDate: '2026-05-10' }, STORED)).toThrow(/endDate/i);
+    expect(() => validatePtoPatch({ startDate: '2026-05-09' }, STORED)).toThrow(/weekend/i);
+    expect(() => validatePtoPatch({ startDate: 'not-a-date' }, STORED)).toThrow(/startDate/i);
+  });
+
+  it('refuses an overlong merged note', () => {
+    expect(() => validatePtoPatch({ note: 'x'.repeat(501) }, STORED)).toThrow(/note/i);
   });
 });

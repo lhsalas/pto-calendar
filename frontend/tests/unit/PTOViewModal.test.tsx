@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { PTOViewModal } from '../../src/components/pto/PTOViewModal';
-import { STUB_PTO, STUB_USER } from '../mocks/handlers';
+import { STUB_PTO, STUB_PTO_DETAIL, STUB_USER } from '../mocks/handlers';
 import { formatRangeLabel } from '../../src/lib/calendar';
 import * as api from '../../src/api/client';
 import type { PTO } from '../../src/types/api';
@@ -13,18 +13,11 @@ import type { PTO } from '../../src/types/api';
 type ModalProps = React.ComponentProps<typeof PTOViewModal>;
 
 function preparedExpected(pto: ModalProps['pto'], viewer = STUB_USER) {
-  return { ...pto, noteLoadedFor: `${viewer.id}:${viewer.role}` };
+  return { ...pto, version: PTO_DETAIL.version, noteLoadedFor: `${viewer.id}:${viewer.role}` };
 }
 
 const PTO_DETAIL: PTO = {
-  id: STUB_PTO.id,
-  userId: STUB_USER.id,
-  startDate: STUB_PTO.startDate,
-  endDate: STUB_PTO.endDate,
-  dayPart: STUB_PTO.dayPart,
-  note: null,
-  createdAt: '2026-05-01T10:00:00.000Z',
-  updatedAt: '2026-05-01T10:00:00.000Z',
+  ...STUB_PTO_DETAIL,
 };
 
 function deferred<T>(): {
@@ -143,7 +136,9 @@ describe('PTOViewModal', () => {
     editButton.focus();
     await user.keyboard('{Enter}');
     expect(onEdit).not.toHaveBeenCalled();
-    expect(requestDetail).toHaveBeenCalledExactlyOnceWith(`/pto/${STUB_PTO.id}`);
+    expect(requestDetail).toHaveBeenCalledExactlyOnceWith(`/pto/${STUB_PTO.id}`, {
+      cache: 'no-store',
+    });
     expect(screen.getByRole('status')).toHaveTextContent('Loading note…');
     expect(editButton).toHaveAttribute('aria-disabled', 'true');
     expect(editButton).toHaveFocus();
@@ -170,15 +165,21 @@ describe('PTOViewModal', () => {
     },
   );
 
-  it('hands off note text already supplied to the modal without a detail request', async () => {
+  it('loads the authoritative version even when a summary already contains note text', async () => {
     const user = userEvent.setup();
-    const requestDetail = vi.spyOn(api, 'apiRequest');
+    const requestDetail = vi
+      .spyOn(api, 'apiRequest')
+      .mockResolvedValue({ ...PTO_DETAIL, note: 'Current private note' });
     const onEdit = vi.fn();
     const pto = { ...STUB_PTO, note: 'Known private note' };
     renderModal({ pto, onEdit });
     await user.click(screen.getByRole('button', { name: /^edit$/i }));
-    expect(onEdit).toHaveBeenCalledExactlyOnceWith(preparedExpected(pto));
-    expect(requestDetail).not.toHaveBeenCalled();
+    expect(onEdit).toHaveBeenCalledExactlyOnceWith(
+      preparedExpected({ ...pto, note: 'Current private note' }),
+    );
+    expect(requestDetail).toHaveBeenCalledExactlyOnceWith(`/pto/${pto.id}`, {
+      cache: 'no-store',
+    });
   });
 
   it('joins an in-flight note load and deduplicates rapid edit requests', async () => {
@@ -373,13 +374,32 @@ describe('PTOViewModal', () => {
   it('asks for confirmation before calling onDelete', async () => {
     const user = userEvent.setup();
     const onDelete = vi.fn(async () => {});
+    const detail = {
+      ...PTO_DETAIL,
+      startDate: '2026-05-12',
+      endDate: '2026-05-12',
+      dayPart: 'evening' as const,
+    };
+    vi.spyOn(api, 'apiRequest').mockResolvedValue(detail);
     renderModal({ onDelete });
     await user.click(screen.getByRole('button', { name: /delete/i }));
     expect(await screen.findByText(/cannot be undone/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(formatRangeLabel(detail.startDate, detail.endDate)),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/evening \(pm\)/i)).toBeInTheDocument();
     expect(onDelete).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: /yes, delete/i }));
     await waitFor(() => {
-      expect(onDelete).toHaveBeenCalledWith(STUB_PTO);
+      expect(onDelete).toHaveBeenCalledExactlyOnceWith(
+        preparedExpected({
+          ...STUB_PTO,
+          startDate: detail.startDate,
+          endDate: detail.endDate,
+          dayPart: detail.dayPart,
+        }),
+        detail.version,
+      );
     });
   });
 
@@ -388,9 +408,10 @@ describe('PTOViewModal', () => {
     const onDelete = vi.fn(async () => {
       throw new Error('Cannot delete');
     });
+    vi.spyOn(api, 'apiRequest').mockResolvedValue(PTO_DETAIL);
     renderModal({ onDelete });
     await user.click(screen.getByRole('button', { name: /delete/i }));
-    await user.click(screen.getByRole('button', { name: /yes, delete/i }));
+    await user.click(await screen.findByRole('button', { name: /yes, delete/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/cannot delete/i);
   });
 
@@ -629,17 +650,19 @@ describe('PTOViewModal', () => {
     expect(screen.getByText('(no note)')).toHaveClass('text-ink-muted/70');
     await user.click(screen.getByRole('button', { name: /load note/i }));
     expect(await screen.findByText('Other note')).toBeInTheDocument();
-    expect(requestDetail).toHaveBeenNthCalledWith(2, `/pto/${otherPto.id}`);
+    expect(requestDetail).toHaveBeenNthCalledWith(2, `/pto/${otherPto.id}`, { cache: 'no-store' });
   });
 
   it('resets note errors and delete confirmation when a different PTO is selected', async () => {
     const user = userEvent.setup();
-    vi.spyOn(api, 'apiRequest').mockRejectedValueOnce(new Error('Cannot load note'));
+    vi.spyOn(api, 'apiRequest')
+      .mockRejectedValueOnce(new Error('Cannot load note'))
+      .mockResolvedValueOnce(PTO_DETAIL);
     const { rerenderModal } = renderModal();
     await user.click(screen.getByRole('button', { name: /load note/i }));
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /^delete$/i }));
-    expect(screen.getByText(/cannot be undone/i)).toBeInTheDocument();
+    expect(await screen.findByText(/cannot be undone/i)).toBeInTheDocument();
 
     rerenderModal({ pto: { ...STUB_PTO, id: 'other-pto-id' } });
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -652,7 +675,7 @@ describe('PTOViewModal', () => {
     const response = deferred<PTO>();
     vi.spyOn(api, 'apiRequest')
       .mockReturnValueOnce(response.promise)
-      .mockResolvedValueOnce({ ...PTO_DETAIL, note: 'Other note' });
+      .mockResolvedValueOnce({ ...PTO_DETAIL, id: 'other-pto-id', note: 'Other note' });
     const { rerenderModal } = renderModal();
     await user.click(screen.getByRole('button', { name: /load note/i }));
     expect(screen.getByRole('status')).toBeInTheDocument();

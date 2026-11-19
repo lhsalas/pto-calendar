@@ -66,6 +66,9 @@ model PTORequest {
   endDate   DateTime @db.Date @map("end_date")
   dayPart   DayPart  @map("day_part")
   note      String?
+  // Optimistic concurrency counter (#256). Every successful write increments
+  // it, and a write must name the version it read. Existing rows start at 1.
+  version   Int      @default(1)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

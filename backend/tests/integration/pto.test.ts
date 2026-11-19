@@ -82,6 +82,8 @@ describe('PTO routes', () => {
       expect(res.body).toHaveProperty('id');
       expect(res.body).toHaveProperty('createdAt');
       expect(res.body).toHaveProperty('updatedAt');
+      // A new record starts at the first version a write can name.
+      expect(res.body.version).toBe(1);
       const stored = await prisma.pTORequest.findUniqueOrThrow({ where: { id: res.body.id } });
       expect(stored.note).toBe('Doctor');
     });

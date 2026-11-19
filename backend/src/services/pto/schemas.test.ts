@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetEnvForTests } from '../../config/env.js';
 import { mintCursor } from '../calendar/cursor.js';
-import { CreatePtoSchema, IdParamSchema, PtoListQuerySchema, RangeQuerySchema } from './schemas.js';
+import {
+  CreatePtoSchema,
+  IdParamSchema,
+  PatchPtoSchema,
+  PtoListQuerySchema,
+  RangeQuerySchema,
+  ReplacePtoSchema,
+} from './schemas.js';
 
 const SESSION_SECRET = 'aB1!cD2@eF3#gH4$iJ5%kL6&mN7*oP8+';
 const OWNER = '11111111-1111-4111-8111-111111111111';
@@ -297,5 +304,73 @@ describe('IdParamSchema', () => {
   it('rejects an empty string', () => {
     const result = IdParamSchema.safeParse('');
     expect(result.success).toBe(false);
+  });
+});
+
+describe('ReplacePtoSchema', () => {
+  it('accepts a valid replacement payload', () => {
+    const result = ReplacePtoSchema.safeParse({
+      startDate: '2026-05-11',
+      endDate: '2026-05-11',
+      dayPart: 'morning',
+      note: 'Doctor',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('refuses an unknown key instead of dropping it', () => {
+    const result = ReplacePtoSchema.safeParse({
+      startDate: '2026-05-11',
+      endDate: '2026-05-11',
+      userId: '11111111-1111-4111-8111-111111111111',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.code).toBe('unrecognized_keys');
+  });
+
+  it('still requires both dates', () => {
+    expect(ReplacePtoSchema.safeParse({ endDate: '2026-05-11' }).success).toBe(false);
+    expect(ReplacePtoSchema.safeParse({ startDate: '2026-05-11' }).success).toBe(false);
+  });
+
+  it('refuses a null note', () => {
+    const result = ReplacePtoSchema.safeParse({
+      startDate: '2026-05-11',
+      endDate: '2026-05-11',
+      note: null,
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('PatchPtoSchema', () => {
+  it('accepts a non-empty partial payload of the known fields', () => {
+    const result = PatchPtoSchema.safeParse({ endDate: '2026-05-13' });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual({ endDate: '2026-05-13' });
+  });
+
+  it('accepts an explicit null note, which clears the stored one', () => {
+    const result = PatchPtoSchema.safeParse({ note: null });
+    expect(result.success).toBe(true);
+    if (result.success) expect(Object.hasOwn(result.data, 'note')).toBe(true);
+  });
+
+  it('refuses an empty payload', () => {
+    const result = PatchPtoSchema.safeParse({});
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.message).toMatch(/at least one field/i);
+  });
+
+  it('refuses an unknown key instead of dropping it', () => {
+    const result = PatchPtoSchema.safeParse({ userId: '11111111-1111-4111-8111-111111111111' });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.code).toBe('unrecognized_keys');
+  });
+
+  it('refuses an unusable field value', () => {
+    expect(PatchPtoSchema.safeParse({ dayPart: 'noon' }).success).toBe(false);
+    expect(PatchPtoSchema.safeParse({ startDate: '2026-05-11' }).success).toBe(true);
+    expect(PatchPtoSchema.safeParse({ note: 42 }).success).toBe(false);
   });
 });

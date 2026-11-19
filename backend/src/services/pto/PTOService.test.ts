@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HttpError } from '../../middleware/errorHandler.js';
 import type { AttributedActor } from '../audit/auditContext.js';
@@ -7,6 +8,7 @@ import {
   deletePto,
   findOverlapping,
   getPtoById,
+  patchPto,
   toPublicPto,
   updatePto,
 } from './PTOService.js';
@@ -58,11 +60,17 @@ const ACTOR_PAT_OWNER: AttributedActor = {
 const EXISTING_ROW = {
   id: PTO_ID,
   userId: USER_ID,
+  version: 1,
+  startDate: new Date('2026-05-11T00:00:00.000Z'),
+  endDate: new Date('2026-05-11T00:00:00.000Z'),
+  dayPart: 'morning' as const,
+  note: 'Stored note',
 };
 
 const UPDATED_ROW = {
   id: PTO_ID,
   userId: USER_ID,
+  version: 2,
   startDate: new Date('2026-05-12T00:00:00.000Z'),
   endDate: new Date('2026-05-12T00:00:00.000Z'),
   dayPart: 'morning' as const,
@@ -82,6 +90,14 @@ const DELETED_ROW = {
 function auditData(): Record<string, unknown> {
   const call = mockAuditCreate.mock.calls[0] as unknown as [{ data: Record<string, unknown> }];
   return call[0].data;
+}
+
+/** The driver error of a guarded write that found no row: a lost race. */
+function missingRowError(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('No PTO record was found for the update.', {
+    code: 'P2025',
+    clientVersion: '7.10.1',
+  });
 }
 
 describe('PTOService extended', () => {
@@ -110,6 +126,7 @@ describe('PTOService extended', () => {
         endDate: new Date('2026-05-11T00:00:00.000Z'),
         dayPart: 'morning',
         note: 'Doctor',
+        version: 3,
         createdAt: new Date('2026-05-01T10:00:00.000Z'),
         updatedAt: new Date('2026-05-01T10:00:00.000Z'),
         user: { id: USER_ID, name: 'Alice', colorCode: '#3B82F6' },
@@ -122,6 +139,7 @@ describe('PTOService extended', () => {
         endDate: '2026-05-11',
         dayPart: 'morning',
         note: 'Doctor',
+        version: 3,
         createdAt: '2026-05-01T10:00:00.000Z',
         updatedAt: '2026-05-01T10:00:00.000Z',
         user: { id: USER_ID, name: 'Alice', colorCode: '#3B82F6' },
@@ -133,6 +151,7 @@ describe('PTOService extended', () => {
     const CREATED_ROW = {
       id: PTO_ID,
       userId: USER_ID,
+      version: 1,
       startDate: new Date('2026-05-11T00:00:00.000Z'),
       endDate: new Date('2026-05-11T00:00:00.000Z'),
       dayPart: 'morning' as const,
@@ -263,6 +282,7 @@ describe('PTOService extended', () => {
       const createdRow = {
         id: PTO_ID,
         userId: USER_ID,
+        version: 1,
         startDate: new Date('2026-05-11T00:00:00.000Z'),
         endDate: new Date('2026-05-15T00:00:00.000Z'),
         dayPart: 'all_day' as const,
@@ -304,22 +324,32 @@ describe('PTOService extended', () => {
     it('returns 404 when the PTO is missing', async () => {
       mockFindUnique.mockResolvedValueOnce(null);
       await expect(
-        updatePto(ACTOR_MEMBER, PTO_ID, {
-          startDate: '2026-05-12',
-          endDate: '2026-05-12',
-          dayPart: 'morning',
-        }),
+        updatePto(
+          ACTOR_MEMBER,
+          PTO_ID,
+          {
+            startDate: '2026-05-12',
+            endDate: '2026-05-12',
+            dayPart: 'morning',
+          },
+          1,
+        ),
       ).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
     });
 
     it('returns 403 when a non-owner non-lead attempts to edit', async () => {
       mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
       await expect(
-        updatePto(ACTOR_OTHER_MEMBER, PTO_ID, {
-          startDate: '2026-05-12',
-          endDate: '2026-05-12',
-          dayPart: 'morning',
-        }),
+        updatePto(
+          ACTOR_OTHER_MEMBER,
+          PTO_ID,
+          {
+            startDate: '2026-05-12',
+            endDate: '2026-05-12',
+            dayPart: 'morning',
+          },
+          1,
+        ),
       ).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
       expect(mockAuditCreate).not.toHaveBeenCalled();
     });
@@ -329,12 +359,17 @@ describe('PTOService extended', () => {
       mockFindFirst.mockResolvedValueOnce(null);
       mockUpdate.mockResolvedValueOnce(UPDATED_ROW);
 
-      const result = await updatePto(ACTOR_MEMBER, PTO_ID, {
-        startDate: '2026-05-12',
-        endDate: '2026-05-12',
-        dayPart: 'morning',
-        note: 'Edited',
-      });
+      const result = await updatePto(
+        ACTOR_MEMBER,
+        PTO_ID,
+        {
+          startDate: '2026-05-12',
+          endDate: '2026-05-12',
+          dayPart: 'morning',
+          note: 'Edited',
+        },
+        1,
+      );
 
       expect(result).toBe(UPDATED_ROW);
       expect(mockUpdate).toHaveBeenCalledTimes(1);
@@ -369,16 +404,29 @@ describe('PTOService extended', () => {
         const persisted = { ...UPDATED_ROW, note };
         mockUpdate.mockResolvedValueOnce(persisted);
 
-        const result = await updatePto(ACTOR_MEMBER, PTO_ID, {
-          startDate: '2026-05-12',
-          endDate: '2026-05-12',
-          dayPart: 'morning',
-        });
+        const result = await updatePto(
+          ACTOR_MEMBER,
+          PTO_ID,
+          {
+            startDate: '2026-05-12',
+            endDate: '2026-05-12',
+            dayPart: 'morning',
+          },
+          1,
+        );
 
         expect(result).toBe(persisted);
         expect(mockFindUnique).toHaveBeenCalledExactlyOnceWith({
           where: { id: PTO_ID },
-          select: { id: true, userId: true },
+          select: {
+            id: true,
+            userId: true,
+            version: true,
+            startDate: true,
+            endDate: true,
+            dayPart: true,
+            note: true,
+          },
         });
         const update = mockUpdate.mock.calls[0]![0] as { data: Record<string, unknown> };
         expect(update.data).not.toHaveProperty('note');
@@ -409,12 +457,17 @@ describe('PTOService extended', () => {
         mockFindFirst.mockResolvedValueOnce(null);
         mockUpdate.mockResolvedValueOnce({ ...UPDATED_ROW, note: stored });
 
-        const result = await updatePto(ACTOR_MEMBER, PTO_ID, {
-          startDate: '2026-05-12',
-          endDate: '2026-05-12',
-          dayPart: 'morning',
-          note,
-        });
+        const result = await updatePto(
+          ACTOR_MEMBER,
+          PTO_ID,
+          {
+            startDate: '2026-05-12',
+            endDate: '2026-05-12',
+            dayPart: 'morning',
+            note,
+          },
+          1,
+        );
 
         expect(result.note).toBe(stored);
         expect(mockUpdate).toHaveBeenCalledExactlyOnceWith(
@@ -454,14 +507,13 @@ describe('PTOService extended', () => {
       } as CreatePtoInput;
       expect(Object.hasOwn(input, 'note')).toBe(true);
 
-      await expect(updatePto(ACTOR_MEMBER, PTO_ID, input)).rejects.toMatchObject({
+      await expect(updatePto(ACTOR_MEMBER, PTO_ID, input, 1)).rejects.toMatchObject({
         status: 400,
         code: 'VALIDATION_ERROR',
       });
       expect(mockFindFirst).not.toHaveBeenCalled();
       expect(mockUpdate).not.toHaveBeenCalled();
       expect(mockAuditCreate).not.toHaveBeenCalled();
-      expect(mockTx).not.toHaveBeenCalled();
     });
 
     it('lets a team lead update another user PTO and audits the lead as actor with the owner as target', async () => {
@@ -469,11 +521,16 @@ describe('PTOService extended', () => {
       mockFindFirst.mockResolvedValueOnce(null);
       mockUpdate.mockResolvedValueOnce(UPDATED_ROW);
 
-      await updatePto(ACTOR_LEAD, PTO_ID, {
-        startDate: '2026-05-12',
-        endDate: '2026-05-12',
-        dayPart: 'morning',
-      });
+      await updatePto(
+        ACTOR_LEAD,
+        PTO_ID,
+        {
+          startDate: '2026-05-12',
+          endDate: '2026-05-12',
+          dayPart: 'morning',
+        },
+        1,
+      );
       expect(mockAuditCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
@@ -491,12 +548,17 @@ describe('PTOService extended', () => {
       mockFindFirst.mockResolvedValueOnce(null);
       mockUpdate.mockResolvedValueOnce(UPDATED_ROW);
 
-      await updatePto(ACTOR_PAT_OWNER, PTO_ID, {
-        startDate: '2026-05-12',
-        endDate: '2026-05-12',
-        dayPart: 'morning',
-        note: 'Edited',
-      });
+      await updatePto(
+        ACTOR_PAT_OWNER,
+        PTO_ID,
+        {
+          startDate: '2026-05-12',
+          endDate: '2026-05-12',
+          dayPart: 'morning',
+          note: 'Edited',
+        },
+        1,
+      );
 
       expect(auditData()).toMatchObject({
         credentialType: 'personal_access_token',
@@ -510,25 +572,34 @@ describe('PTOService extended', () => {
       mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
       mockFindFirst.mockResolvedValueOnce({ id: 'another-id' });
       await expect(
-        updatePto(ACTOR_MEMBER, PTO_ID, {
-          startDate: '2026-05-12',
-          endDate: '2026-05-13',
-          dayPart: 'all_day',
-        }),
+        updatePto(
+          ACTOR_MEMBER,
+          PTO_ID,
+          {
+            startDate: '2026-05-12',
+            endDate: '2026-05-13',
+            dayPart: 'all_day',
+          },
+          1,
+        ),
       ).rejects.toMatchObject({ status: 409, code: 'CONFLICT' });
       expect(mockUpdate).not.toHaveBeenCalled();
       expect(mockAuditCreate).not.toHaveBeenCalled();
-      expect(mockTx).not.toHaveBeenCalled();
     });
 
     it('re-runs validation and rejects weekend edits', async () => {
       mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
       await expect(
-        updatePto(ACTOR_MEMBER, PTO_ID, {
-          startDate: '2026-05-09',
-          endDate: '2026-05-09',
-          dayPart: 'morning',
-        }),
+        updatePto(
+          ACTOR_MEMBER,
+          PTO_ID,
+          {
+            startDate: '2026-05-09',
+            endDate: '2026-05-09',
+            dayPart: 'morning',
+          },
+          1,
+        ),
       ).rejects.toBeInstanceOf(HttpError);
       expect(mockUpdate).not.toHaveBeenCalled();
     });
@@ -540,20 +611,263 @@ describe('PTOService extended', () => {
       mockAuditCreate.mockRejectedValueOnce(new Error('audit insert failed'));
 
       await expect(
-        updatePto(ACTOR_MEMBER, PTO_ID, {
+        updatePto(
+          ACTOR_MEMBER,
+          PTO_ID,
+          {
+            startDate: '2026-05-12',
+            endDate: '2026-05-12',
+            dayPart: 'morning',
+          },
+          1,
+        ),
+      ).rejects.toThrow('audit insert failed');
+      expect(mockUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    it('guards the write by the id, the owner and the expected version', async () => {
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      mockFindFirst.mockResolvedValueOnce(null);
+      mockUpdate.mockResolvedValueOnce(UPDATED_ROW);
+
+      await updatePto(
+        ACTOR_MEMBER,
+        PTO_ID,
+        {
           startDate: '2026-05-12',
           endDate: '2026-05-12',
           dayPart: 'morning',
+        },
+        1,
+      );
+
+      const update = mockUpdate.mock.calls[0]![0] as {
+        where: Record<string, unknown>;
+        data: Record<string, unknown>;
+      };
+      expect(update.where).toEqual({ id: PTO_ID, userId: USER_ID, version: 1 });
+      expect(update.data['version']).toEqual({ increment: 1 });
+    });
+
+    it('refuses a stale snapshot before the payload or the overlap is reported', async () => {
+      mockFindUnique.mockResolvedValueOnce({ ...EXISTING_ROW, version: 7 });
+
+      await expect(
+        updatePto(
+          ACTOR_MEMBER,
+          PTO_ID,
+          {
+            startDate: '2026-05-09',
+            endDate: '2026-05-09',
+            dayPart: 'morning',
+          },
+          1,
+        ),
+      ).rejects.toMatchObject({ status: 412, code: 'STALE_WRITE' });
+      expect(mockFindFirst).not.toHaveBeenCalled();
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('reports a lost race as a stale write and writes no audit row', async () => {
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      mockFindFirst.mockResolvedValueOnce(null);
+      mockUpdate.mockRejectedValueOnce(missingRowError());
+
+      await expect(
+        updatePto(
+          ACTOR_MEMBER,
+          PTO_ID,
+          {
+            startDate: '2026-05-12',
+            endDate: '2026-05-12',
+            dayPart: 'morning',
+          },
+          1,
+        ),
+      ).rejects.toMatchObject({ status: 412, code: 'STALE_WRITE' });
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('never lets a driver failure carry the note or the statement into the answer', async () => {
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      mockFindFirst.mockResolvedValueOnce(null);
+      mockUpdate.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('constraint failed on note "Doctor"', {
+          code: 'P2004',
+          clientVersion: '7.10.1',
         }),
-      ).rejects.toThrow('audit insert failed');
-      expect(mockUpdate).toHaveBeenCalledTimes(1);
+      );
+
+      const error = await updatePto(
+        ACTOR_MEMBER,
+        PTO_ID,
+        {
+          startDate: '2026-05-12',
+          endDate: '2026-05-12',
+          dayPart: 'morning',
+          note: 'Doctor',
+        },
+        1,
+      ).catch((err: unknown) => err);
+      expect(error).toBeInstanceOf(HttpError);
+      expect(error).toMatchObject({ status: 500, code: 'INTERNAL_ERROR' });
+      expect(String(error)).not.toContain('Doctor');
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('patchPto', () => {
+    it('changes only the named field and keeps the stored note and day part', async () => {
+      mockFindUnique.mockResolvedValueOnce({ ...EXISTING_ROW, dayPart: 'all_day' });
+      mockFindFirst.mockResolvedValueOnce(null);
+      mockUpdate.mockResolvedValueOnce(UPDATED_ROW);
+
+      const result = await patchPto(ACTOR_MEMBER, PTO_ID, { endDate: '2026-05-13' }, 1);
+
+      expect(result).toBe(UPDATED_ROW);
+      const update = mockUpdate.mock.calls[0]![0] as {
+        where: Record<string, unknown>;
+        data: Record<string, unknown>;
+      };
+      expect(update.where).toEqual({ id: PTO_ID, userId: USER_ID, version: 1 });
+      expect(update.data['startDate']).toEqual(new Date('2026-05-11T00:00:00.000Z'));
+      expect(update.data['endDate']).toEqual(new Date('2026-05-13T00:00:00.000Z'));
+      expect(update.data['dayPart']).toBe('all_day');
+      expect(update.data).not.toHaveProperty('note');
+      expect(update.data['version']).toEqual({ increment: 1 });
+      expect(mockAuditCreate).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            action: 'update_pto',
+            details: {
+              startDate: '2026-05-11',
+              endDate: '2026-05-13',
+              dayPart: 'all_day',
+              noteWritten: false,
+            },
+          }),
+        }),
+      );
+    });
+
+    it.each([
+      { label: 'null', note: null },
+      { label: 'an empty string', note: '' },
+    ])('clears the stored note when the patch carries $label', async ({ note }) => {
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      mockFindFirst.mockResolvedValueOnce(null);
+      mockUpdate.mockResolvedValueOnce(UPDATED_ROW);
+
+      await patchPto(ACTOR_MEMBER, PTO_ID, { note }, 1);
+
+      const update = mockUpdate.mock.calls[0]![0] as { data: Record<string, unknown> };
+      expect(update.data['note']).toBeNull();
+      expect(mockAuditCreate).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            details: expect.objectContaining({ noteWritten: true }),
+          }),
+        }),
+      );
+    });
+
+    it('writes an explicit note text without putting it into the audit row', async () => {
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      mockFindFirst.mockResolvedValueOnce(null);
+      mockUpdate.mockResolvedValueOnce(UPDATED_ROW);
+
+      await patchPto(ACTOR_MEMBER, PTO_ID, { note: 'Replacement' }, 1);
+
+      const update = mockUpdate.mock.calls[0]![0] as { data: Record<string, unknown> };
+      expect(update.data['note']).toBe('Replacement');
+      expect(JSON.stringify(auditData())).not.toContain('Replacement');
+      expect(auditData().details).not.toHaveProperty('note');
+    });
+
+    it('refuses a stale snapshot and a foreign record without a write', async () => {
+      mockFindUnique.mockResolvedValueOnce({ ...EXISTING_ROW, version: 9 });
+      await expect(
+        patchPto(ACTOR_MEMBER, PTO_ID, { endDate: '2026-05-13' }, 1),
+      ).rejects.toMatchObject({ status: 412, code: 'STALE_WRITE' });
+      mockFindUnique.mockResolvedValueOnce(null);
+      await expect(
+        patchPto(ACTOR_MEMBER, PTO_ID, { endDate: '2026-05-13' }, 1),
+      ).rejects.toMatchObject({
+        status: 404,
+        code: 'NOT_FOUND',
+      });
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      await expect(
+        patchPto(ACTOR_OTHER_MEMBER, PTO_ID, { endDate: '2026-05-13' }, 1),
+      ).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('returns 409 when the merged record overlaps another PTO of the same user', async () => {
+      mockFindUnique.mockResolvedValueOnce({ ...EXISTING_ROW, dayPart: 'all_day' });
+      mockFindFirst.mockResolvedValueOnce({ id: 'another-id' });
+
+      await expect(
+        patchPto(ACTOR_MEMBER, PTO_ID, { endDate: '2026-05-13' }, 1),
+      ).rejects.toMatchObject({ status: 409, code: 'CONFLICT' });
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('never lets a driver failure of the live read carry its cause', async () => {
+      mockFindUnique.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('connection to the server was lost', {
+          code: 'P1001',
+          clientVersion: '7.10.1',
+        }),
+      );
+
+      const error = await patchPto(ACTOR_MEMBER, PTO_ID, { dayPart: 'evening' }, 1).catch(
+        (err: unknown) => err,
+      );
+      expect(error).toMatchObject({ status: 500, code: 'INTERNAL_ERROR' });
+      expect(String(error)).not.toContain('connection');
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('never lets a driver failure of a guarded delete carry its cause', async () => {
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      mockDelete.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('deadlock detected', {
+          code: 'P2034',
+          clientVersion: '7.10.1',
+        }),
+      );
+
+      const error = await deletePto(ACTOR_MEMBER, PTO_ID, 1).catch((err: unknown) => err);
+      expect(error).toMatchObject({ status: 500, code: 'INTERNAL_ERROR' });
+      expect(String(error)).not.toContain('deadlock');
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('refuses a merged record whose retained half-day day part cannot describe the range', async () => {
+      mockFindUnique.mockResolvedValueOnce({
+        ...EXISTING_ROW,
+        startDate: new Date('2026-05-11T00:00:00.000Z'),
+        endDate: new Date('2026-05-11T00:00:00.000Z'),
+        dayPart: 'morning',
+      });
+
+      await expect(
+        patchPto(ACTOR_MEMBER, PTO_ID, { endDate: '2026-05-13' }, 1),
+      ).rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
     });
   });
 
   describe('deletePto', () => {
     it('returns 404 when the PTO is missing', async () => {
       mockFindUnique.mockResolvedValueOnce(null);
-      await expect(deletePto(ACTOR_MEMBER, PTO_ID)).rejects.toMatchObject({
+      await expect(deletePto(ACTOR_MEMBER, PTO_ID, 1)).rejects.toMatchObject({
         status: 404,
         code: 'NOT_FOUND',
       });
@@ -561,7 +875,7 @@ describe('PTOService extended', () => {
 
     it('returns 403 when a non-owner non-lead attempts to delete', async () => {
       mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
-      await expect(deletePto(ACTOR_OTHER_MEMBER, PTO_ID)).rejects.toMatchObject({
+      await expect(deletePto(ACTOR_OTHER_MEMBER, PTO_ID, 1)).rejects.toMatchObject({
         status: 403,
         code: 'FORBIDDEN',
       });
@@ -571,9 +885,9 @@ describe('PTOService extended', () => {
     it('lets the owner delete and writes an audit summary of the removed row inside a transaction', async () => {
       mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
       mockDelete.mockResolvedValueOnce(DELETED_ROW);
-      await deletePto(ACTOR_MEMBER, PTO_ID);
+      await deletePto(ACTOR_MEMBER, PTO_ID, 1);
       expect(mockDelete).toHaveBeenCalledWith({
-        where: { id: PTO_ID },
+        where: { id: PTO_ID, userId: USER_ID, version: 1 },
         select: { userId: true, startDate: true, endDate: true, dayPart: true },
       });
       expect(mockTx).toHaveBeenCalledTimes(1);
@@ -595,7 +909,7 @@ describe('PTOService extended', () => {
     it('lets a team lead delete another user PTO and audits the action', async () => {
       mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
       mockDelete.mockResolvedValueOnce(DELETED_ROW);
-      await deletePto(ACTOR_LEAD, PTO_ID);
+      await deletePto(ACTOR_LEAD, PTO_ID, 1);
       expect(mockAuditCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ actorUserId: LEAD_ID, action: 'delete_pto' }),
@@ -606,7 +920,7 @@ describe('PTOService extended', () => {
     it('audits a personal-token delete with the source token ID', async () => {
       mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
       mockDelete.mockResolvedValueOnce(DELETED_ROW);
-      await deletePto(ACTOR_PAT_OWNER, PTO_ID);
+      await deletePto(ACTOR_PAT_OWNER, PTO_ID, 1);
       expect(auditData()).toMatchObject({
         credentialType: 'personal_access_token',
         sourceTokenId: TOKEN_ID,
@@ -618,8 +932,25 @@ describe('PTOService extended', () => {
       mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
       mockDelete.mockResolvedValueOnce(DELETED_ROW);
       mockAuditCreate.mockRejectedValueOnce(new Error('audit insert failed'));
-      await expect(deletePto(ACTOR_MEMBER, PTO_ID)).rejects.toThrow('audit insert failed');
+      await expect(deletePto(ACTOR_MEMBER, PTO_ID, 1)).rejects.toThrow('audit insert failed');
       expect(mockDelete).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a stale snapshot and a lost race without removing anything', async () => {
+      mockFindUnique.mockResolvedValueOnce({ ...EXISTING_ROW, version: 5 });
+      await expect(deletePto(ACTOR_MEMBER, PTO_ID, 1)).rejects.toMatchObject({
+        status: 412,
+        code: 'STALE_WRITE',
+      });
+      expect(mockDelete).not.toHaveBeenCalled();
+
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      mockDelete.mockRejectedValueOnce(missingRowError());
+      await expect(deletePto(ACTOR_MEMBER, PTO_ID, 1)).rejects.toMatchObject({
+        status: 412,
+        code: 'STALE_WRITE',
+      });
+      expect(mockAuditCreate).not.toHaveBeenCalled();
     });
   });
 
@@ -632,6 +963,7 @@ describe('PTOService extended', () => {
         endDate: new Date('2026-05-11T00:00:00.000Z'),
         dayPart: 'morning',
         note: null,
+        version: 4,
         createdAt: new Date('2026-05-01T10:00:00.000Z'),
         updatedAt: new Date('2026-05-01T10:00:00.000Z'),
       });
@@ -642,6 +974,7 @@ describe('PTOService extended', () => {
         endDate: '2026-05-11',
         dayPart: 'morning',
         note: null,
+        version: 4,
         createdAt: '2026-05-01T10:00:00.000Z',
         updatedAt: '2026-05-01T10:00:00.000Z',
       });
@@ -657,6 +990,7 @@ describe('PTOService extended', () => {
         endDate: new Date('2026-05-11T00:00:00.000Z'),
         dayPart: 'morning' as const,
         note: null,
+        version: 1,
         createdAt: new Date(),
         updatedAt: new Date(),
       };

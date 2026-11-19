@@ -1,14 +1,15 @@
 import type { JSX } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { PTOWithUser, User } from '../../types/api';
+import type { CreatePTORequest, PTOWithUser, User } from '../../types/api';
 import { editViewerKey, isPreparedPto, loadPtoForEdit, type PreparedPto } from '../../lib/ptoEdit';
 import { useModalA11y } from '../../hooks/useModalA11y';
-import { PTOFormModal, type PTOFormModalProps } from './PTOFormModal';
+import { PTOFormModal } from './PTOFormModal';
 
 interface Props {
   pto: PTOWithUser;
   currentUser: User;
-  onSubmit: PTOFormModalProps['onSubmit'];
+  /** The submitted payload with the version of the loaded detail. */
+  onSubmit: (payload: CreatePTORequest, version: number) => Promise<void> | void;
   onClose: () => void;
 }
 export function PTOEditModal(props: Props): JSX.Element {
@@ -51,7 +52,7 @@ function EditSession({ pto, currentUser, onSubmit, onClose }: Props): JSX.Elemen
         open
         initialPto={ready}
         initialNoteLoaded
-        onSubmit={onSubmit}
+        onSubmit={(payload) => onSubmit(payload, ready.version)}
         onClose={onClose}
       />
     );

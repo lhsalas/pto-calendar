@@ -1,13 +1,41 @@
 openapi: 3.0.3
 # Scoped bearer REST is implemented behind disabled-by-default server flags.
 # docs/agent-access-delivery-plan.md, tracked by #246 and owning #249–#269 PRs.
-# #255 adds opt-in cursor pagination for GET /pto. Write preconditions and
-# the client packages remain separate deliverables.
+# #255 adds opt-in cursor pagination for GET /pto. #256 adds versioned writes:
+# a record version, required If-Match preconditions and PATCH. The client
+# packages remain separate deliverables.
 info:
   title: PTO / Vacation Calendar API
-  version: 1.4.0
+  version: 1.5.0
   description: |
     API for managing PTO requests in a shared team calendar.
+
+    ## Optimistic concurrency
+    Every PTO record carries a positive integer `version`, starting at 1 for
+    new and migrated rows. It is returned by `GET /pto/{id}`, by `POST /pto`,
+    `PUT /pto/{id}` and `PATCH /pto/{id}`, and by the items of the opt-in
+    paged list. The historical capped array keeps its shape and carries no
+    version.
+
+    `PUT`, `PATCH` and `DELETE` on `/pto/{id}` require exactly one canonical
+    quoted strong `If-Match` value that states the expected version, for
+    example `"1"`. The header carries one value only: a list, `*`, a weak
+    validator (`W/"1"`), an unquoted number or any other spelling is rejected.
+    The number is an integer in 1..2147483647.
+
+    - A missing `If-Match` is `428 PRECONDITION_REQUIRED`.
+    - A malformed or out-of-range `If-Match` is `400 VALIDATION_ERROR`.
+    - A well-formed but outdated `If-Match` is `412 STALE_WRITE`. The stored
+      record is unchanged: refetch it, show the difference and confirm again.
+      The server never retries a stale write and never overwrites silently.
+    - A business conflict such as an overlapping PTO stays `409 CONFLICT`. A
+      failed precondition is never reported as a business conflict.
+
+    The version check, the write, the version increment and the audit row
+    happen in one transaction/conditional statement, so two concurrent updates
+    based on one version cannot both succeed and a stale delete cannot remove
+    a newer revision. Older browser clients that do not send the precondition
+    receive `428` and must refresh; there is no unguarded write path.
 
     ## Personal-token access
     PAT_AUTH_ENABLED and PAT_WRITES_ENABLED default false in every environment.
@@ -569,6 +597,8 @@ paths:
         response is the `PTOCalendarPage` envelope. Use its `hasMore` and
         `nextCursor` to traverse more than 1,000 matching records without
         silently truncating the result. Agent clients must use paged mode.
+        Only the paged items carry the record `version`; the historical array
+        keeps its previous shape and carries no version.
 
         The optional `userId` filter is applied in the database before sorting
         and limiting, so an unrelated owner can never consume the budget of a
@@ -774,14 +804,14 @@ paths:
             format: uuid
       responses:
         '200':
-          description: PTO details
+          description: PTO details, including the record version used for write preconditions
           headers:
             X-Request-Id:
               schema: { type: string, format: uuid }
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PTOWithUser'
+                $ref: '#/components/schemas/PTODetail'
         '401':
           description: Not authenticated
           headers:
@@ -820,8 +850,15 @@ paths:
         Normal CSRF/foreign-Origin and global limiter protections remain.
         Writes one internal audit row in the same transaction as the update;
         the row never contains the note text and is not returned.
+
+        The expected version is required: send it as one canonical quoted
+        strong `If-Match` value such as `"1"`. A missing header is 428, a
+        malformed one is 400, and an outdated one is 412 STALE_WRITE with the
+        stored record untouched. The version check, the write, the increment
+        and the audit row are one transaction, so a stale write never lands.
       parameters:
         - $ref: '#/components/parameters/RequestIdHeader'
+        - $ref: '#/components/parameters/IfMatchVersion'
         - in: path
           name: id
           required: true
@@ -834,14 +871,15 @@ paths:
           Both dates are required; single-day PTO also requires dayPart.
           Omit note to preserve its stored value, send an empty string to clear it
           to null, or send a non-empty string to replace it. A provided note must
-          be a string of at most 500 characters; null is invalid.
+          be a string of at most 500 characters; null is invalid. Unknown
+          fields are rejected and the owner can never be transferred.
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/UpdatePTORequest'
       responses:
         '200':
-          description: PTO updated
+          description: PTO updated, with the incremented version
           headers:
             X-Request-Id:
               schema: { type: string, format: uuid }
@@ -850,7 +888,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/PTO'
         '400':
-          description: Validation error
+          description: >
+            Validation error: an invalid body, an unknown field, or a
+            malformed/unsupported If-Match value (a list, a wildcard, a weak
+            validator, an unquoted number or a version outside 1..2147483647).
           headers:
             X-Request-Id:
               schema: { type: string, format: uuid }
@@ -885,6 +926,135 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: PTO overlaps an existing PTO entry for the same user
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '412':
+          $ref: '#/components/responses/StaleWrite'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    patch:
+      security:
+        - cookieAuth: []
+        - personalToken: []
+      summary: Partially update PTO by id
+      tags: [PTO]
+      description: |
+        PATCH changes only the fields it carries. An omitted key preserves the
+        stored value, so a client never has to read, merge or write back a
+        field it did not change. The merged record is validated with the
+        current date, day-part, note and overlap rules before anything is
+        written.
+
+        The note contract matches the legacy PUT (#237) and adds an explicit
+        null: omit `note` to preserve it, send `null` or an empty string to
+        clear it, or send a non-empty string to replace it. A missing note-read
+        scope is never widened into a read/merge/write requirement, and a
+        stored note that the caller may not read is never disclosed in the
+        response.
+
+        Authorization is the same as the legacy PUT: PAT_WRITES_ENABLED AND
+        pto:update:self for an owned record, or pto:update:team AND live
+        lead/admin eligibility. Scope AND role AND record authorization must
+        pass, and the owner can never be transferred.
+
+        The expected version is required: send it as one canonical quoted
+        strong `If-Match` value such as `"1"`. A missing header is 428, a
+        malformed one is 400, and an outdated one is 412 STALE_WRITE with the
+        stored record untouched. The version check, the write, the increment
+        and the audit row are one transaction, so a stale write never lands
+        and is never retried automatically.
+      parameters:
+        - $ref: '#/components/parameters/RequestIdHeader'
+        - $ref: '#/components/parameters/IfMatchVersion'
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        description: |
+          A non-empty object with only `startDate`, `endDate`, `dayPart` and
+          `note`. At least one key is required and unknown keys are rejected.
+          The merged record must still satisfy every create-time rule, so a
+          range that becomes a single day needs a valid `dayPart`.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchPTORequest'
+      responses:
+        '200':
+          description: PTO updated, with the incremented version
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PTO'
+        '400':
+          description: >
+            Validation error: an empty body, an unknown field, a merged record
+            that breaks the date/day-part/note rules, or a malformed/unsupported
+            If-Match value (a list, a wildcard, a weak validator, an unquoted
+            number or a version outside 1..2147483647).
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Not authenticated
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Not allowed to modify PTO
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: PTO not found
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: PTO overlaps an existing PTO entry for the same user
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '412':
+          $ref: '#/components/responses/StaleWrite'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
         '429':
           $ref: '#/components/responses/RateLimited'
     delete:
@@ -900,8 +1070,15 @@ paths:
         Normal CSRF/foreign-Origin and global limiter protections remain.
         Writes one internal audit row in the same transaction as the delete;
         the row is not returned.
+
+        The expected version is required: send it as one canonical quoted
+        strong `If-Match` value such as `"1"`. A missing header is 428, a
+        malformed one is 400, and an outdated one is 412 STALE_WRITE. A stale
+        delete never removes the newer revision: the record stays exactly as it
+        is and the caller must refetch and confirm again.
       parameters:
         - $ref: '#/components/parameters/RequestIdHeader'
+        - $ref: '#/components/parameters/IfMatchVersion'
         - in: path
           name: id
           required: true
@@ -914,6 +1091,18 @@ paths:
           headers:
             X-Request-Id:
               schema: { type: string, format: uuid }
+        '400':
+          description: >
+            Validation error: a malformed/unsupported If-Match value (a list, a
+            wildcard, a weak validator, an unquoted number or a version
+            outside 1..2147483647).
+          headers:
+            X-Request-Id:
+              schema: { type: string, format: uuid }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: Not authenticated
           headers:
@@ -941,6 +1130,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '412':
+          $ref: '#/components/responses/StaleWrite'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
         '429':
           $ref: '#/components/responses/RateLimited'
   /holidays:
@@ -1134,6 +1327,41 @@ components:
       description: Safe inbound correlation ID or a generated UUID v4.
       schema: { type: string, pattern: '^[A-Za-z0-9._-]{1,200}$' }
   responses:
+    PreconditionRequired:
+      description: |
+        428 PRECONDITION_REQUIRED. The write needs the expected record
+        version, sent as one canonical quoted strong `If-Match` value such as
+        `"1"`. Older clients that do not send it must refresh the record and
+        retry with its current version; the server never grants an unguarded
+        write.
+      headers:
+        X-Request-Id: { $ref: '#/components/headers/TokenRequestId' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          examples:
+            preconditionRequired:
+              value:
+                error:
+                  code: PRECONDITION_REQUIRED
+                  message: Send the expected record version in If-Match.
+    StaleWrite:
+      description: |
+        412 STALE_WRITE. The record changed after the caller read it, so the
+        stored data is left untouched. Refetch the record, show the difference
+        and confirm again; the server never retries a stale write and never
+        overwrites silently. A business conflict stays 409.
+      headers:
+        X-Request-Id: { $ref: '#/components/headers/TokenRequestId' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          examples:
+            staleWrite:
+              value:
+                error:
+                  code: STALE_WRITE
+                  message: This PTO changed since you loaded it. Reload and try again.
     PatForbidden:
       description: |
         403 FORBIDDEN for insufficient PAT scope, disabled writes or failed
@@ -1228,6 +1456,24 @@ components:
       schema:
         type: string
         format: uuid
+    IfMatchVersion:
+      name: If-Match
+      in: header
+      required: true
+      description: >
+        The expected version of the record, as exactly one canonical quoted
+        strong entity-tag that states the decimal version: `"1"`, `"2"`, and
+        so on. One value only — a list, `*`, a weak validator (`W/"1"`), an
+        unquoted number or any other spelling is rejected with
+        `400 VALIDATION_ERROR`. The version is an integer in 1..2147483647; a
+        canonical value outside that range is rejected the same way. A missing
+        header is `428 PRECONDITION_REQUIRED` and an outdated value is
+        `412 STALE_WRITE`. Use the JSON `version`, not any transport-generated
+        ETag. This write contract does not define conditional reads.
+      schema:
+        type: string
+        pattern: '^"[1-9][0-9]{0,9}"$'
+        example: '"1"'
   schemas:
     PersonalTokenIdentity:
       type: object
@@ -1337,7 +1583,7 @@ components:
           example: '#3B82F6'
     PTO:
       type: object
-      required: [id, userId, startDate, endDate, dayPart, createdAt, updatedAt]
+      required: [id, userId, startDate, endDate, dayPart, createdAt, updatedAt, version]
       properties:
         id:
           type: string
@@ -1362,6 +1608,19 @@ components:
         updatedAt:
           type: string
           format: date-time
+        version:
+          $ref: '#/components/schemas/PTORecordVersion'
+    PTORecordVersion:
+      type: integer
+      minimum: 1
+      maximum: 2147483647
+      description: >
+        Optimistic-concurrency revision of the record. It starts at 1 for new
+        and migrated rows and increments by one on every successful write. It
+        is the value a write must state as its `If-Match` precondition. The
+        client must not derive or guess it: read it from the detail, create or
+        paged response.
+      example: 1
     PTOWithUser:
       type: object
       description: >
@@ -1394,6 +1653,18 @@ components:
         note:
           type: string
           nullable: true
+    PTODetail:
+      description: >
+        One PTO with the record version that a write must state as its
+        `If-Match` precondition. The note is visible only where the caller's
+        role and credential scopes permit it.
+      allOf:
+        - $ref: '#/components/schemas/PTOWithUser'
+        - type: object
+          required: [version]
+          properties:
+            version:
+              $ref: '#/components/schemas/PTORecordVersion'
     PTOListItem:
       description: List metadata only. Notes are always null, for every role and scope.
       allOf:
@@ -1405,6 +1676,22 @@ components:
               type: string
               nullable: true
               enum: [null]
+    PTOPagedListItem:
+      description: >
+        One row of the opt-in paged list. Notes are always null, for every
+        role and scope, and the row carries the record version so a client
+        can write it back with the right precondition.
+      allOf:
+        - $ref: '#/components/schemas/PTOWithUser'
+        - type: object
+          required: [note, version]
+          properties:
+            note:
+              type: string
+              nullable: true
+              enum: [null]
+            version:
+              $ref: '#/components/schemas/PTORecordVersion'
     PTOCalendarPage:
       type: object
       additionalProperties: false
@@ -1421,9 +1708,9 @@ components:
           maxItems: 200
           description: >
             The rows of this page, ordered by `(startDate, userId, id)`. Every
-            item has `note: null`.
+            item has `note: null` and carries the record `version`.
           items:
-            $ref: '#/components/schemas/PTOListItem'
+            $ref: '#/components/schemas/PTOPagedListItem'
         nextCursor:
           type: string
           nullable: true
@@ -1523,7 +1810,12 @@ components:
         note: Doctor appointment
     UpdatePTORequest:
       type: object
-      description: Same validation rules as create. Update is allowed only for the owner or a team lead. Notes are visible only to the owner and team leads.
+      additionalProperties: false
+      description: >
+        Same validation rules as create. Update is allowed only for the owner
+        or a team lead. Notes are visible only to the owner and team leads.
+        Both dates stay required, unknown fields are rejected and the owner
+        can never be transferred.
       required: [startDate, endDate]
       properties:
         startDate:
@@ -1538,6 +1830,40 @@ components:
           type: string
           maxLength: 500
           description: Omitted preserves the stored note; an empty string clears it to null; a non-empty string replaces it. Null is not accepted.
+    PatchPTORequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: >
+        A non-empty set of changed fields. Every omitted key preserves the
+        stored value, so a client never has to read, merge or write back a
+        field it did not change. The merged record is validated with the
+        current date, day-part, note and overlap rules before anything is
+        written. The owner can never be transferred.
+      properties:
+        startDate:
+          type: string
+          format: date
+          description: Replaces the stored start date. The merged range must still be valid.
+        endDate:
+          type: string
+          format: date
+          description: Replaces the stored end date. The merged range must still be valid.
+        dayPart:
+          $ref: '#/components/schemas/DayPart'
+          description: >
+            Replaces the stored day part. A merged record that covers a single
+            day needs a valid day part.
+        note:
+          type: string
+          nullable: true
+          maxLength: 500
+          description: >
+            Omitted preserves the stored note; `null` or an empty string clears
+            it; a non-empty string replaces it. A stored note the caller may
+            not read is never disclosed in the response.
+      example:
+        dayPart: evening
     ErrorResponse:
       type: object
       required: [error]
@@ -1555,7 +1881,9 @@ components:
                   - `CSRF_REJECTED` (403) — state-changing request origin is not allowed
                   - `VALIDATION_ERROR` (400)
                   - `NOT_FOUND` (404)
-                  - `CONFLICT` (409)
+                  - `CONFLICT` (409) — business conflict, for example an overlap
+                  - `STALE_WRITE` (412) — the expected version no longer matches
+                  - `PRECONDITION_REQUIRED` (428) — the expected version header is missing
                   - `RATE_LIMITED` (429) — see `Retry-After` header
                   - `NOT_READY` (503) — readiness probe only
                   - `INTERNAL_ERROR` (500)

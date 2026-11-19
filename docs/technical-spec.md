@@ -3,14 +3,16 @@
 ## 1. Purpose
 This document defines the technical specification for an internal PTO/vacation calendar app where authenticated users can create and view PTO entries, and only the owner or a team lead can modify or delete them.
 
-> **Proposed agent-access architecture (#246), not current functionality:**
-> [Shared scope/API/compatibility contract](agent-access-delivery-plan.md)
+> **Agent-access architecture (#246):** the
+> [shared scope/API/compatibility contract](agent-access-delivery-plan.md)
 > covers session-only own-token management, scoped bearer REST, complete paged
-> queries and versioned writes before CLI/local MCP delivery. Failed `If-Match`
-> is proposed as **412 STALE_WRITE**, missing preconditions as **428**, and
-> business/idempotency conflicts as **409**. Owning implementation PRs update
-> this specification, OpenAPI and browser callers together; no new route or
-> security scheme is made available by this documentation.
+> queries and versioned writes before CLI/local MCP delivery. The versioned
+> write contract (#256) is implemented here: a failed `If-Match` is
+> **412 STALE_WRITE**, a missing precondition is **428 PRECONDITION_REQUIRED**,
+> and business/idempotency conflicts stay **409**. Owning implementation PRs
+> update this specification, OpenAPI and browser callers together. The CLI and
+> the local MCP server are still not distributed, and this documentation alone
+> makes no route or security scheme available.
 
 ## 2. Scope
 The application will support:
@@ -140,6 +142,7 @@ Fields:
 - `note: string | null`
 - `createdAt: datetime`
 - `updatedAt: datetime`
+- `version: integer` — optimistic-concurrency revision; starts at 1 for new and migrated rows and increments by one on every successful write
 
 Rules:
 - If `startDate == endDate`, `dayPart` is required
@@ -147,6 +150,7 @@ Rules:
 - PTO entries cannot overlap another PTO entry for the same user
 - PTO cannot start or end on a weekend
 - Weekends inside a multi-day PTO range count and are displayed as part of the continuous PTO
+- `version` is never derived by a client: it is read from the detail, create or paged response and stated back as the write precondition
 
 ### 5.3 Holiday
 A public holiday. Read by every authenticated user; written by team leads only. Two holidays on the same `date` with different `countryCode` values coexist; the unique key is `(date, country_code)`. A `countryCode` of `null` denotes a locale-agnostic holiday that applies to everyone. Holidays do not interact with PTO validation — a PTO that starts or ends on a holiday is allowed.
@@ -526,9 +530,12 @@ Response 200:
   "startDate": "2026-05-10",
   "endDate": "2026-05-10",
   "dayPart": "evening",
-  "note": "Appointment"
+  "note": "Appointment",
+  "version": 1
 }
 ```
+
+The `version` is the value a write must state as its `If-Match` precondition.
 
 #### POST /pto
 Creates a PTO record for the authenticated user.
@@ -563,12 +570,18 @@ Response 201:
   "dayPart": "morning",
   "note": "Doctor",
   "createdAt": "2026-05-03T12:00:00Z",
-  "updatedAt": "2026-05-03T12:00:00Z"
+  "updatedAt": "2026-05-03T12:00:00Z",
+  "version": 1
 }
 ```
 
 #### PUT /pto/:id
 Updates a PTO record if requester is owner or team lead.
+
+Requires the `If-Match` precondition: one canonical quoted strong version,
+for example `If-Match: "1"`. A missing precondition is `428
+PRECONDITION_REQUIRED`, a malformed one is `400 VALIDATION_ERROR` and an
+outdated one is `412 STALE_WRITE` with the stored record unchanged.
 
 Request:
 ```json
@@ -589,14 +602,44 @@ Response 200:
   "endDate": "2026-05-11",
   "dayPart": "all_day",
   "note": "Updated plan",
-  "updatedAt": "2026-05-03T12:30:00Z"
+  "updatedAt": "2026-05-03T12:30:00Z",
+  "version": 2
 }
 ```
+
+#### PATCH /pto/:id
+Changes only the fields the request carries. An omitted key preserves the
+stored value, so a client never has to read, merge or write back a field it
+did not change. The merged record is validated with every create-time rule
+before anything is written.
+
+Requires the same `If-Match` precondition as `PUT` (`428` when missing, `400`
+when malformed, `412` when outdated), and the same scope, live role and
+record authorization as the legacy PUT.
+
+Request (a non-empty object; only these four keys are accepted):
+```json
+{
+  "dayPart": "evening"
+}
+```
+
+The note contract matches the legacy PUT and adds an explicit null: omit
+`note` to preserve it, send `null` or `""` to clear it, send a non-empty
+string to replace it. `null` stays invalid for `PUT`.
+
+Response 200: the updated record with the incremented `version`.
 
 #### DELETE /pto/:id
 Deletes a PTO record if requester is owner or team lead.
 
-Response 204.
+Requires the `If-Match` precondition: one canonical quoted strong version,
+for example `If-Match: "2"`. A missing precondition is `428
+PRECONDITION_REQUIRED`, a malformed one is `400 VALIDATION_ERROR` and an
+outdated one is `412 STALE_WRITE` — a stale delete never removes a newer
+revision.
+
+Response 204, empty body.
 
 ### 7.3 Holiday APIs
 
@@ -671,12 +714,18 @@ Standard error codes:
 - `UNAUTHENTICATED` (401) — no valid session cookie
 - `FORBIDDEN` (403) — requester is not allowed to perform the action
 - `CSRF_REJECTED` (403) — state-changing request has an untrusted Origin or Referer
-- `VALIDATION_ERROR` (400) — request body fails Zod validation
+- `VALIDATION_ERROR` (400) — request body fails Zod validation, or the `If-Match` precondition is malformed
 - `NOT_FOUND` (404) — referenced PTO does not exist
 - `CONFLICT` (409) — proposed PTO overlaps an existing PTO for the same user
+- `STALE_WRITE` (412) — the `If-Match` version no longer matches the stored record; the record is unchanged
+- `PRECONDITION_REQUIRED` (428) — a write reached the server without the required `If-Match` version
 - `RATE_LIMITED` (429) — login limiter, global limiter or a personal-token quota tripped; `Retry-After` header carries seconds-until-reset of the exact rejecting window
 - `NOT_READY` (503) — readiness probe only; DB unreachable or probe timed out
 - `INTERNAL_ERROR` (500) — unhandled exception
+
+A failed precondition is never reported as a business conflict: `412`/`428` mean
+"the expected version did not hold", `409` means "the business rules refuse
+this change".
 
 ## 9. Validation Rules
 
@@ -690,6 +739,31 @@ Standard error codes:
 - Weekends inside multi-day PTO ranges count and are displayed
 - PTO entries cannot overlap another PTO entry for the same user
 - `note` max length recommended: 500 chars
+
+### 9.1a Write preconditions and partial updates (#256)
+- `PUT`, `PATCH` and `DELETE` on `/pto/:id` require exactly one `If-Match`
+  header holding the expected version as one canonical quoted strong
+  entity-tag: `"1"`, `"2"`, … The value is an integer in 1..2147483647.
+- Accepted spelling: one double-quoted decimal integer. A missing header is
+  `428 PRECONDITION_REQUIRED`; a list, `*`, a weak validator (`W/"1"`), an
+  unquoted number, a non-numeric value or a value outside the range is
+  `400 VALIDATION_ERROR`.
+- A well-formed but outdated version is `412 STALE_WRITE`. The stored record
+  is left exactly as it is; the client refetches, shows the difference and
+  confirms again. The server never retries a stale write.
+- The version check, the write, the increment and the audit row run in one
+  transaction/conditional statement, so two updates based on one version
+  cannot both succeed and a stale delete cannot remove a newer revision.
+- `PATCH /pto/:id` accepts a non-empty object with only `startDate`,
+  `endDate`, `dayPart` and `note`. Omitted keys preserve the stored value;
+  `note: null` and `note: ""` clear it; a non-empty string replaces it. The
+  merged record is validated with every rule in §9.1 before anything is
+  written, and unknown fields are rejected.
+- `PUT /pto/:id` keeps its contract: both dates are required, an omitted
+  `note` preserves the stored value, `""` clears it, a non-empty string
+  replaces it and `null` is invalid.
+- The owner can never be transferred by either method, and a personal token
+  needs the same scope, live role and record authority as the legacy PUT.
 
 ### 9.2 Auth validation
 - Email must be unique
@@ -875,6 +949,7 @@ For each day in the visible calendar grid:
 - Clicking PTO opens details
 - Edit/delete shown only when current user is owner or team lead
 - Confirm before delete
+- An edit or a delete states the loaded record version as its `If-Match` precondition, and a stale write is refused with a visible conflict instead of overwriting the newer record (§11.8)
 
 ### 11.6 Toast notifications
 - Page-level feedback (create / update / delete / list-fetch errors) is delivered through a single toast system, not inline banners.
@@ -896,6 +971,15 @@ For each day in the visible calendar grid:
 - The dialogs reuse the shared modal trap (Escape to close, Tab cycling, scroll lock, initial focus) and add focus restoration through `useTokenDialog`: the control that opened a dialog gets its focus back when the dialog closes.
 - The CLI/local MCP section is placeholder-only. It states that no client is distributed yet, so there is nothing to install and nothing to paste, and it explains that an assistant can see whatever the tool sends it — including note text — and that this reaches whichever AI provider is configured, so a token must never be pasted into a chat or a shared document.
 - No token is written to `localStorage`, no `VITE_*` token configuration exists, and the rollout flags `PAT_AUTH_ENABLED` / `PAT_WRITES_ENABLED` stay off by default in every environment. A token issued in this page therefore cannot reach a bearer route until an operator enables bearer authentication; the separate read-only/write rollout gates are unchanged.
+
+### 11.8 Versioned PTO writes in the browser (#256)
+
+- The browser never invents a version. Opening the edit form or the delete confirmation loads `GET /pto/:id` and keeps the `version` of that response; the write then states it as one canonical quoted strong `If-Match` value (`"1"`, `"2"`, …).
+- The legacy `PUT` body is unchanged: both dates, the day part and the note. The precondition is a header, not a body field, and the note journeys of #235–#237 keep working unchanged.
+- A successful write updates the record and the version. The list is refetched, so the calendar shows the new state.
+- A refused write is never silent. `412 STALE_WRITE` means the record changed after it was read: the stored data stays untouched, the user is told that the record changed, and the app offers the current record again (refetch/reopen) instead of retrying the stale write. The write is attempted once — there is no automatic retry that could overwrite a newer revision.
+- `428 PRECONDITION_REQUIRED` means the client did not state a version. An older cached browser client receives it and must refresh the record; the server never grants an unguarded write.
+- The conflict message is a normal error surface (inline `role="alert"` in the form or the details modal, or an error toast). It never contains data from the other revision that the user is not allowed to read.
 
 ## 12. Query and Rendering Logic
 

@@ -253,29 +253,50 @@ describe('scoped PAT HTTP authorization on PostgreSQL', () => {
         expect(created.body.userId).toBe(users[index]!.id);
         expect(created.body.note).toBe(has('pto:notes:read') ? 'submitted note' : null);
       }
+      let version = 1;
       const updated = await request(app)
         .put(`/pto/${record.id}`)
         .set('Authorization', bearer)
+        .set('If-Match', `"${version}"`)
         .send(day)
         .expect(canWrite('update') ? 200 : denial);
-      if (canWrite('update'))
+      if (canWrite('update')) {
         expect(updated.body.note).toBe(has('pto:notes:read') ? 'stored private note' : null);
+        expect(updated.body.version).toBe(version + 1);
+        version += 1;
+      }
       expect((await db.pTORequest.findUniqueOrThrow({ where: { id: record.id } })).note).toBe(
         'stored private note',
       );
       const noteWrite = await request(app)
         .put(`/pto/${record.id}`)
         .set('Authorization', bearer)
+        .set('If-Match', `"${version}"`)
         .send({ ...day, note: 'replacement private note' })
         .expect(canWrite('update') ? 200 : denial);
-      if (canWrite('update'))
+      if (canWrite('update')) {
         expect(noteWrite.body.note).toBe(has('pto:notes:read') ? 'replacement private note' : null);
+        version += 1;
+      }
+      // A partial write is the same scoped write as the replacement write.
+      const patched = await request(app)
+        .patch(`/pto/${record.id}`)
+        .set('Authorization', bearer)
+        .set('If-Match', `"${version}"`)
+        .send({ dayPart: 'morning' })
+        .expect(canWrite('update') ? 200 : denial);
+      if (canWrite('update')) {
+        // The partial write changes the day part and keeps the stored note.
+        expect(patched.body.note).toBe(has('pto:notes:read') ? 'replacement private note' : null);
+        version += 1;
+      }
       expect((await db.pTORequest.findUniqueOrThrow({ where: { id: record.id } })).note).toBe(
         canWrite('update') ? 'replacement private note' : 'stored private note',
       );
       const deleted = await request(app)
         .delete(`/pto/${record.id}`)
         .set('Authorization', bearer)
+        .set('If-Match', `"${version}"`)
         .expect(canWrite('delete') ? 204 : denial);
       for (const res of [detail, created, updated, noteWrite, deleted]) confidential(res);
       expect(await db.pTORequest.findUnique({ where: { id: record.id } })).toEqual(
@@ -331,10 +352,11 @@ describe('scoped PAT HTTP authorization on PostgreSQL', () => {
     for (const path of ['/pto', '/auth/me', `/pto/${randomUUID()}`]) {
       await request(app).head(path).set('Authorization', bearer).expect(401);
       confidential(await request(app).options(path).set('Authorization', bearer).expect(401));
+    }
+    for (const path of ['/pto', '/auth/me', '/pto/future'])
       confidential(
         await request(app).patch(path).set('Authorization', bearer).send({}).expect(401),
       );
-    }
     // Cookie-free browser preflight remains the same CORS policy and 204 status.
     const preflight = await request(app)
       .options('/pto')
@@ -342,6 +364,48 @@ describe('scoped PAT HTTP authorization on PostgreSQL', () => {
       .set('Access-Control-Request-Method', 'POST')
       .expect(204);
     expect(preflight.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+  });
+
+  it('requires and checks the same explicit version for authorized PAT writes', async () => {
+    const record = await makeRecord(users[0]!.id);
+    const issued = await mint(0, ['pto:update:self', 'pto:delete:self']);
+    const bearer = `Bearer ${issued.rawToken}`;
+    const path = `/pto/${record.id}`;
+    for (const write of [
+      request(app).put(path).send(day),
+      request(app).patch(path).send({ dayPart: 'evening' }),
+      request(app).delete(path),
+    ]) {
+      const res = await write.set('Authorization', bearer).expect(428);
+      confidential(res);
+      expect(res.body.error.code).toBe('PRECONDITION_REQUIRED');
+    }
+    const updated = await request(app)
+      .patch(path)
+      .set('Authorization', bearer)
+      .set('If-Match', '"1"')
+      .send({ dayPart: 'evening' })
+      .expect(200);
+    confidential(updated);
+    expect(updated.body).toMatchObject({ version: 2, dayPart: 'evening', note: null });
+    const stale = await request(app)
+      .delete(path)
+      .set('Authorization', bearer)
+      .set('If-Match', '"1"')
+      .expect(412);
+    confidential(stale);
+    expect(stale.body.error.code).toBe('STALE_WRITE');
+    expect(await db.pTORequest.findUnique({ where: { id: record.id } })).toMatchObject({
+      version: 2,
+      note: 'stored private note',
+    });
+    const audits = await db.auditLog.findMany({ where: { entityId: record.id } });
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      action: 'update_pto',
+      credentialType: 'personal_access_token',
+      sourceTokenId: issued.token.id,
+    });
   });
 
   it('rejects absent/empty/duplicate/malformed/mixed credentials without falling back to a valid signed cookie', async () => {
@@ -393,8 +457,12 @@ describe('scoped PAT HTTP authorization on PostgreSQL', () => {
     await request(readonly).get('/auth/me').set('Authorization', bearer).expect(200);
     for (const operation of [
       request(readonly).post('/pto').send({ startDate: '2026-12-08', endDate: '2026-12-08' }),
-      request(readonly).put(`/pto/${record.id}`).send(day),
-      request(readonly).delete(`/pto/${record.id}`),
+      request(readonly).put(`/pto/${record.id}`).set('If-Match', '"1"').send(day),
+      request(readonly)
+        .patch(`/pto/${record.id}`)
+        .set('If-Match', '"1"')
+        .send({ dayPart: 'evening' }),
+      request(readonly).delete(`/pto/${record.id}`).set('If-Match', '"1"'),
     ])
       confidential(await operation.set('Authorization', bearer).expect(403));
     expect(await db.pTORequest.count({ where: { userId: users[2]!.id } })).toBe(1);

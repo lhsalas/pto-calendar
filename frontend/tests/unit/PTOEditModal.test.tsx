@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { PTOEditModal } from '../../src/components/pto/PTOEditModal';
 import { preparePtoForEdit } from '../../src/lib/ptoEdit';
 import * as api from '../../src/api/client';
-import { STUB_PTO, STUB_USER } from '../mocks/handlers';
+import { STUB_PTO, STUB_PTO_DETAIL, STUB_USER } from '../mocks/handlers';
 
 afterEach(() => vi.restoreAllMocks());
 function deferred() {
@@ -109,7 +109,9 @@ describe('PTOEditModal', () => {
     });
     expect(cancel).toHaveFocus();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    await act(async () => current.resolve({ note: 'Current note' }));
+    await act(async () =>
+      current.resolve({ ...STUB_PTO_DETAIL, id: 'new-session', note: 'Current note' }),
+    );
     expect(screen.getByLabelText(/note \(optional\)/i)).toHaveValue('Current note');
   });
 
@@ -120,23 +122,41 @@ describe('PTOEditModal', () => {
       <PTOEditModal pto={STUB_PTO} currentUser={STUB_USER} onSubmit={vi.fn()} onClose={vi.fn()} />,
     );
     unmount();
-    await act(async () => response.resolve({ note: 'Late private note' }));
+    await act(async () => response.resolve({ ...STUB_PTO_DETAIL, note: 'Late private note' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
   it('rejects a malformed detail note rather than enabling an empty edit', async () => {
-    vi.spyOn(api, 'apiRequest').mockResolvedValue({});
+    vi.spyOn(api, 'apiRequest').mockResolvedValue({ ...STUB_PTO_DETAIL, note: undefined });
     render(
       <PTOEditModal pto={STUB_PTO} currentUser={STUB_USER} onSubmit={vi.fn()} onClose={vi.fn()} />,
     );
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load PTO details.');
     expect(screen.queryByLabelText(/note \(optional\)/i)).not.toBeInTheDocument();
   });
+  it.each([
+    { version: undefined },
+    { version: 0 },
+    { version: 1.5 },
+    { version: 2_147_483_648 },
+    { id: 'different-pto' },
+    { userId: 'different-owner' },
+    { startDate: 'today' },
+    { endDate: null },
+    { dayPart: 'night' },
+  ])('keeps an inconsistent loaded detail non-editable (%j)', async (invalid) => {
+    vi.spyOn(api, 'apiRequest').mockResolvedValue({ ...STUB_PTO_DETAIL, ...invalid });
+    render(
+      <PTOEditModal pto={STUB_PTO} currentUser={STUB_USER} onSubmit={vi.fn()} onClose={vi.fn()} />,
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load PTO details.');
+    expect(screen.queryByRole('button', { name: /save pto/i })).not.toBeInTheDocument();
+  });
   it('keeps failed preparation non-editable and retries the authorized detail load', async () => {
     const user = userEvent.setup();
     const request = vi
       .spyOn(api, 'apiRequest')
       .mockRejectedValueOnce(new Error('Private detail unavailable'))
-      .mockResolvedValueOnce({ note: 'Doctor' });
+      .mockResolvedValueOnce({ ...STUB_PTO_DETAIL, note: 'Doctor' });
     render(
       <PTOEditModal pto={STUB_PTO} currentUser={STUB_USER} onSubmit={vi.fn()} onClose={vi.fn()} />,
     );
@@ -151,7 +171,7 @@ describe('PTOEditModal', () => {
     const request = vi.spyOn(api, 'apiRequest');
     render(
       <PTOEditModal
-        pto={preparePtoForEdit(STUB_PTO, STUB_USER, note)}
+        pto={preparePtoForEdit(STUB_PTO, STUB_USER, { ...STUB_PTO_DETAIL, note })}
         currentUser={STUB_USER}
         onSubmit={vi.fn()}
         onClose={vi.fn()}
@@ -170,19 +190,19 @@ describe('PTOEditModal', () => {
     );
     expect(screen.getByRole('status')).toBeInTheDocument();
     expect(request).toHaveBeenCalledTimes(1);
-    await act(async () => response.resolve({ note: 'Doctor' }));
+    await act(async () => response.resolve({ ...STUB_PTO_DETAIL, note: 'Doctor' }));
     expect(screen.getByLabelText(/note \(optional\)/i)).toHaveValue('Doctor');
   });
   it('ignores the old PTO response after selection changes', async () => {
     const response = deferred();
     vi.spyOn(api, 'apiRequest')
       .mockReturnValueOnce(response.promise)
-      .mockResolvedValueOnce({ note: 'Current note' });
+      .mockResolvedValueOnce({ ...STUB_PTO_DETAIL, id: 'other-pto', note: 'Current note' });
     const props = { currentUser: STUB_USER, onSubmit: vi.fn(), onClose: vi.fn() };
     const { rerender } = render(<PTOEditModal {...props} pto={STUB_PTO} />);
     rerender(<PTOEditModal {...props} pto={{ ...STUB_PTO, id: 'other-pto' }} />);
     expect(await screen.findByLabelText(/note \(optional\)/i)).toHaveValue('Current note');
-    await act(async () => response.resolve({ note: 'Stale private note' }));
+    await act(async () => response.resolve({ ...STUB_PTO_DETAIL, note: 'Stale private note' }));
     expect(screen.getByLabelText(/note \(optional\)/i)).toHaveValue('Current note');
   });
   it('discards a prior viewer request and never fetches or edits without permission', async () => {
@@ -197,16 +217,18 @@ describe('PTOEditModal', () => {
       />,
     );
     expect(await screen.findByRole('alert')).toHaveTextContent('You cannot edit this PTO.');
-    await act(async () => response.resolve({ note: 'Stale private note' }));
+    await act(async () => response.resolve({ ...STUB_PTO_DETAIL, note: 'Stale private note' }));
     expect(screen.queryByLabelText(/note \(optional\)/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Stale private note')).not.toBeInTheDocument();
     expect(request).toHaveBeenCalledTimes(1);
   });
   it('does not reuse prepared data from a different authorized viewer', async () => {
-    const request = vi.spyOn(api, 'apiRequest').mockResolvedValue({ note: 'Fresh detail' });
+    const request = vi
+      .spyOn(api, 'apiRequest')
+      .mockResolvedValue({ ...STUB_PTO_DETAIL, note: 'Fresh detail' });
     render(
       <PTOEditModal
-        pto={preparePtoForEdit(STUB_PTO, STUB_USER, 'Old detail')}
+        pto={preparePtoForEdit(STUB_PTO, STUB_USER, { ...STUB_PTO_DETAIL, note: 'Old detail' })}
         currentUser={{ ...STUB_USER, id: 'new-lead' }}
         onSubmit={vi.fn()}
         onClose={vi.fn()}

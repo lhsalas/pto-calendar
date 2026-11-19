@@ -565,6 +565,14 @@ describe('GET /pto paging, owner filtering and cursor validation', () => {
           .expect(200);
         expect(paged.body.items.length).toBeGreaterThan(0);
         expect(paged.body.items.every((item: { note: unknown }) => item.note === null)).toBe(true);
+        // The paged rows carry the version a write has to name; the legacy
+        // array keeps its historical fields and has none.
+        expect(
+          paged.body.items.every((item: { version: number }) => Number.isInteger(item.version)),
+        ).toBe(true);
+        expect(legacy.body.every((item: { version?: number }) => item.version === undefined)).toBe(
+          true,
+        );
       }
     });
 

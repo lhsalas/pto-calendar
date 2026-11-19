@@ -167,7 +167,7 @@ client packages, new routes and pilot rollout remain separate gates.
 | Paged queries | Deterministic `(startDate, userId, id)` ordering, bounded page sizes, validated filter/range-bound cursors; traverse >1,000 records without silent loss. No point-in-time snapshot claim under concurrent changes. Adapters deduplicate/detect changes and report incomplete results when bounded budgets are exhausted. | [#255], [#259] |
 | `PATCH /pto/:id` | Non-empty changed fields only; omitted keys preserve, `note: null` explicitly clears. Document empty-string compatibility. Validate the merged record, reject unknown fields/owner transfer. | [#256] |
 | Existing `PUT /pto/:id` | Preserve [#237]: both dates still required; omitted note unchanged, `note: ""` clears, text sets. Create-note normalization is unchanged. | [#237], [#256] |
-| `PUT/PATCH/DELETE /pto/:id` | Integer `version` starts at 1, returned on detail/mutations and paged summaries as needed. Require expected-version preconditions for browser **and** PAT writes; compare/write/increment/audit atomically. Browser edit/delete uses loaded detail version and handles refetch/reconfirmation, with no legacy bypass. | [#256] |
+| `PUT/PATCH/DELETE /pto/:id` | Integer `version` starts at 1, returned on detail/mutations and paged items; the legacy capped array keeps its shape and carries no version. Require expected-version preconditions for browser **and** PAT writes; compare/write/increment/audit atomically. Browser edit/delete uses loaded detail version and handles refetch/reconfirmation, with no legacy bypass. | [#256] |
 | All POST/PUT/PATCH writes | Enforce existing inclusive owner/date non-overlap at DB/transaction boundary, not only a preflight SELECT. Same-day morning/evening still conflict; different owners may overlap; continuous ranges may contain weekends but cannot start/end on weekends. | [#257] |
 | `POST /pto` | PAT creates require a validated `Idempotency-Key` scoped to actor, credential and operation, bound to a canonical payload fingerprint. Persist replay/result, create and audit atomically: one record/audit for simultaneous identical retries. Cookie callers may remain key-optional. | [#258] |
 
@@ -206,13 +206,17 @@ key and bound to the date range and normalized `userId`, not to `limit`. A
 continuation after session-key rotation must restart from the first page.
 
 Do not invent frozen values for other bounded sizes,
-exact `If-Match` wire grammar, quota windows/defaults, replay retention/cleanup,
+quota windows/defaults, replay retention/cleanup,
 audit-note retention, profile/env precedence, credential backends, package
 versions/bin details, CLI JSON/exit-code schema or MCP protocol/SDK revision.
-Owners document/test these within the constraints above, update this ADR and
-OpenAPI/shared contracts before downstream use, and obtain approval for any
-incompatible scope change. Missing precondition remains 428 and failed
-`If-Match` remains 412 regardless of the chosen version encoding.
+[#256] settles the `If-Match` wire grammar it owns: exactly one canonical
+quoted strong value that states the decimal expected version (`"1"`, `"2"`,
+…, an integer in 1..2147483647), with a missing header as 428, a malformed,
+listed, wildcard, weak or unquoted value as 400 and an outdated value as 412.
+Owners document/test the remaining values within the constraints above, update
+this ADR and OpenAPI/shared contracts before downstream use, and obtain
+approval for any incompatible scope change. Missing precondition remains 428
+and failed `If-Match` remains 412 regardless of the chosen version encoding.
 
 ## 4. Adapter, distribution and client acceptance contract
 
@@ -427,30 +431,56 @@ the separately authorized #294 waiver skipped `Security scan`.
 #255 adds the validated `userId` filter and the signed cursor paging
 described in §3; the browser array form and its 1,000-row cap are unchanged.
 
-**Self-service UI scope — 2026-11-18:** #254 delivers the all-role own-token
-settings page: `/settings/tokens` behind ordinary signed-in-user protection
-with an **API access** entry in the calendar header, name/current
-password/expiry plus scope controls (read-only and 90 days by default), a
-copy-once reveal dialog with loss-and-replacement guidance, owned metadata with
-server-computed absolute expiry and Active/Expired/Revoked/Invalidated status,
-and revoke-one/revoke-all confirmations that need a valid session but no
-password. The Chromium acceptance suite drives that journey with disposable
-accounts and tokens only: issue, copy-once, revoke-one, revoke-all, and a
-cookie-free bearer proof on `GET /auth/me` (200 before revocation, 401 after).
-The suite refuses to run against anything but the designated local database
-and loopback API named in the environment, and it never follows a redirect for
-a synthetic credential probe. The secret stays in component memory and is
-cleared on close, navigation and unmount; no token is written to `localStorage`
-and no `VITE_*` token configuration exists. The CLI/local MCP section is
-placeholder-only — nothing is distributed, so there is no package to install
-and no configuration to paste — and it explains that an assistant can see
-whatever the tool sends it, including note text, and that this reaches the
-configured AI provider. `PAT_AUTH_ENABLED` and `PAT_WRITES_ENABLED` stay off
-by default in every environment; this page issues credentials but does not
-enable bearer traffic. Managing teammates' tokens, role administration, hosted
-MCP/OAuth and secret recovery remain out of scope. The delivery record for
-this scope lives in the issue and its pull request; this document does not
-restate a merge or CI state that would go stale.
+**Self-service UI checkpoint — 2026-11-18:** #254 was delivered by PR #298 on
+master `ee31f262eec3cfe2123b2a92032293d96ac5c613` (master CI run
+`44432603267`). That run passed the ten non-waived jobs; the separately
+authorized #294 waiver skipped `Security scan`, and the run executed no
+production step. #254 delivers the all-role own-token settings page:
+`/settings/tokens` behind ordinary signed-in-user protection with an **API
+access** entry in the calendar header, name/current password/expiry plus scope
+controls (read-only and 90 days by default), a copy-once reveal dialog with
+loss-and-replacement guidance, owned metadata with server-computed absolute
+expiry and Active/Expired/Revoked/Invalidated status, and revoke-one/revoke-all
+confirmations that need a valid session but no password. The Chromium
+acceptance suite drives that journey with disposable accounts and tokens only:
+issue, copy-once, revoke-one, revoke-all, and a cookie-free bearer proof on
+`GET /auth/me` (200 before revocation, 401 after). The suite refuses to run
+against anything but the designated local database and loopback API named in
+the environment, and it never follows a redirect for a synthetic credential
+probe. The secret stays in component memory and is cleared on close, navigation
+and unmount; no token is written to `localStorage` and no `VITE_*` token
+configuration exists. The CLI/local MCP section is placeholder-only — nothing
+is distributed, so there is no package to install and no configuration to
+paste — and it explains that an assistant can see whatever the tool sends it,
+including note text, and that this reaches the configured AI provider.
+`PAT_AUTH_ENABLED` and `PAT_WRITES_ENABLED` stay off by default in every
+environment; this page issues credentials but does not enable bearer traffic.
+Managing teammates' tokens, role administration, hosted MCP/OAuth and secret
+recovery remain out of scope.
+
+**Versioned-write scope — 2026-11-18:** #256 is the implementation scope of
+this change, and this document records the contract it implements rather than
+a delivery status: the delivery record lives in its issue and pull request.
+A PTO record carries a positive integer `version` that starts at 1 for new and
+migrated rows and is returned by the detail, the create/update responses and
+the opt-in paged items, while the historical capped array keeps its shape and
+carries no version. `PUT`, `PATCH` and `DELETE` on `/pto/:id` require exactly
+one canonical quoted strong `If-Match` value that states the expected version
+(`"1"`, `"2"`, …): a missing header is `428 PRECONDITION_REQUIRED`, a
+malformed, listed, wildcard, weak or unquoted value is `400 VALIDATION_ERROR`
+and an outdated value is `412 STALE_WRITE` with the stored record untouched.
+The business conflict stays `409`. `PATCH /pto/:id` changes only the fields it
+carries — omitted keys preserve the stored value, `note: null` and `note: ""`
+clear it — and validates the merged record with the current rules; the legacy
+`PUT` note contract of #237 and the owner-only rule are unchanged, and the
+owner can never be transferred. The version check, the write, the increment
+and the audit row are one transaction, so two updates based on one version
+cannot both succeed and a stale delete cannot remove a newer revision. The
+browser states the version it loaded, treats `412` as a deliberate conflict
+that it surfaces and recovers from with a refetch, and never retries the stale
+write; an older client without the precondition receives `428` and must
+refresh. Overlap integrity across rows and adapters stays #257, and the
+replay/idempotency contract stays #258.
 
 Rows give the safe serial default. Parallel development is restricted to the
 approved waves below after prerequisites merge; every row is one deliverable/PR.
