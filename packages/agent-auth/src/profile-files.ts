@@ -20,10 +20,13 @@
  *   removed.
  * - A write admits the record it replaces first, so a symbolic link, a hard
  *   link, a foreign, nonregular or corrupt record is never overwritten even if
- *   the caller did not read it. The new content is staged in the same
- *   directory under an unpredictable name created with `O_EXCL`, flushed and
- *   identity-checked, then renamed over the target. The store is flushed after
- *   the rename.
+ *   the caller did not read it. The admitted record and the staged file keep
+ *   their descriptors open through every identity check, so an inode number
+ *   freed by another process cannot be recycled into a false match. The new
+ *   content is staged in the same directory under an unpredictable name created
+ *   with `O_EXCL`, flushed, then renamed over the target. The store is flushed
+ *   after the rename. A failure after the rename is reported as unconfirmed:
+ *   nothing is rolled back and no success is claimed.
  * - Each profile is serialized by an exclusive lock directory that is held for
  *   the whole callback. A held lock is reported as busy. It is never waited on,
  *   broken or removed by anybody but the process that created it, so a stale
@@ -38,7 +41,11 @@
  * Limits: a process running as root or as the same user can replace entries
  * of the store between two of its own system calls. Identity checks narrow
  * those windows before each rename and unlink, but they do not eliminate them,
- * and a same-user process can read the stored token in any case. The guarantees
+ * and a same-user process can read the stored token in any case. A record that
+ * is replaced between its last check and the rename can still be overwritten;
+ * the link count after the rename detects a record that was moved aside, but not
+ * every such race. A target that was absent at its last check is not pinned, so
+ * a file created there before the rename is overwritten as well. The guarantees
  * assume a local Linux filesystem with working `fsync`, and a store path whose
  * components are real directories rather than symbolic links.
  */
@@ -159,10 +166,17 @@ interface Stage {
   readonly identity: Identity;
 }
 
-/** A record that a write may replace, with the identity it was admitted under. */
-interface Admitted {
-  readonly record: StoredProfile;
+/**
+ * An admitted record whose descriptor is still open.
+ *
+ * The open descriptor pins the object that was admitted: no other file can take
+ * its inode number while its identity is still compared. The owner closes the
+ * handle exactly once.
+ */
+interface Pinned {
+  readonly handle: number;
   readonly identity: Identity;
+  readonly record: StoredProfile;
 }
 
 /** The access of one callback, and the revocation that ends it. */
@@ -531,25 +545,33 @@ async function settle<T>(run: () => Promise<T>): Promise<Outcome<T>> {
  * corrupt and its content is never shown.
  */
 function readRecord(store: number, name: string, profile: string): StoredProfile | null {
-  const admitted = admitRecord(store, name, profile);
-  return admitted === null ? null : admitted.record;
+  const pinned = pinRecord(store, name, profile);
+  if (pinned === null) return null;
+  closeHandle(pinned.handle);
+  return pinned.record;
 }
 
 /**
- * Admits the record at one name of the store.
+ * Admits the record at one name of the store and keeps its descriptor open.
  *
  * Returns null when there is no entry. Otherwise the entry must be an owner-only
  * regular file with a single link, and its content must be a valid profile of
- * this name. The identity of the admitted file is returned with the record.
+ * this name. The open handle belongs to the caller, which closes it exactly once.
+ * While the handle stays open the admitted object cannot be freed, so its inode
+ * number cannot be reused by another file and an identity comparison against it
+ * stays meaningful. A failed admission closes the handle and keeps its error.
  */
-function admitRecord(store: number, name: string, profile: string): Admitted | null {
+function pinRecord(store: number, name: string, profile: string): Pinned | null {
   const handle = openOrNull(anchoredPath(store, name), RECORD_FLAGS);
   if (handle === null) return null;
-  return withHandle(handle, () => {
+  try {
     const stat = statHandle(handle);
     assertOwnerOnlyRecord(stat);
-    return { record: readContent(handle, profile), identity: identityOf(stat) };
-  });
+    return { handle, identity: identityOf(stat), record: readContent(handle, profile) };
+  } catch (error) {
+    closeQuietly(handle);
+    throw error;
+  }
 }
 
 /**
@@ -579,34 +601,73 @@ function readContent(handle: number, profile: string): StoredProfile {
 /**
  * Writes the record of one profile.
  *
- * The record that is replaced is admitted first, even if the caller read it.
- * The new content is staged in the same directory, flushed and checked against
- * its own identity, then renamed over the target after the target is checked
- * again. A failed write removes its stage and leaves the target alone. The
- * store is flushed after the rename, so an error after the rename means the
- * new record may already be in place.
+ * The record that is replaced is admitted first, even if the caller read it,
+ * and its descriptor stays open until the write has settled. The new content is
+ * staged in the same directory, flushed, and then renamed over the target after
+ * the target has been checked again. A failure before the rename removes the
+ * stage that this write created and leaves the target alone. The rename is the
+ * commit point. A failure after it, including a failed close, is reported with
+ * an unconfirmed outcome: the new record may already be in place, nothing here
+ * restores the previous record, and no success is claimed.
  */
 function writeRecord(store: number, name: string, profile: string, value: StoredProfile): void {
   const record = validateStoredProfile(value, profile);
   const bytes = Buffer.from(JSON.stringify(record), 'utf8');
   assertBoundedRecord(bytes.byteLength);
-  const replaced = admitRecord(store, name, profile);
+  const replaced = pinRecord(store, name, profile);
+  try {
+    publishRecord(store, name, profile, bytes, replaced);
+  } catch (error) {
+    if (replaced !== null) closeQuietly(replaced.handle);
+    throw error;
+  }
+  if (replaced !== null) closeHandle(replaced.handle);
+}
+
+/**
+ * Stages the new content and renames it over the admitted record.
+ *
+ * The stage and the admitted record stay pinned through every check that comes
+ * before the rename and through the checks that come after it. The stage is only
+ * closed once the commit has been checked, and its name is checked while it is
+ * still pinned, so a recycled inode number can never make a check pass.
+ */
+function publishRecord(
+  store: number,
+  name: string,
+  profile: string,
+  bytes: Buffer,
+  replaced: Pinned | null,
+): void {
   const target = anchoredPath(store, name);
   const stage = createStage(store, profile);
   try {
     attempt(() => fchmodSync(stage.handle, FILE_MODE));
     attempt(() => writeFileSync(stage.handle, bytes));
     attempt(() => fsyncSync(stage.handle));
-    closeStage(stage);
     assertIdentityAt(stage.path, stage.identity);
     assertIdentityAt(target, replaced === null ? null : replaced.identity);
     attempt(() => renameSync(stage.path, target));
     assertIdentityAt(target, stage.identity);
+    assertReplacedUnlinked(replaced);
     attempt(() => fsyncSync(store));
   } catch (error) {
     discardStage(stage);
     throw error;
   }
+  closeStage(stage);
+}
+
+/**
+ * After the rename the admitted record must have lost its only name.
+ *
+ * Its descriptor keeps the object alive, so a link count that stays positive
+ * means that the name which was replaced was not the admitted record: the record
+ * was moved aside before the rename, for example. That is reported as unsafe.
+ */
+function assertReplacedUnlinked(replaced: Pinned | null): void {
+  if (replaced === null) return;
+  if (statHandle(replaced.handle).nlink !== 0) throw new AgentAuthError('FILE_UNSAFE');
 }
 
 /**
@@ -627,7 +688,11 @@ function createStage(store: number, profile: string): Stage {
   }
 }
 
-/** Closes a stage before it is renamed. The handle is forgotten first, so it is never closed twice. */
+/**
+ * Closes the stage once the commit has been checked. The handle is forgotten
+ * before the close is attempted, so it is never closed twice, and a failed close
+ * is reported: the write has already committed, so it must not claim success.
+ */
 function closeStage(stage: Stage): void {
   const handle = stage.handle;
   stage.handle = -1;
@@ -635,23 +700,23 @@ function closeStage(stage: Stage): void {
 }
 
 /**
- * Removes a stage that this write created, and only that stage.
+ * Removes the stage that this write created, and only that stage, then closes it.
  *
- * The stage is removed by name only when that name still refers to the file
- * that this write created. A stage that was replaced, renamed or never
- * identified is left alone.
+ * The stage name is checked while the stage descriptor still pins its object, so
+ * an inode number cannot be recycled into a false match. The name is unlinked
+ * only while it refers to that object. A name that now refers to anything else is
+ * never taken over. The stage is closed after the check, exactly once, and a
+ * failed close here does not replace the error of the write.
  */
 function discardStage(stage: Stage): void {
-  if (stage.handle >= 0) {
-    const handle = stage.handle;
-    stage.handle = -1;
-    closeQuietly(handle);
-  }
   try {
     if (matchesIdentity(statOrNull(stage.path), stage.identity)) unlinkQuietly(stage.path);
   } catch {
     // The stage cannot be inspected, so it is left alone.
   }
+  const handle = stage.handle;
+  stage.handle = -1;
+  closeQuietly(handle);
 }
 
 /** Removes a file that was already checked. A file that is gone is not an error. */

@@ -230,6 +230,23 @@ function descriptorCount(): number {
   return readdirSync('/proc/self/fd').length;
 }
 
+/**
+ * The path that each open descriptor refers to, as the kernel reports it. A
+ * descriptor whose object was unlinked reads with the suffix " (deleted)": that
+ * is the proof that the object is still pinned and its inode cannot be reused.
+ */
+function descriptorLinks(): string[] {
+  const links: string[] = [];
+  for (const entry of readdirSync('/proc/self/fd')) {
+    try {
+      links.push(readlinkSync(`/proc/self/fd/${entry}`));
+    } catch {
+      // The descriptor was closed after it was listed.
+    }
+  }
+  return links;
+}
+
 /** The stage files that a store holds right now. A settled write leaves none, except where a test says so. */
 function stagesIn(store: string): string[] {
   return readdirSync(store).filter((name) => name.startsWith('.stage.'));
@@ -1710,12 +1727,14 @@ describe('the local profile store', () => {
       expect(stagesIn(store)).toEqual([]);
     });
 
-    it('cleans up its stage when the stage cannot be closed, without closing it twice', async () => {
+    it('reports a stage that cannot be closed after the commit, without closing it twice', async () => {
       const base = createBase();
       const store = existingStore(base);
       const files = createProfileFiles(store);
+      const target = join(store, 'default.json');
       const before = descriptorCount();
-      failClosingNext('closeSync', 'EIO', handleHas('.stage.'));
+      // The stage is closed after the rename, when its descriptor reads as the target.
+      failClosingNext('closeSync', 'EIO', handleIs(target));
 
       await files.withProfile('default', true, async (file) => {
         await expectAsyncCode(file.write(KEYRING_RECORD), 'FILE_UNAVAILABLE');
@@ -1787,6 +1806,245 @@ describe('the local profile store', () => {
         JSON.stringify(KEYRING_RECORD),
       );
       expect(stagesIn(store)).toEqual([]);
+    });
+  });
+
+  describe('the descriptor lifetime of a replacement', () => {
+    /*
+     * These tests do not depend on how the kernel recycles inode numbers. Each one
+     * asserts, at the exact point where another process would act, that the
+     * descriptor which pins the admitted or the staged object is still open. The
+     * kernel reports an unlinked object that is still open with " (deleted)".
+     */
+
+    it('keeps the admitted record pinned while another process replaces its name', async () => {
+      const base = createBase();
+      const store = existingStore(base);
+      const files = createProfileFiles(store);
+      const path = join(store, 'default.json');
+      writeStoreFile(path, JSON.stringify(FILE_RECORD));
+      let pinnedBeforeReplace = false;
+      let pinnedAfterUnlink = false;
+      beforeNext(
+        'writeFileSync',
+        () => {
+          pinnedBeforeReplace = descriptorLinks().includes(path);
+          unlinkSync(path);
+          pinnedAfterUnlink = descriptorLinks().includes(`${path} (deleted)`);
+          writeStoreFile(path, JSON.stringify(KEYRING_RECORD));
+        },
+        handleHas('.stage.'),
+      );
+
+      await files.withProfile('default', true, async (file) => {
+        await expectAsyncCode(file.write(FILE_RECORD), 'FILE_UNSAFE');
+      });
+
+      expect(pinnedBeforeReplace).toBe(true);
+      expect(pinnedAfterUnlink).toBe(true);
+      expect(readFileSync(path, 'utf8')).toBe(JSON.stringify(KEYRING_RECORD));
+      expect(stagesIn(store)).toEqual([]);
+    });
+
+    it('checks the admitted record while its descriptor is still open, before the rename', async () => {
+      const base = createBase();
+      const store = existingStore(base);
+      const files = createProfileFiles(store);
+      const target = join(store, 'default.json');
+      writeStoreFile(target, JSON.stringify(FILE_RECORD));
+      let pinnedAtRecheck = false;
+      beforeNext(
+        'lstatSync',
+        () => {
+          pinnedAtRecheck = descriptorLinks().includes(target);
+        },
+        pathEnds('/default.json'),
+      );
+
+      await files.withProfile('default', true, async (file) => {
+        await file.write(KEYRING_RECORD);
+      });
+
+      expect(pinnedAtRecheck).toBe(true);
+      expect(readFileSync(target, 'utf8')).toBe(JSON.stringify(KEYRING_RECORD));
+    });
+
+    it('keeps the staged record pinned while it is renamed over the target', async () => {
+      const base = createBase();
+      const store = existingStore(base);
+      const files = createProfileFiles(store);
+      const target = join(store, 'default.json');
+      let pinnedAfterRename = false;
+      let pinnedAfterUnlink = false;
+      afterNext(
+        'renameSync',
+        (result) => {
+          pinnedAfterRename = descriptorLinks().includes(target);
+          unlinkSync(target);
+          pinnedAfterUnlink = descriptorLinks().includes(`${target} (deleted)`);
+          writeStoreFile(target, 'decoy');
+          return result;
+        },
+        pathEnds('/default.json', 1),
+      );
+
+      await files.withProfile('default', true, async (file) => {
+        await expectAsyncCode(file.write(KEYRING_RECORD), 'FILE_UNSAFE');
+      });
+
+      expect(pinnedAfterRename).toBe(true);
+      expect(pinnedAfterUnlink).toBe(true);
+      expect(readFileSync(target, 'utf8')).toBe('decoy');
+    });
+
+    it('refuses a replacement whose admitted record was moved aside before the rename', async () => {
+      const base = createBase();
+      const store = existingStore(base);
+      const files = createProfileFiles(store);
+      const target = join(store, 'default.json');
+      const moved = join(base, 'moved.json');
+      writeStoreFile(target, JSON.stringify(FILE_RECORD));
+      beforeNext(
+        'renameSync',
+        () => {
+          // The admitted record leaves its name after the recheck; another file takes it.
+          renameSync(target, moved);
+          writeStoreFile(target, 'attacker');
+        },
+        pathEnds('/default.json', 1),
+      );
+
+      await files.withProfile('default', true, async (file) => {
+        await expectAsyncCode(file.write(KEYRING_RECORD), 'FILE_UNSAFE');
+      });
+
+      // The rename committed the new record; the failure is reported, and the
+      // admitted record is not claimed to have been replaced.
+      expect(readFileSync(target, 'utf8')).toBe(JSON.stringify(KEYRING_RECORD));
+      expect(readFileSync(moved, 'utf8')).toBe(JSON.stringify(FILE_RECORD));
+      expect(stagesIn(store)).toEqual([]);
+    });
+
+    it('reports a stage close after the commit as unavailable, without restoring the previous record', async () => {
+      const base = createBase();
+      const store = existingStore(base);
+      const files = createProfileFiles(store);
+      const target = join(store, 'default.json');
+      writeStoreFile(target, JSON.stringify(FILE_RECORD));
+      // After the rename the staged descriptor refers to the record at the target name.
+      failClosingNext('closeSync', 'EIO', handleIs(target));
+
+      await files.withProfile('default', true, async (file) => {
+        await expectAsyncCode(file.write(KEYRING_RECORD), 'FILE_UNAVAILABLE');
+      });
+
+      expect(readFileSync(target, 'utf8')).toBe(JSON.stringify(KEYRING_RECORD));
+      expect(stagesIn(store)).toEqual([]);
+    });
+
+    it('reports a destination close after the commit as unavailable, with the new record in place', async () => {
+      const base = createBase();
+      const store = existingStore(base);
+      const files = createProfileFiles(store);
+      const target = join(store, 'default.json');
+      writeStoreFile(target, JSON.stringify(FILE_RECORD));
+      // The rename unlinked the admitted record, so its descriptor reads as deleted.
+      failClosingNext('closeSync', 'EIO', handleIs(`${target} (deleted)`));
+
+      await files.withProfile('default', true, async (file) => {
+        await expectAsyncCode(file.write(KEYRING_RECORD), 'FILE_UNAVAILABLE');
+      });
+
+      expect(readFileSync(target, 'utf8')).toBe(JSON.stringify(KEYRING_RECORD));
+      expect(stagesIn(store)).toEqual([]);
+    });
+
+    it('keeps the operation error when the admitted record cannot be closed', async () => {
+      const base = createBase();
+      const store = existingStore(base);
+      const files = createProfileFiles(store);
+      const target = join(store, 'default.json');
+      writeStoreFile(target, JSON.stringify(FILE_RECORD));
+      beforeNext(
+        'writeFileSync',
+        () => {
+          unlinkSync(target);
+          writeStoreFile(target, JSON.stringify(KEYRING_RECORD));
+        },
+        handleHas('.stage.'),
+      );
+      failClosingNext('closeSync', 'EIO', handleIs(`${target} (deleted)`));
+
+      await files.withProfile('default', true, async (file) => {
+        await expectAsyncCode(file.write(FILE_RECORD), 'FILE_UNSAFE');
+      });
+
+      expect(readFileSync(target, 'utf8')).toBe(JSON.stringify(KEYRING_RECORD));
+      expect(stagesIn(store)).toEqual([]);
+    });
+
+    it('checks the staged name while the stage is still pinned', async () => {
+      const base = createBase();
+      const store = existingStore(base);
+      const files = createProfileFiles(store);
+      let pinnedDuringCheck = false;
+      failNext('fsyncSync', 'EIO', handleHas('.stage.'));
+      beforeNext(
+        'lstatSync',
+        () => {
+          const [stage] = stagesIn(store);
+          pinnedDuringCheck = descriptorLinks().includes(join(store, stage!));
+        },
+        pathHas('/.stage.'),
+      );
+
+      await files.withProfile('default', true, async (file) => {
+        await expectAsyncCode(file.write(KEYRING_RECORD), 'FILE_UNAVAILABLE');
+      });
+
+      expect(pinnedDuringCheck).toBe(true);
+      expect(stagesIn(store)).toEqual([]);
+    });
+
+    it('keeps a replacement at the staged name instead of taking ownership of it', async () => {
+      const base = createBase();
+      const store = existingStore(base);
+      const files = createProfileFiles(store);
+      failNext('fsyncSync', 'EIO', handleHas('.stage.'));
+      beforeNext(
+        'lstatSync',
+        () => {
+          const [stage] = stagesIn(store);
+          renameSync(join(store, stage!), join(base, 'moved.tmp'));
+          writeStoreFile(join(store, stage!), 'decoy');
+        },
+        pathHas('/.stage.'),
+      );
+
+      await files.withProfile('default', true, async (file) => {
+        await expectAsyncCode(file.write(KEYRING_RECORD), 'FILE_UNAVAILABLE');
+      });
+
+      expect(existsSync(join(store, 'default.json'))).toBe(false);
+      expect(stagesIn(store)).toHaveLength(1);
+      expect(readFileSync(join(store, stagesIn(store)[0]!), 'utf8')).toBe('decoy');
+    });
+
+    it('keeps the flush error when the stage cannot be closed afterwards', async () => {
+      const base = createBase();
+      const store = existingStore(base);
+      const files = createProfileFiles(store);
+      const before = descriptorCount();
+      failNext('fsyncSync', 'EIO', handleHas('.stage.'));
+      failClosingNext('closeSync', 'EIO', handleHas('.stage.'));
+
+      await files.withProfile('default', true, async (file) => {
+        await expectAsyncCode(file.write(KEYRING_RECORD), 'FILE_UNAVAILABLE');
+      });
+
+      expect(stagesIn(store)).toEqual([]);
+      expect(existsSync(join(store, 'default.json'))).toBe(false);
+      expect(descriptorCount()).toBe(before);
     });
   });
 
