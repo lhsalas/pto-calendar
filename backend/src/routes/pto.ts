@@ -4,6 +4,7 @@ import {
   createPto,
   deletePto,
   getPtoById,
+  patchPto,
   toPublicPto,
   updatePto,
 } from '../services/pto/PTOService.js';
@@ -14,7 +15,14 @@ import {
   redactPtoNote,
 } from '../services/authorization/patPolicy.js';
 import { attributedActorFromAuth } from '../services/audit/auditContext.js';
-import { CreatePtoSchema, IdParamSchema, PtoListQuerySchema } from '../services/pto/schemas.js';
+import {
+  CreatePtoSchema,
+  IdParamSchema,
+  PatchPtoSchema,
+  PtoListQuerySchema,
+  ReplacePtoSchema,
+} from '../services/pto/schemas.js';
+import { parseExpectedVersion } from '../services/pto/preconditions.js';
 
 export const ptoRouter: Router = Router();
 
@@ -67,16 +75,57 @@ ptoRouter.get('/:id', requireAuth, async (req, res, next) => {
 
 ptoRouter.put('/:id', requireAuth, async (req, res, next) => {
   try {
+    // The write must name the revision it changes. A missing or unusable
+    // precondition is refused before the record is read or the body parsed.
+    const expectedVersion = parseExpectedVersion(req.headers['if-match']);
     const id = IdParamSchema.parse(req.params.id);
-    const input = CreatePtoSchema.parse(req.body);
+    const input = ReplacePtoSchema.parse(req.body);
     const existing = await getPtoById(id);
     if (!existing) {
       res.status(404).json({ error: { code: 'NOT_FOUND', message: 'PTO entry not found.' } });
       return;
     }
     assertPtoRecordAccess(req.auth!, 'update', existing);
-    const updated = await updatePto(attributedActorFromAuth(req.auth!), id, input);
+    // The record this caller was just authorized for is the observation the
+    // write is based on: if it disappears or changes owner before the write,
+    // the write is stale rather than missing or forbidden.
+    const updated = await updatePto(
+      attributedActorFromAuth(req.auth!),
+      id,
+      input,
+      expectedVersion,
+      existing.userId,
+    );
     res.json(redactPtoNote(req.auth!, toPublicPto(updated)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * A partial write. The same authorization, the same precondition and the
+ * same record access as the replacement write apply; only the named fields
+ * change.
+ */
+ptoRouter.patch('/:id', requireAuth, async (req, res, next) => {
+  try {
+    const expectedVersion = parseExpectedVersion(req.headers['if-match']);
+    const id = IdParamSchema.parse(req.params.id);
+    const patch = PatchPtoSchema.parse(req.body);
+    const existing = await getPtoById(id);
+    if (!existing) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: 'PTO entry not found.' } });
+      return;
+    }
+    assertPtoRecordAccess(req.auth!, 'update', existing);
+    const patched = await patchPto(
+      attributedActorFromAuth(req.auth!),
+      id,
+      patch,
+      expectedVersion,
+      existing.userId,
+    );
+    res.json(redactPtoNote(req.auth!, toPublicPto(patched)));
   } catch (err) {
     next(err);
   }
@@ -84,6 +133,7 @@ ptoRouter.put('/:id', requireAuth, async (req, res, next) => {
 
 ptoRouter.delete('/:id', requireAuth, async (req, res, next) => {
   try {
+    const expectedVersion = parseExpectedVersion(req.headers['if-match']);
     const id = IdParamSchema.parse(req.params.id);
     const existing = await getPtoById(id);
     if (!existing) {
@@ -91,7 +141,7 @@ ptoRouter.delete('/:id', requireAuth, async (req, res, next) => {
       return;
     }
     assertPtoRecordAccess(req.auth!, 'delete', existing);
-    await deletePto(attributedActorFromAuth(req.auth!), id);
+    await deletePto(attributedActorFromAuth(req.auth!), id, expectedVersion, existing.userId);
     res.status(204).end();
   } catch (err) {
     next(err);

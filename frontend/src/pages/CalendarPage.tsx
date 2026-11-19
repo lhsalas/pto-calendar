@@ -126,16 +126,18 @@ export function CalendarPage(): JSX.Element {
     pushToast({ tone: 'success', title: 'PTO saved.' });
   }
 
-  async function handleUpdate(payload: CreatePTORequest): Promise<void> {
+  async function handleUpdate(payload: CreatePTORequest, version: number): Promise<void> {
     if (!editing) return;
-    await update(editing.id, payload);
+    // The write quotes the version of the detail the editor was opened with.
+    await update(editing.id, payload, version);
     setEditing(null);
     setViewing(null);
     pushToast({ tone: 'success', title: 'PTO updated.' });
   }
 
-  async function handleDelete(pto: PTOWithUser): Promise<void> {
-    await remove(pto.id);
+  async function handleDelete(pto: PTOWithUser, version: number): Promise<void> {
+    // The delete quotes the version of the detail the user reviewed.
+    await remove(pto.id, version);
     setViewing(null);
     pushToast({ tone: 'success', title: 'PTO deleted.' });
   }
@@ -252,7 +254,12 @@ export function CalendarPage(): JSX.Element {
             setViewing(null);
             setEditing(p);
           }}
-          onDelete={handleDelete}
+          // The list shows a summary without a version, so its delete opens
+          // the details modal: the user reviews the loaded detail and
+          // confirms there before anything is written.
+          onDelete={async (p) => {
+            setViewing(p);
+          }}
         />
       )}
 

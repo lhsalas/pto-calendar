@@ -12,9 +12,13 @@ import { RequireAuth } from '../../src/routes/RequireAuth';
 import { LoginPage } from '../../src/pages/LoginPage';
 import { AdminUsersPage } from '../../src/pages/admin/AdminUsersPage';
 import { server } from '../mocks/server';
-import type { User } from '../../src/types/api';
-import { STUB_PTO, STUB_USER } from '../mocks/handlers';
+import type { PTOWithUser, User } from '../../src/types/api';
+import { STUB_PTO, STUB_PTO_DETAIL, STUB_USER } from '../mocks/handlers';
 import { authenticated } from '../mocks/handlers';
+
+function detailFor(pto: PTOWithUser) {
+  return { ...STUB_PTO_DETAIL, ...pto, userId: pto.user.id };
+}
 
 function firstWeekdayInCurrentMonth(): string {
   const now = new Date();
@@ -94,7 +98,7 @@ describe('CalendarPage', () => {
           { status: 503 },
         ),
       )
-      .mockImplementationOnce(() => HttpResponse.json({ ...localPto, note: 'Doctor' }));
+      .mockImplementationOnce(() => HttpResponse.json({ ...detailFor(localPto), note: 'Doctor' }));
     server.use(
       http.get('/pto', () => HttpResponse.json([localPto])),
       http.get('/pto/:id', detail),
@@ -115,14 +119,14 @@ describe('CalendarPage', () => {
     async (field) => {
       const user = userEvent.setup();
       const localPto = { ...STUB_PTO, startDate: '2026-06-15', endDate: '2026-06-15' };
-      const detail = vi.fn(() =>
-        HttpResponse.json({ ...localPto, userId: localPto.user.id, note: 'Doctor' }),
-      );
+      const detail = vi.fn(() => HttpResponse.json({ ...detailFor(localPto), note: 'Doctor' }));
       let storedNote: string | null = 'Doctor';
+      let expectedVersion: string | null = null;
       const put = vi.fn(async ({ request }: { request: Request }) => {
+        expectedVersion = request.headers.get('If-Match');
         const payload = (await request.json()) as { note?: string };
         storedNote = payload.note || null;
-        return HttpResponse.json({ ...localPto, note: storedNote });
+        return HttpResponse.json({ ...detailFor(localPto), note: storedNote, version: 8 });
       });
       server.use(
         http.get('/pto', () => HttpResponse.json([localPto])),
@@ -145,6 +149,7 @@ describe('CalendarPage', () => {
       await user.click(screen.getByRole('button', { name: /save pto/i }));
       await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
       expect(storedNote).toBe('Doctor');
+      expect(expectedVersion).toBe('"7"');
     },
   );
 
@@ -392,6 +397,7 @@ describe('CalendarPage', () => {
           user: localPto.user,
           createdAt: '2026-05-01T10:00:00.000Z',
           updatedAt: '2026-05-01T10:00:00.000Z',
+          version: 7,
         }),
       ),
     );
@@ -443,6 +449,7 @@ describe('CalendarPage', () => {
           user: localPto.user,
           createdAt: '2026-05-01T10:00:00.000Z',
           updatedAt: '2026-05-01T10:00:00.000Z',
+          version: 7,
         }),
       ),
     );
@@ -504,6 +511,7 @@ describe('CalendarPage', () => {
           user: localPto.user,
           createdAt: '2026-05-01T10:00:00.000Z',
           updatedAt: '2026-05-01T10:00:00.000Z',
+          version: 7,
         }),
       ),
     );
@@ -526,9 +534,14 @@ describe('CalendarPage', () => {
   it('deletes a PTO and shows the success toast', async () => {
     const today = firstWeekdayInCurrentMonth();
     const localPto = { ...STUB_PTO, startDate: today, endDate: today };
+    const remove = vi.fn(({ request }: { request: Request }) => {
+      expect(request.headers.get('If-Match')).toBe('"7"');
+      return new HttpResponse(null, { status: 204 });
+    });
     server.use(
       http.get('/pto', () => HttpResponse.json([localPto])),
-      http.delete('/pto/:id', () => new HttpResponse(null, { status: 204 })),
+      http.get('/pto/:id', () => HttpResponse.json(detailFor(localPto))),
+      http.delete('/pto/:id', remove),
     );
     const user = userEvent.setup();
     renderPage();
@@ -540,9 +553,149 @@ describe('CalendarPage', () => {
       expect(screen.getByText(/pto details/i)).toBeInTheDocument();
     });
     await user.click(screen.getByRole('button', { name: /^delete$/i }));
-    await user.click(screen.getByRole('button', { name: /yes, delete/i }));
+    const confirm = await screen.findByRole('button', { name: /yes, delete/i });
+    expect(remove).not.toHaveBeenCalled();
+    await user.click(confirm);
     const toast = await screen.findByTestId('toast-success');
     expect(toast).toHaveTextContent(/pto deleted/i);
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not send a DELETE from the list or an incomplete loaded detail', async () => {
+    const localPto = { ...STUB_PTO, startDate: '2026-06-15', endDate: '2026-06-15' };
+    const remove = vi.fn(() => new HttpResponse(null, { status: 204 }));
+    const detail = vi.fn(() => HttpResponse.json({ ...detailFor(localPto), version: undefined }));
+    server.use(
+      http.get('/pto', () => HttpResponse.json([localPto])),
+      http.get('/pto/:id', detail),
+      http.delete('/pto/:id', remove),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole('radio', { name: /show upcoming pto list/i }));
+    const row = await screen.findByTestId(`upcoming-row-${localPto.id}`);
+    await user.click(within(row).getByRole('button', { name: /^delete$/i }));
+    const dialog = await screen.findByRole('dialog', { name: /pto details/i });
+    expect(remove).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole('button', { name: /^delete$/i }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'Could not load PTO details.',
+    );
+    expect(within(dialog).queryByRole('button', { name: /yes, delete/i })).not.toBeInTheDocument();
+    expect(detail).toHaveBeenCalledTimes(1);
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it.each([412, 428])(
+    'locks a refused edit (%d) until the user reopens the current detail',
+    async (status) => {
+      const localPto = { ...STUB_PTO, startDate: '2026-06-15', endDate: '2026-06-15' };
+      const current = {
+        ...detailFor(localPto),
+        startDate: '2026-06-16',
+        endDate: '2026-06-16',
+        note: 'Reviewed note',
+      };
+      let version = 7;
+      const put = vi.fn(async ({ request }: { request: Request }) => {
+        const header = request.headers.get('If-Match');
+        const payload = await request.json();
+        expect(payload).toMatchObject({
+          startDate: current.startDate,
+          endDate: current.endDate,
+          note: 'Reviewed note',
+        });
+        if (header === '"7"') {
+          version += 1;
+          return HttpResponse.json(
+            {
+              error: {
+                code: status === 412 ? 'STALE_WRITE' : 'PRECONDITION_REQUIRED',
+                message: 'Refused',
+              },
+            },
+            { status },
+          );
+        }
+        expect(header).toBe('"8"');
+        return HttpResponse.json({ ...current, version: 9 });
+      });
+      server.use(
+        http.get('/pto', () => HttpResponse.json([localPto])),
+        http.get('/pto/:id', () => HttpResponse.json({ ...current, version })),
+        http.put('/pto/:id', put),
+      );
+      const user = userEvent.setup();
+      renderPage();
+      await user.click(await screen.findByRole('radio', { name: /show upcoming pto list/i }));
+      const row = await screen.findByTestId(`upcoming-row-${localPto.id}`);
+      const open = async () => {
+        await user.click(within(row).getByRole('button', { name: /^edit$/i }));
+        expect(await screen.findByLabelText(/start date/i)).toHaveValue(current.startDate);
+        expect(screen.getByLabelText(/end date/i)).toHaveValue(current.endDate);
+      };
+      await open();
+      const save = screen.getByRole('button', { name: /save pto/i });
+      await user.click(save);
+      expect(await screen.findByTestId('pto-write-conflict')).toHaveTextContent(
+        /open the pto again/i,
+      );
+      expect(save).toBeDisabled();
+      await user.click(save);
+      expect(put).toHaveBeenCalledTimes(1);
+      await user.click(screen.getByRole('button', { name: /^cancel$/i }));
+      await open();
+      await user.click(screen.getByRole('button', { name: /save pto/i }));
+      expect(await screen.findByTestId('toast-success')).toHaveTextContent('PTO updated.');
+      expect(put).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('refuses a stale deletion and requires a fresh confirmation', async () => {
+    const localPto = { ...STUB_PTO, startDate: '2026-06-15', endDate: '2026-06-15' };
+    let version = 7;
+    const remove = vi.fn(({ request }: { request: Request }) => {
+      const header = request.headers.get('If-Match');
+      if (header === '"7"') {
+        version = 8;
+        return HttpResponse.json(
+          { error: { code: 'STALE_WRITE', message: 'Refused' } },
+          { status: 412 },
+        );
+      }
+      expect(header).toBe('"8"');
+      return new HttpResponse(null, { status: 204 });
+    });
+    server.use(
+      http.get('/pto', () => HttpResponse.json([localPto])),
+      http.get('/pto/:id', () =>
+        HttpResponse.json({ ...detailFor(localPto), version, note: `Revision ${version}` }),
+      ),
+      http.delete('/pto/:id', remove),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole('radio', { name: /show upcoming pto list/i }));
+    const row = await screen.findByTestId(`upcoming-row-${localPto.id}`);
+    const openConfirmation = async () => {
+      await user.click(within(row).getByRole('button', { name: /^delete$/i }));
+      const dialog = await screen.findByRole('dialog', { name: /pto details/i });
+      await user.click(within(dialog).getByRole('button', { name: /^delete$/i }));
+      return await within(dialog).findByRole('button', { name: /yes, delete/i });
+    };
+    await user.click(await openConfirmation());
+    expect(await screen.findByTestId('pto-delete-conflict')).toHaveTextContent(
+      /open the pto again/i,
+    );
+    expect(screen.queryByRole('button', { name: /yes, delete/i })).not.toBeInTheDocument();
+    expect(remove).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: /^close$/i }));
+    const confirm = await openConfirmation();
+    expect(screen.getByText('Revision 8')).toBeInTheDocument();
+    expect(remove).toHaveBeenCalledTimes(1);
+    await user.click(confirm);
+    expect(await screen.findByTestId('toast-success')).toHaveTextContent('PTO deleted.');
+    expect(remove).toHaveBeenCalledTimes(2);
   });
 
   it('pushes an error toast with Retry when the list fetch fails, and Retry triggers refetch', async () => {

@@ -2,8 +2,15 @@ import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { patFixture } from '../../tests/unit/helpers/patFixture.js';
 import { resetEnvForTests } from '../config/env.js';
+import { HttpError } from '../middleware/errorHandler.js';
 import { ptoRouter } from './pto.js';
-import { createPto, deletePto, getPtoById, updatePto } from '../services/pto/PTOService.js';
+import {
+  createPto,
+  deletePto,
+  getPtoById,
+  patchPto,
+  updatePto,
+} from '../services/pto/PTOService.js';
 import { listVisiblePage, listVisibleRange } from '../services/calendar/CalendarQuery.js';
 import type { TokenScope } from '../services/tokens/tokenDomain.js';
 
@@ -12,6 +19,7 @@ vi.mock('../services/pto/PTOService.js', async () => ({
   createPto: vi.fn(),
   deletePto: vi.fn(),
   getPtoById: vi.fn(),
+  patchPto: vi.fn(),
   updatePto: vi.fn(),
 }));
 vi.mock('../services/calendar/CalendarQuery.js', () => ({
@@ -28,9 +36,14 @@ const raw = {
   endDate: new Date('2026-12-01'),
   dayPart: 'all_day' as const,
   note: 'stored private note',
+  version: 1,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
+
+/** The precondition every write has to name. */
+const IF_MATCH = 'If-Match';
+const VERSION = '"1"';
 
 function fixture(options: Parameters<typeof patFixture>[0] = {}) {
   const f = patFixture(options);
@@ -41,12 +54,14 @@ function fixture(options: Parameters<typeof patFixture>[0] = {}) {
     ...record,
     startDate: '2026-12-01',
     endDate: '2026-12-01',
+    version: record.version,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     user: { id: record.userId, name: 'Owner', colorCode: '#123456' },
   });
   vi.mocked(createPto).mockResolvedValue(record);
   vi.mocked(updatePto).mockResolvedValue(record);
+  vi.mocked(patchPto).mockResolvedValue(record);
   vi.mocked(deletePto).mockResolvedValue(undefined);
   // A rogue note proves the route redacts independently of the service type.
   vi.mocked(listVisibleRange).mockResolvedValue([
@@ -62,6 +77,7 @@ function fixture(options: Parameters<typeof patFixture>[0] = {}) {
       {
         id,
         ...body,
+        version: 1,
         user: { id: record.userId, name: 'Owner', colorCode: '#123456' },
         note: 'defensive list note',
       } as unknown as Awaited<ReturnType<typeof listVisiblePage>>['items'][number],
@@ -129,6 +145,7 @@ describe('PTO HTTP scopes and note serialization', () => {
     const updated = await request(f.app)
       .put(`/pto/${id}`)
       .set('Authorization', f.bearer)
+      .set(IF_MATCH, VERSION)
       .send(body)
       .expect(200);
     expect(updated.body.note).toBeNull();
@@ -141,6 +158,8 @@ describe('PTO HTTP scopes and note serialization', () => {
       },
       id,
       body,
+      1,
+      f.record.userId,
     );
     const notes = fixture({
       scopes: ['pto:create', 'pto:update:self', 'pto:read', 'pto:notes:read'],
@@ -159,6 +178,7 @@ describe('PTO HTTP scopes and note serialization', () => {
         await request(notes.app)
           .put(`/pto/${id}`)
           .set('Authorization', notes.bearer)
+          .set(IF_MATCH, VERSION)
           .send(body)
           .expect(200)
       ).body.note,
@@ -169,8 +189,17 @@ describe('PTO HTTP scopes and note serialization', () => {
     const f = fixture({ role: 'team_lead', scopes: ['pto:update:self', 'pto:delete:self'] });
     const other = { ...f.record, userId: 'other' };
     vi.mocked(getPtoById).mockResolvedValue(other as never);
-    await request(f.app).put(`/pto/${id}`).set('Authorization', f.bearer).send(body).expect(403);
-    await request(f.app).delete(`/pto/${id}`).set('Authorization', f.bearer).expect(403);
+    await request(f.app)
+      .put(`/pto/${id}`)
+      .set('Authorization', f.bearer)
+      .set(IF_MATCH, VERSION)
+      .send(body)
+      .expect(403);
+    await request(f.app)
+      .delete(`/pto/${id}`)
+      .set('Authorization', f.bearer)
+      .set(IF_MATCH, VERSION)
+      .expect(403);
     expect(updatePto).not.toHaveBeenCalled();
     expect(deletePto).not.toHaveBeenCalled();
     const team = fixture({ role: 'admin', scopes: ['pto:update:team', 'pto:delete:team'] });
@@ -178,17 +207,31 @@ describe('PTO HTTP scopes and note serialization', () => {
     await request(team.app)
       .put(`/pto/${id}`)
       .set('Authorization', team.bearer)
+      .set(IF_MATCH, VERSION)
       .send(body)
       .expect(200);
-    await request(team.app).delete(`/pto/${id}`).set('Authorization', team.bearer).expect(204);
+    await request(team.app)
+      .delete(`/pto/${id}`)
+      .set('Authorization', team.bearer)
+      .set(IF_MATCH, VERSION)
+      .expect(204);
   });
 
   it('returns consistent not-found results for missing read/update/delete records', async () => {
     const f = fixture({ scopes: ['pto:read', 'pto:update:self', 'pto:delete:self'] });
     vi.mocked(getPtoById).mockResolvedValue(null);
     await request(f.app).get(`/pto/${id}`).set('Authorization', f.bearer).expect(404);
-    await request(f.app).put(`/pto/${id}`).set('Authorization', f.bearer).send(body).expect(404);
-    await request(f.app).delete(`/pto/${id}`).set('Authorization', f.bearer).expect(404);
+    await request(f.app)
+      .put(`/pto/${id}`)
+      .set('Authorization', f.bearer)
+      .set(IF_MATCH, VERSION)
+      .send(body)
+      .expect(404);
+    await request(f.app)
+      .delete(`/pto/${id}`)
+      .set('Authorization', f.bearer)
+      .set(IF_MATCH, VERSION)
+      .expect(404);
   });
 
   it('propagates schema and service failures from every handler without exposing private causes', async () => {
@@ -198,9 +241,18 @@ describe('PTO HTTP scopes and note serialization', () => {
     await request(f.app).get('/pto?start=bad').set('Authorization', f.bearer).expect(400);
     vi.mocked(getPtoById).mockRejectedValueOnce(new Error('private failure'));
     await request(f.app).get(`/pto/${id}`).set('Authorization', f.bearer).expect(500);
-    await request(f.app).put(`/pto/${id}`).set('Authorization', f.bearer).send({}).expect(400);
+    await request(f.app)
+      .put(`/pto/${id}`)
+      .set('Authorization', f.bearer)
+      .set(IF_MATCH, VERSION)
+      .send({})
+      .expect(400);
     vi.mocked(deletePto).mockRejectedValueOnce(new Error('private failure'));
-    await request(f.app).delete(`/pto/${id}`).set('Authorization', f.bearer).expect(500);
+    await request(f.app)
+      .delete(`/pto/${id}`)
+      .set('Authorization', f.bearer)
+      .set(IF_MATCH, VERSION)
+      .expect(500);
   });
 
   it('attributes every mutation to the verified token and ignores forged body identity or credentials', async () => {
@@ -219,13 +271,35 @@ describe('PTO HTTP scopes and note serialization', () => {
       requestId: expect.any(String),
     };
     await request(f.app).post('/pto').set('Authorization', f.bearer).send(forged).expect(201);
-    await request(f.app).put(`/pto/${id}`).set('Authorization', f.bearer).send(forged).expect(200);
-    await request(f.app).delete(`/pto/${id}`).set('Authorization', f.bearer).expect(204);
+    await request(f.app)
+      .put(`/pto/${id}`)
+      .set('Authorization', f.bearer)
+      .set(IF_MATCH, VERSION)
+      .send(body)
+      .expect(200);
+    await request(f.app)
+      .delete(`/pto/${id}`)
+      .set('Authorization', f.bearer)
+      .set(IF_MATCH, VERSION)
+      .expect(204);
     expect(vi.mocked(createPto).mock.calls[0]![0]).toEqual(verified);
     expect(vi.mocked(updatePto).mock.calls[0]![0]).toEqual(verified);
     expect(vi.mocked(deletePto).mock.calls[0]![0]).toEqual(verified);
+    // Every write names the owner the route just authorized, so a record
+    // that disappears before the write is a stale write, not a missing one.
+    expect(vi.mocked(updatePto).mock.calls[0]![4]).toBe(f.record.userId);
+    expect(vi.mocked(deletePto).mock.calls[0]![3]).toBe(f.record.userId);
     expect(JSON.stringify(vi.mocked(createPto).mock.calls)).not.toContain('forged');
     expect(JSON.stringify(vi.mocked(updatePto).mock.calls)).not.toContain('forged');
+    // A replacement write refuses the forged keys instead of ignoring them.
+    const refused = await request(f.app)
+      .put(`/pto/${id}`)
+      .set('Authorization', f.bearer)
+      .set(IF_MATCH, VERSION)
+      .send(forged)
+      .expect(400);
+    expect(refused.body.error.code).toBe('VALIDATION_ERROR');
+    expect(vi.mocked(updatePto)).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the legacy array response for an unmodified caller', async () => {
@@ -270,6 +344,7 @@ describe('PTO HTTP scopes and note serialization', () => {
           startDate: '2026-12-01',
           endDate: '2026-12-01',
           dayPart: 'all_day',
+          version: 1,
           user: { id: f.record.userId, name: 'Owner', colorCode: '#123456' },
           note: null,
         },
@@ -316,5 +391,161 @@ describe('PTO HTTP scopes and note serialization', () => {
     expect(cursor.body.error.code).toBe('VALIDATION_ERROR');
     expect(JSON.stringify(cursor.body)).not.toContain('not-a-cursor');
     expect(vi.mocked(listVisiblePage)).not.toHaveBeenCalled();
+  });
+
+  it('requires the version precondition on every write', async () => {
+    const f = fixture({ scopes: ['pto:update:self', 'pto:delete:self'] });
+    for (const res of [
+      await request(f.app).put(`/pto/${id}`).set('Authorization', f.bearer).send(body),
+      await request(f.app)
+        .patch(`/pto/${id}`)
+        .set('Authorization', f.bearer)
+        .send({ dayPart: 'morning' }),
+      await request(f.app).delete(`/pto/${id}`).set('Authorization', f.bearer),
+    ]) {
+      expect(res.status).toBe(428);
+      expect(res.body.error.code).toBe('PRECONDITION_REQUIRED');
+    }
+    expect(updatePto).not.toHaveBeenCalled();
+    expect(patchPto).not.toHaveBeenCalled();
+    expect(deletePto).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a wildcard', '*'],
+    ['a weak validator', 'W/"1"'],
+    ['an unquoted number', '1'],
+    ['a list of values', '"1", "2"'],
+    ['a duplicate header', '"1", "1"'],
+    ['text', 'nonsense'],
+  ])('refuses %s as the precondition without echoing it', async (_label, header) => {
+    const f = fixture({ scopes: ['pto:update:self', 'pto:delete:self'] });
+    const res = await request(f.app)
+      .put(`/pto/${id}`)
+      .set('Authorization', f.bearer)
+      .set(IF_MATCH, header)
+      .send(body)
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(JSON.stringify(res.body)).not.toContain(header);
+    expect(updatePto).not.toHaveBeenCalled();
+  });
+
+  it('reports a stale write without naming a version or a note', async () => {
+    const f = fixture({ scopes: ['pto:update:self'] });
+    vi.mocked(updatePto).mockRejectedValueOnce(
+      new HttpError(
+        412,
+        'STALE_WRITE',
+        'This PTO entry changed since it was loaded. Reload the entry and apply the change again.',
+      ),
+    );
+    const res = await request(f.app)
+      .put(`/pto/${id}`)
+      .set('Authorization', f.bearer)
+      .set(IF_MATCH, '"5"')
+      .send(body)
+      .expect(412);
+    expect(res.body.error.code).toBe('STALE_WRITE');
+    expect(JSON.stringify(res.body)).not.toContain('note');
+    expect(JSON.stringify(res.body)).not.toContain('5');
+  });
+
+  it('applies a partial write with the same authorization and precondition', async () => {
+    const f = fixture({ scopes: ['pto:update:self'] });
+    const patched = await request(f.app)
+      .patch(`/pto/${id}`)
+      .set('Authorization', f.bearer)
+      .set(IF_MATCH, VERSION)
+      .send({ endDate: '2026-12-02' })
+      .expect(200);
+    expect(patched.body.version).toBe(1);
+    expect(patchPto).toHaveBeenCalledWith(
+      expect.objectContaining({ id: f.owner.id }),
+      id,
+      { endDate: '2026-12-02' },
+      1,
+      f.record.userId,
+    );
+  });
+
+  it('rejects an empty or unknown partial write before the record is read', async () => {
+    const f = fixture({ scopes: ['pto:update:self'] });
+    for (const payload of [
+      {},
+      { userId: 'other' },
+      { dayPart: 'noon' },
+      { startDate: '2026-12-01', extra: 1 },
+    ]) {
+      const res = await request(f.app)
+        .patch(`/pto/${id}`)
+        .set('Authorization', f.bearer)
+        .set(IF_MATCH, VERSION)
+        .send(payload)
+        .expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    }
+    expect(patchPto).not.toHaveBeenCalled();
+  });
+
+  it('reports a stale write on every write route when the record disappears', async () => {
+    const f = fixture({ scopes: ['pto:update:self', 'pto:delete:self'] });
+    const stale = () =>
+      new HttpError(
+        412,
+        'STALE_WRITE',
+        'This PTO entry changed since it was loaded. Reload the entry and apply the change again.',
+      );
+    vi.mocked(updatePto).mockRejectedValueOnce(stale());
+    vi.mocked(patchPto).mockRejectedValueOnce(stale());
+    vi.mocked(deletePto).mockRejectedValueOnce(stale());
+    for (const res of [
+      await request(f.app)
+        .put(`/pto/${id}`)
+        .set('Authorization', f.bearer)
+        .set(IF_MATCH, VERSION)
+        .send(body)
+        .expect(412),
+      await request(f.app)
+        .patch(`/pto/${id}`)
+        .set('Authorization', f.bearer)
+        .set(IF_MATCH, VERSION)
+        .send({ dayPart: 'evening' })
+        .expect(412),
+      await request(f.app)
+        .delete(`/pto/${id}`)
+        .set('Authorization', f.bearer)
+        .set(IF_MATCH, VERSION)
+        .expect(412),
+    ]) {
+      expect(res.body.error.code).toBe('STALE_WRITE');
+      expect(JSON.stringify(res.body)).not.toContain('note');
+      expect(JSON.stringify(res.body)).not.toContain('version');
+    }
+  });
+
+  it('returns 404 for an unknown partial write', async () => {
+    const f = fixture({ scopes: ['pto:update:self'] });
+    vi.mocked(getPtoById).mockResolvedValue(null);
+    const res = await request(f.app)
+      .patch(`/pto/${id}`)
+      .set('Authorization', f.bearer)
+      .set(IF_MATCH, VERSION)
+      .send({ dayPart: 'evening' })
+      .expect(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
+    expect(patchPto).not.toHaveBeenCalled();
+  });
+
+  it('refuses a replacement write with an unknown key', async () => {
+    const f = fixture({ scopes: ['pto:update:self'] });
+    const res = await request(f.app)
+      .put(`/pto/${id}`)
+      .set('Authorization', f.bearer)
+      .set(IF_MATCH, VERSION)
+      .send({ ...body, userId: 'other' })
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(updatePto).not.toHaveBeenCalled();
   });
 });

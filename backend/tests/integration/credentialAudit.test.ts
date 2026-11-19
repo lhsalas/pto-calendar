@@ -149,12 +149,19 @@ describe('credential-attributed audit trail', () => {
       expect(JSON.stringify(afterCreate[0]!.details)).not.toContain(NOTE);
       expect(afterCreate[0]!.details).not.toHaveProperty('note');
 
-      await updatePto(sessionActor(OWNER, 'member'), created.id, {
-        startDate: '2026-05-12',
-        endDate: '2026-05-12',
-        dayPart: 'morning',
-        note: `${NOTE}-edited`,
-      });
+      expect(created.version).toBe(1);
+      const updated = await updatePto(
+        sessionActor(OWNER, 'member'),
+        created.id,
+        {
+          startDate: '2026-05-12',
+          endDate: '2026-05-12',
+          dayPart: 'morning',
+          note: `${NOTE}-edited`,
+        },
+        created.version,
+      );
+      expect(updated.version).toBe(2);
       const afterUpdate = await auditRows('pto_request', created.id);
       expect(afterUpdate).toHaveLength(2);
       expect(afterUpdate[1]).toMatchObject({
@@ -165,7 +172,7 @@ describe('credential-attributed audit trail', () => {
       });
       expect(JSON.stringify(afterUpdate[1]!.details)).not.toContain(NOTE);
 
-      await deletePto(sessionActor(OWNER, 'member'), created.id);
+      await deletePto(sessionActor(OWNER, 'member'), created.id, updated.version);
       const afterDelete = await auditRows('pto_request', created.id);
       expect(afterDelete).toHaveLength(3);
       expect(afterDelete[2]).toMatchObject({
@@ -204,11 +211,16 @@ describe('credential-attributed audit trail', () => {
         endDate: '2026-05-11',
         dayPart: 'morning',
       });
-      await updatePto(sessionActor(LEAD, 'team_lead'), created.id, {
-        startDate: '2026-05-12',
-        endDate: '2026-05-12',
-        dayPart: 'morning',
-      });
+      await updatePto(
+        sessionActor(LEAD, 'team_lead'),
+        created.id,
+        {
+          startDate: '2026-05-12',
+          endDate: '2026-05-12',
+          dayPart: 'morning',
+        },
+        1,
+      );
       const rows = await auditRows('pto_request', created.id);
       expect(rows[1]).toMatchObject({
         actorUserId: LEAD,
@@ -225,13 +237,18 @@ describe('credential-attributed audit trail', () => {
         dayPart: 'morning',
       });
       await expect(
-        updatePto(sessionActor(OTHER, 'member'), created.id, {
-          startDate: '2026-05-12',
-          endDate: '2026-05-12',
-          dayPart: 'morning',
-        }),
+        updatePto(
+          sessionActor(OTHER, 'member'),
+          created.id,
+          {
+            startDate: '2026-05-12',
+            endDate: '2026-05-12',
+            dayPart: 'morning',
+          },
+          1,
+        ),
       ).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
-      await expect(deletePto(sessionActor(OTHER, 'member'), created.id)).rejects.toMatchObject({
+      await expect(deletePto(sessionActor(OTHER, 'member'), created.id, 1)).rejects.toMatchObject({
         status: 403,
         code: 'FORBIDDEN',
       });
@@ -577,6 +594,7 @@ describe('credential-attributed audit trail', () => {
       const lead = await loginAs(LEAD_EMAIL);
       const updated = await lead
         .put(`/pto/${created.body.id}`)
+        .set('If-Match', '"1"')
         .send({ startDate: '2026-05-12', endDate: '2026-05-12', dayPart: 'morning' });
       expect(updated.status).toBe(200);
       const rows = await auditRows('pto_request', created.body.id as string);
@@ -600,6 +618,7 @@ describe('credential-attributed audit trail', () => {
       const before = await db.auditLog.count({ where: { actorUserId: { in: IDS } } });
       const denied = await other
         .put(`/pto/${created.body.id}`)
+        .set('If-Match', '"1"')
         .send({ startDate: '2026-05-12', endDate: '2026-05-12', dayPart: 'morning' });
       expect(denied.status).toBe(403);
       expect(await db.auditLog.count({ where: { actorUserId: { in: IDS } } })).toBe(before);
@@ -731,11 +750,16 @@ describe('credential-attributed audit trail', () => {
       });
       await withRejectedAudit('update_pto', OWNER, async () => {
         await expect(
-          updatePto(sessionActor(OWNER, 'member'), created.id, {
-            startDate: '2026-05-12',
-            endDate: '2026-05-12',
-            dayPart: 'morning',
-          }),
+          updatePto(
+            sessionActor(OWNER, 'member'),
+            created.id,
+            {
+              startDate: '2026-05-12',
+              endDate: '2026-05-12',
+              dayPart: 'morning',
+            },
+            1,
+          ),
         ).rejects.toThrow();
         const stored = await db.pTORequest.findUniqueOrThrow({ where: { id: created.id } });
         expect(stored.startDate).toEqual(new Date('2026-05-11T00:00:00.000Z'));
@@ -752,7 +776,7 @@ describe('credential-attributed audit trail', () => {
         dayPart: 'morning',
       });
       await withRejectedAudit('delete_pto', OWNER, async () => {
-        await expect(deletePto(sessionActor(OWNER, 'member'), created.id)).rejects.toThrow();
+        await expect(deletePto(sessionActor(OWNER, 'member'), created.id, 1)).rejects.toThrow();
         expect(await db.pTORequest.count({ where: { id: created.id } })).toBe(1);
         expect(
           await db.auditLog.count({ where: { action: 'delete_pto', actorUserId: { in: IDS } } }),

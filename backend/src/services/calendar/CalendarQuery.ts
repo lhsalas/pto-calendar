@@ -16,6 +16,15 @@ export interface PTOWithUser {
   note: null;
 }
 
+/**
+ * The paged representation carries the revision of every entry, so a client
+ * can name the version it read when it writes the entry back. The legacy
+ * array representation keeps its historical shape and has no version.
+ */
+export interface PTOWithUserVersion extends PTOWithUser {
+  version: number;
+}
+
 /** The validated filters a calendar query is executed with. */
 export interface CalendarRangeFilters {
   start: string;
@@ -26,7 +35,7 @@ export interface CalendarRangeFilters {
 
 /** One page of the opt-in paged representation. */
 export interface CalendarPage {
-  items: PTOWithUser[];
+  items: PTOWithUserVersion[];
   nextCursor: string | null;
   hasMore: boolean;
 }
@@ -38,6 +47,12 @@ const PTO_LIST_SELECT = {
   endDate: true,
   dayPart: true,
   user: { select: { id: true, name: true, colorCode: true } },
+} as const;
+
+/** The paged representation also selects the revision of every entry. */
+const PTO_PAGE_SELECT = {
+  ...PTO_LIST_SELECT,
+  version: true,
 } as const;
 
 /**
@@ -112,6 +127,18 @@ function toPublicRow(row: {
   };
 }
 
+/** The paged projection adds the revision of the entry to the legacy fields. */
+function toPublicVersionRow(row: {
+  id: string;
+  startDate: Date;
+  endDate: Date;
+  dayPart: DayPart;
+  version: number;
+  user: { id: string; name: string; colorCode: string };
+}): PTOWithUserVersion {
+  return { ...toPublicRow(row), version: row.version };
+}
+
 /**
  * The legacy array representation. It keeps the historical 1,000-row cap and
  * the historical response shape; only the optional owner filter is new, and it
@@ -142,10 +169,10 @@ export async function listVisiblePage(
     orderBy: PTO_LIST_ORDER,
     // One extra row answers "is there more?" without a second query.
     take: limit + 1,
-    select: PTO_LIST_SELECT,
+    select: PTO_PAGE_SELECT,
   });
   const hasMore = rows.length > limit;
-  const items = rows.slice(0, limit).map(toPublicRow);
+  const items = rows.slice(0, limit).map(toPublicVersionRow);
   const last = items[items.length - 1];
   const nextCursor =
     hasMore && last

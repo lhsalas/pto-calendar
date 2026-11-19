@@ -75,8 +75,8 @@ describe('range query lifecycle', () => {
           operation === 'create'
             ? result.current.create(payload)
             : operation === 'update'
-              ? result.current.update(STUB_PTO.id, payload)
-              : result.current.remove(STUB_PTO.id);
+              ? result.current.update(STUB_PTO.id, payload, 7)
+              : result.current.remove(STUB_PTO.id, 7);
       });
       rerender({ start: '2026-06-01' });
       await waitFor(() => expect(result.current.items[0]?.id).toBe('before-write'));

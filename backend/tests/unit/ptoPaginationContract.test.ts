@@ -81,7 +81,11 @@ describe('GET /pto OpenAPI pagination contract', () => {
       additionalProperties: false,
       required: ['items', 'nextCursor', 'hasMore'],
       properties: {
-        items: { type: 'array', maxItems: MAX_CALENDAR_PAGE_SIZE, items: schemaRef('PTOListItem') },
+        items: {
+          type: 'array',
+          maxItems: MAX_CALENDAR_PAGE_SIZE,
+          items: schemaRef('PTOPagedListItem'),
+        },
         nextCursor: { type: 'string', nullable: true, maxLength: MAX_CURSOR_LENGTH },
         hasMore: { type: 'boolean' },
       },
@@ -96,9 +100,26 @@ describe('GET /pto OpenAPI pagination contract', () => {
         },
       ],
     });
+    // The paged rows carry the record version; the legacy array does not.
+    expect(api.components.schemas['PTOPagedListItem']).toMatchObject({
+      allOf: [
+        schemaRef('PTOWithUser'),
+        {
+          type: 'object',
+          required: ['note', 'version'],
+          properties: {
+            note: { type: 'string', nullable: true, enum: [null] },
+            version: schemaRef('PTORecordVersion'),
+          },
+        },
+      ],
+    });
     expect(
       api.paths['/pto/{id}']?.get.responses['200']?.content?.['application/json'].schema,
-    ).toEqual(schemaRef('PTOWithUser'));
+    ).toEqual(schemaRef('PTODetail'));
+    expect(api.components.schemas['PTODetail']).toMatchObject({
+      allOf: [schemaRef('PTOWithUser'), { type: 'object', required: ['version'] }],
+    });
     expect(api.components.schemas['PTOWithUser']).toMatchObject({
       properties: { note: { type: 'string', nullable: true } },
     });

@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import type { DayPart, PTOWithUser, User } from '../../types/api';
 import { canModifyPto } from '../../lib/permissions';
 import { formatRangeLabel } from '../../lib/calendar';
-import { loadPtoForEdit, preparePtoForEdit } from '../../lib/ptoEdit';
+import { isStalePtoWriteError, loadPtoForEdit, type PreparedPto } from '../../lib/ptoEdit';
 import { X } from '../icons';
 import { useModalA11y } from '../../hooks/useModalA11y';
 
@@ -13,7 +13,11 @@ export interface PTOViewModalProps {
   currentUser: User;
   onClose: () => void;
   onEdit: (pto: PTOWithUser) => void;
-  onDelete: (pto: PTOWithUser) => Promise<void>;
+  /**
+   * Deletes the PTO. The version is the one of the detail the user loaded
+   * and reviewed in this modal, never a newer revision.
+   */
+  onDelete: (pto: PTOWithUser, version: number) => Promise<void>;
 }
 
 type LoadedNote = { status: 'loaded'; note: string | null };
@@ -44,13 +48,18 @@ function PTOViewModalContent({
 }: PTOViewModalProps): JSX.Element {
   const [confirming, setConfirming] = useState<boolean>(false);
   const [busy, setBusy] = useState<boolean>(false);
+  const [preparingDelete, setPreparingDelete] = useState<boolean>(false);
+  const [deleteConflict, setDeleteConflict] = useState<string | null>(null);
   const [openingEdit, setOpeningEdit] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [detail, setDetail] = useState<PreparedPto | null>(null);
   const [noteState, setNoteState] = useState<NoteState>(() =>
     typeof pto.note === 'string' ? { status: 'loaded', note: pto.note } : { status: 'unknown' },
   );
-  const noteRequest = useRef<Promise<LoadedNote | undefined> | null>(null);
+  const detailRequest = useRef<Promise<PreparedPto | null> | null>(null);
   const editStarted = useRef(false);
+  const preparingDeleteRef = useRef(false);
+  const deletingRef = useRef(false);
   const sessionActive = useRef(true);
   useLayoutEffect(() => {
     sessionActive.current = true;
@@ -72,31 +81,34 @@ function PTOViewModalContent({
     { id: currentUser.id, role: currentUser.role },
     { userId: pto.user.id },
   );
+  const shown = detail ?? pto;
 
-  function loadDetail(): Promise<LoadedNote | undefined> {
-    if (!canModify || !sessionActive.current) return Promise.resolve(undefined);
-    if (noteState.status === 'loaded') return Promise.resolve(noteState);
-    if (noteRequest.current) return noteRequest.current;
+  function loadDetail(): Promise<PreparedPto | null> {
+    if (!canModify || !sessionActive.current) return Promise.resolve(null);
+    if (detail) return Promise.resolve(detail);
+    if (detailRequest.current) return detailRequest.current;
 
     setError(null);
-    setNoteState({ status: 'loading' });
-    const request = (async (): Promise<LoadedNote | undefined> => {
+    if (noteState.status !== 'loaded') setNoteState({ status: 'loading' });
+    const request = (async (): Promise<PreparedPto | null> => {
       try {
-        const detail = await loadPtoForEdit(pto, currentUser);
-        const loaded: LoadedNote = { status: 'loaded', note: detail.note };
-        if (sessionActive.current) setNoteState(loaded);
+        const loaded = await loadPtoForEdit(pto, currentUser);
+        if (sessionActive.current) {
+          setDetail(loaded);
+          setNoteState({ status: 'loaded', note: loaded.note });
+        }
         return loaded;
       } catch (err) {
         if (sessionActive.current) {
           setError(err instanceof Error ? err.message : 'Could not load PTO details.');
-          setNoteState({ status: 'unknown' });
+          if (noteState.status !== 'loaded') setNoteState({ status: 'unknown' });
         }
         // Only failed loads may be retried in this modal session.
-        noteRequest.current = null;
-        return undefined;
+        detailRequest.current = null;
+        return null;
       }
     })();
-    noteRequest.current = request;
+    detailRequest.current = request;
     return request;
   }
 
@@ -107,7 +119,9 @@ function PTOViewModalContent({
   }
 
   async function handleEdit(): Promise<void> {
-    if (!canModify || !sessionActive.current || editStarted.current) return;
+    if (!canModify || !sessionActive.current || editStarted.current || preparingDeleteRef.current) {
+      return;
+    }
     editStarted.current = true;
     setOpeningEdit(true);
     const loaded = await loadDetail();
@@ -117,17 +131,47 @@ function PTOViewModalContent({
       setOpeningEdit(false);
       return;
     }
-    onEdit(preparePtoForEdit(pto, currentUser, loaded.note));
+    // The editor works on the loaded snapshot, so its version always belongs
+    // to the dates and the note the user reviewed.
+    onEdit(loaded);
+  }
+
+  async function handlePrepareDelete(): Promise<void> {
+    if (!sessionActive.current || editStarted.current || preparingDeleteRef.current) return;
+    preparingDeleteRef.current = true;
+    setPreparingDelete(true);
+    const loaded = await loadDetail();
+    preparingDeleteRef.current = false;
+    if (!sessionActive.current) return;
+    setPreparingDelete(false);
+    if (!loaded) return;
+    setDeleteConflict(null);
+    setConfirming(true);
   }
 
   async function handleDelete(): Promise<void> {
+    // The confirmation is only reachable with a loaded detail, so the delete
+    // always quotes the version the user reviewed.
+    if (!detail || !confirming || deleteConflict || !sessionActive.current || deletingRef.current) {
+      return;
+    }
+    deletingRef.current = true;
     setBusy(true);
     setError(null);
     try {
-      await onDelete(pto);
+      await onDelete(detail, detail.version);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not delete PTO.');
-      setBusy(false);
+      if (!sessionActive.current) return;
+      if (isStalePtoWriteError(err)) {
+        // The record changed: the delete is not offered again with the stale
+        // version, the user has to load the current details.
+        setDeleteConflict(err.message);
+      } else {
+        setError(err instanceof Error ? err.message : 'Could not delete PTO.');
+      }
+    } finally {
+      deletingRef.current = false;
+      if (sessionActive.current) setBusy(false);
     }
   }
 
@@ -191,13 +235,13 @@ function PTOViewModalContent({
             <div className="flex items-center justify-between">
               <dt className="text-ink-muted dark:text-ink-muted-dark">Date(s)</dt>
               <dd className="font-mono text-sm tabular-nums font-medium text-ink dark:text-ink-dark">
-                {formatRangeLabel(pto.startDate, pto.endDate)}
+                {formatRangeLabel(shown.startDate, shown.endDate)}
               </dd>
             </div>
             <div className="flex items-center justify-between">
               <dt className="text-ink-muted dark:text-ink-muted-dark">Day part</dt>
               <dd className="font-medium text-ink dark:text-ink-dark">
-                {dayPartLabel(pto.dayPart)}
+                {dayPartLabel(shown.dayPart)}
               </dd>
             </div>
             <div className="flex items-start justify-between gap-3">
@@ -246,25 +290,44 @@ function PTOViewModalContent({
 
           {confirming ? (
             <div className="mb-3 rounded border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
-              <p className="mb-2">Delete this PTO? This cannot be undone.</p>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setConfirming(false)}
-                  disabled={busy}
-                  className="min-h-11 rounded border border-border bg-surface-3 px-3 py-2 text-sm text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60 dark:border-border-dark dark:bg-surface-dark-3 dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleDelete()}
-                  disabled={busy}
-                  className="min-h-11 rounded bg-danger px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60 dark:focus-visible:ring-offset-surface-dark"
-                >
-                  {busy ? 'Deleting…' : 'Yes, delete'}
-                </button>
-              </div>
+              {deleteConflict ? (
+                <>
+                  <p className="mb-2" role="alert" data-testid="pto-delete-conflict">
+                    {deleteConflict}
+                  </p>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={closeModal}
+                      className="min-h-11 rounded border border-border bg-surface-3 px-3 py-2 text-sm text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:bg-surface-dark-3 dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="mb-2">Delete this PTO? This cannot be undone.</p>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setConfirming(false)}
+                      disabled={busy}
+                      className="min-h-11 rounded border border-border bg-surface-3 px-3 py-2 text-sm text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60 dark:border-border-dark dark:bg-surface-dark-3 dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleDelete()}
+                      disabled={busy}
+                      className="min-h-11 rounded bg-danger px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60 dark:focus-visible:ring-offset-surface-dark"
+                    >
+                      {busy ? 'Deleting…' : 'Yes, delete'}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           ) : (
             <div className="flex justify-end gap-2">
@@ -281,7 +344,7 @@ function PTOViewModalContent({
                   <button
                     type="button"
                     onClick={() => void handleEdit()}
-                    aria-disabled={openingEdit}
+                    aria-disabled={openingEdit || preparingDelete}
                     aria-busy={openingEdit}
                     className="min-h-11 rounded bg-accent px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface aria-disabled:opacity-60 dark:focus-visible:ring-offset-surface-dark"
                   >
@@ -289,13 +352,12 @@ function PTOViewModalContent({
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      if (!editStarted.current) setConfirming(true);
-                    }}
-                    disabled={openingEdit}
+                    onClick={() => void handlePrepareDelete()}
+                    disabled={openingEdit || preparingDelete}
+                    aria-busy={preparingDelete}
                     className="min-h-11 rounded bg-danger px-3 py-2 text-sm font-medium text-ink-inverse transition-colors duration-150 hover:opacity-90 disabled:opacity-60"
                   >
-                    Delete
+                    {preparingDelete ? 'Preparing delete…' : 'Delete'}
                   </button>
                 </>
               ) : null}

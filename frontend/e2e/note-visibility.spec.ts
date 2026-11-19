@@ -1,5 +1,22 @@
 import { test, expect } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import type { PTO } from '../src/types/api';
+
+/**
+ * A delete now states the expected record version, so the cleanup reads the
+ * current version first and then removes exactly this journey's own record.
+ */
+async function deleteOwnPto(page: Page, id: string): Promise<number> {
+  const detail = await page.request.get(`/pto/${id}`, { maxRedirects: 0 });
+  if (detail.status() === 404) return 404;
+  expect(detail.status()).toBe(200);
+  const current = (await detail.json()) as { version: number };
+  const deleted = await page.request.delete(`/pto/${id}`, {
+    maxRedirects: 0,
+    headers: { 'If-Match': `"${current.version}"` },
+  });
+  return deleted.status();
+}
 
 function nthWeekdayInCurrentMonth(n: number): string {
   const now = new Date();
@@ -74,7 +91,7 @@ for (const field of ['day part', 'dates'] as const) {
       await row.getByRole('button', { name: /^edit$/i }).click();
       await expect(form.getByLabel(/note \(optional\)/i)).toHaveValue('Doctor');
     } finally {
-      expect((await page.request.delete(`/pto/${pto.id}`)).status()).toBe(204);
+      expect(await deleteOwnPto(page, pto.id)).toBe(204);
     }
   });
 }
@@ -166,8 +183,8 @@ test('loading an empty PTO note removes the load button for this opening', async
     await noNote.click();
     expect(detailRequests).toBe(1);
   } finally {
-    const deleted = await page.request.delete(`/pto/${pto.id}`);
-    expect(deleted.status()).toBe(204);
+    const deleted = await deleteOwnPto(page, pto.id);
+    expect(deleted).toBe(204);
   }
 });
 
@@ -273,8 +290,8 @@ for (const scenario of [
         expect(detailRequests).toBe(3);
       }
     } finally {
-      const deleted = await page.request.delete(`/pto/${pto.id}`);
-      expect(deleted.status()).toBe(204);
+      const deleted = await deleteOwnPto(page, pto.id);
+      expect(deleted).toBe(204);
     }
   });
 }

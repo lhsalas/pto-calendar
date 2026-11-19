@@ -34,6 +34,8 @@ interface RequestOptions {
    * endpoints use `error` so a redirect is never followed with cookies.
    */
   redirect?: RequestRedirect;
+  /** Send the version of a reviewed PTO detail on conditional writes only. */
+  headers?: { 'If-Match': string };
   /**
    * Opt in to a real deadline for this request.
    *
@@ -81,8 +83,10 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     cache,
     redirect,
     deadline = false,
+    headers: extraHeaders,
   } = options;
   const headers: Record<string, string> = {};
+  if (extraHeaders) headers['If-Match'] = extraHeaders['If-Match'];
   let payload: BodyInit | undefined;
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';

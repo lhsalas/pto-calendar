@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw';
-import type { PTOWithUser, TokenMetadata, User } from '../../src/types/api';
+import type { PTODetail, PTOWithUser, TokenMetadata, User } from '../../src/types/api';
 
 export const STUB_USER: User = {
   id: '11111111-1111-1111-1111-111111111111',
@@ -24,6 +24,14 @@ export const STUB_PTO: PTOWithUser = {
   endDate: '2026-05-11',
   dayPart: 'morning',
   note: null,
+};
+
+export const STUB_PTO_DETAIL: PTODetail = {
+  ...STUB_PTO,
+  userId: STUB_PTO.user.id,
+  createdAt: '2026-05-01T10:00:00.000Z',
+  updatedAt: '2026-05-01T10:00:00.000Z',
+  version: 7,
 };
 
 export const unauthenticated = http.get('/auth/me', () =>
@@ -122,6 +130,7 @@ export const ptoCreateOk = http.post('/pto', () =>
       note: null,
       createdAt: '2026-05-01T10:00:00.000Z',
       updatedAt: '2026-05-01T10:00:00.000Z',
+      version: 1,
     },
     { status: 201 },
   ),
@@ -149,21 +158,14 @@ export const ptoUpdateOk = http.put('/pto/:id', () =>
     note: 'Edited',
     createdAt: '2026-05-01T10:00:00.000Z',
     updatedAt: '2026-05-02T10:00:00.000Z',
+    version: 2,
   }),
 );
 
 export const ptoDeleteOk = http.delete('/pto/:id', () => new HttpResponse(null, { status: 204 }));
 
 export const ptoGetDetail = http.get('/pto/:id', () =>
-  HttpResponse.json({
-    id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
-    userId: STUB_USER.id,
-    startDate: '2026-05-11',
-    endDate: '2026-05-11',
-    dayPart: 'morning',
-    note: 'Doctor',
-    user: { id: STUB_USER.id, name: STUB_USER.name, colorCode: STUB_USER.colorCode },
-  }),
+  HttpResponse.json({ ...STUB_PTO_DETAIL, note: 'Doctor' }),
 );
 
 export const holidaysListAll = http.get('/holidays/all', () =>

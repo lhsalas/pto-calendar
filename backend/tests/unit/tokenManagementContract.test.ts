@@ -61,13 +61,14 @@ describe('personal token OpenAPI contract', () => {
     );
   });
 
-  it('adds bearer alternatives only on the six deliberately scoped operations', () => {
+  it('adds bearer alternatives only on the deliberately scoped operations', () => {
     const eligible = new Set([
       'GET /auth/me',
       'GET /pto',
       'POST /pto',
       'GET /pto/{id}',
       'PUT /pto/{id}',
+      'PATCH /pto/{id}',
       'DELETE /pto/{id}',
     ]);
     const actual: string[] = [];
