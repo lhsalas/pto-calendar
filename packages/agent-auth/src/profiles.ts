@@ -100,7 +100,13 @@ export interface ProfileFilesPort {
 
 /** The operating system credential store. */
 export interface KeyringPort {
-  get(profile: string, origin: string): Promise<string | null>;
+  /**
+   * The token stored for the profile at the origin, or null when there is none.
+   *
+   * The optional signal belongs to the trusted host: an aborted lookup stops
+   * the credential store and fails with the fixed cancellation code.
+   */
+  get(profile: string, origin: string, signal?: AbortSignal): Promise<string | null>;
   set(profile: string, origin: string, token: string): Promise<void>;
   remove(profile: string, origin: string): Promise<boolean>;
 }
@@ -157,6 +163,15 @@ export interface ResolveInput {
   readonly allowLoopbackHttp?: boolean;
   /** An explicit, trusted environment record. It is never read on its own. */
   readonly env?: AgentAuthEnvironment;
+  /**
+   * An optional trusted cancellation signal.
+   *
+   * The signal belongs to the trusted host, never to a tool argument. A
+   * cancelled resolution stops the credential store and fails with the fixed
+   * cancellation code; the reason of the signal is never read. Its absence
+   * preserves the previous behavior of every caller.
+   */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -258,6 +273,30 @@ function loopbackOptIn(value: unknown): boolean {
 }
 
 /**
+ * The optional trusted cancellation signal.
+ *
+ * Only an absent signal is no signal. A value that is not an actual signal is
+ * refused before a single store is touched, so a malformed option can never
+ * reach the credential store. The reason of the signal is never read.
+ */
+function optionalSignal(value: unknown): AbortSignal | undefined {
+  if (value === undefined) return undefined;
+  if (!(value instanceof AbortSignal)) throw new AgentAuthError('INVALID_OPTIONS');
+  return value;
+}
+
+/**
+ * Whether the trusted signal was aborted.
+ *
+ * The state is read through a function on purpose: a cancellation that happens
+ * between two checks is still seen, so the second check of a resolution is
+ * never narrowed away.
+ */
+function isCancelled(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
+/**
  * The environment pair of an explicit record.
  *
  * Only an absent record is no record. An explicit `null`, an array or any
@@ -346,8 +385,9 @@ async function readKeyringToken(
   keyring: KeyringPort,
   profile: string,
   origin: string,
+  signal?: AbortSignal,
 ): Promise<string> {
-  const token = await keyring.get(profile, origin);
+  const token = await keyring.get(profile, origin, signal);
   if (token === null || token === undefined) throw new AgentAuthError('CREDENTIAL_MISSING');
   return secretValue(token);
 }
@@ -440,6 +480,10 @@ async function resolveCredential(
   const requested = loopbackOptIn(input.allowLoopbackHttp);
   const baseUrl = input.baseUrl;
   const pair = environmentPair(input.env, explicitProfile !== null);
+  const signal = optionalSignal(input.signal);
+  // A cancelled resolution never opens the local store and never asks the
+  // credential store for anything.
+  if (isCancelled(signal)) throw new AgentAuthError('INPUT_CANCELLED');
 
   if (pair !== null) {
     // A managed runtime injects the credential for this run only. Nothing is
@@ -462,6 +506,9 @@ async function resolveCredential(
   // held, so no other writer can change the binding in between.
   return files.withProfile(profile, false, async (file) => {
     const raw = await file.read();
+    // The cancellation is checked again after the read, so a call that was
+    // cancelled while the record was read never reaches the credential store.
+    if (isCancelled(signal)) throw new AgentAuthError('INPUT_CANCELLED');
     if (raw === null || raw === undefined) throw new AgentAuthError('PROFILE_NOT_CONFIGURED');
     const stored = validateStoredProfile(raw, profile);
     // The opt-in of a stored profile persists: it was given on purpose when
@@ -475,7 +522,10 @@ async function resolveCredential(
     const token =
       stored.storage === 'file'
         ? secretValue(stored.token)
-        : await readKeyringToken(keyring, profile, origin);
+        : await readKeyringToken(keyring, profile, origin, signal);
+    // The cancellation is checked again after the credential was read: a
+    // credential that arrived after the call was cancelled is never used.
+    if (isCancelled(signal)) throw new AgentAuthError('INPUT_CANCELLED');
     return freezeBundle({
       baseUrl: origin,
       credential: { origin, token },
@@ -669,7 +719,7 @@ export function lazyKeyring(create: () => KeyringPort): KeyringPort {
     return instance;
   };
   return {
-    get: (profile, origin) => resolve().get(profile, origin),
+    get: (profile, origin, signal) => resolve().get(profile, origin, signal),
     set: (profile, origin, token) => resolve().set(profile, origin, token),
     remove: (profile, origin) => resolve().remove(profile, origin),
   };

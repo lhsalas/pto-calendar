@@ -37,10 +37,13 @@ class FakeFile implements ProfileFilePort {
   removals = 0;
   /** What the store confirms when the record is removed. */
   removeResult = true;
+  /** What the store does after it read the record. */
+  afterRead: (() => void) | null = null;
 
   constructor(private readonly events: string[]) {}
 
   async read(): Promise<StoredProfile | null> {
+    if (this.afterRead !== null) this.afterRead();
     return this.record;
   }
 
@@ -61,6 +64,8 @@ class FakeFile implements ProfileFilePort {
 /** The locked profile store, held in memory. */
 class FakeFiles implements ProfileFilesPort {
   readonly records = new Map<string, FakeFile>();
+  /** What the store does after it read a record. */
+  afterRead: (() => void) | null = null;
 
   constructor(private readonly events: string[]) {}
 
@@ -75,9 +80,15 @@ class FakeFiles implements ProfileFilesPort {
       file = new FakeFile(this.events);
       this.records.set(name, file);
     }
-    const result = await action(file);
-    this.events.push(`unlock:${name}`);
-    return result;
+    // The hook of the store is applied to the record of this call.
+    file.afterRead = this.afterRead;
+    // The lock of the profile is released even when the action fails, exactly
+    // like the real store does.
+    try {
+      return await action(file);
+    } finally {
+      this.events.push(`unlock:${name}`);
+    }
   }
 }
 
@@ -87,11 +98,17 @@ class FakeKeyring implements KeyringPort {
   getFailure: Error | null = null;
   setFailure: Error | null = null;
   removeFailure: Error | null = null;
+  /** The signals the credential store was asked with. */
+  readonly signals: (AbortSignal | undefined)[] = [];
+  /** What the credential store does after it was asked. */
+  afterGet: (() => void) | null = null;
 
   constructor(private readonly events: string[]) {}
 
-  async get(profile: string, origin: string): Promise<string | null> {
+  async get(profile: string, origin: string, signal?: AbortSignal): Promise<string | null> {
     this.events.push('keyring:get');
+    this.signals.push(signal);
+    if (this.afterGet !== null) this.afterGet();
     if (this.getFailure !== null) throw this.getFailure;
     return this.entries.get(entryKey(profile, origin)) ?? null;
   }
@@ -688,6 +705,107 @@ describe('resolving a credential', () => {
       auth.resolve({ allowLoopbackHttp: 'yes' as unknown as boolean }),
       'INVALID_OPTIONS',
     );
+  });
+});
+
+describe('cancelling a resolution', () => {
+  it('passes the trusted signal to the credential store', async () => {
+    const { auth, keyring } = createHarness();
+    await auth.setProfile({ profile: 'work', baseUrl: ORIGIN, token: TOKEN });
+    const controller = new AbortController();
+
+    await auth.resolve({ profile: 'work', signal: controller.signal });
+
+    expect(keyring.signals).toEqual([controller.signal]);
+  });
+
+  it('never opens the local store for a resolution that is already cancelled', async () => {
+    const { auth, events } = createHarness();
+    await auth.setProfile({ profile: 'work', baseUrl: ORIGIN, token: TOKEN });
+    events.length = 0;
+    const controller = new AbortController();
+    controller.abort();
+
+    await expectCode(
+      auth.resolve({ profile: 'work', signal: controller.signal }),
+      'INPUT_CANCELLED',
+    );
+    expect(events).toEqual([]);
+  });
+
+  it('refuses a cancellation value that is not an actual signal', async () => {
+    const { auth, events } = createHarness();
+    await auth.setProfile({ profile: 'work', baseUrl: ORIGIN, token: TOKEN });
+    events.length = 0;
+
+    await expectCode(
+      auth.resolve({ profile: 'work', signal: {} as AbortSignal }),
+      'INVALID_OPTIONS',
+    );
+    expect(events).toEqual([]);
+  });
+
+  it('never asks the credential store when the record was read after the cancellation', async () => {
+    const { auth, events, files } = createHarness();
+    await auth.setProfile({ profile: 'work', baseUrl: ORIGIN, token: TOKEN });
+    events.length = 0;
+    const controller = new AbortController();
+    files.afterRead = () => controller.abort();
+
+    await expectCode(
+      auth.resolve({ profile: 'work', signal: controller.signal }),
+      'INPUT_CANCELLED',
+    );
+    expect(events).toEqual(['lock:work:false', 'unlock:work']);
+  });
+
+  it('never uses a credential that arrived after the resolution was cancelled', async () => {
+    const { auth, events, keyring } = createHarness();
+    await auth.setProfile({ profile: 'work', baseUrl: ORIGIN, token: TOKEN });
+    events.length = 0;
+    const controller = new AbortController();
+    keyring.afterGet = () => controller.abort();
+
+    await expectCode(
+      auth.resolve({ profile: 'work', signal: controller.signal }),
+      'INPUT_CANCELLED',
+    );
+    // The lock of the profile is released even though the action failed.
+    expect(events).toEqual(['lock:work:false', 'keyring:get', 'unlock:work']);
+  });
+
+  it('keeps a report and a removal free of the signal', async () => {
+    const { auth, keyring, events } = createHarness();
+    await auth.setProfile({ profile: 'work', baseUrl: ORIGIN, token: TOKEN });
+    await auth.setProfile({ profile: 'other', baseUrl: OTHER_ORIGIN, token: OTHER_TOKEN });
+    keyring.signals.length = 0;
+    events.length = 0;
+
+    await auth.status({ profile: 'work' });
+    await auth.removeProfile('other');
+
+    // The report reads the credential without a signal, and the removal never
+    // reads a credential at all.
+    expect(keyring.signals).toEqual([undefined]);
+    expect(events).toEqual([
+      'lock:work:false',
+      'keyring:get',
+      'unlock:work',
+      'lock:other:false',
+      'keyring:remove',
+      'remove:metadata',
+      'unlock:other',
+    ]);
+  });
+
+  it('keeps the previous behavior when no signal is named', async () => {
+    const { auth, keyring } = createHarness();
+    await auth.setProfile({ profile: 'work', baseUrl: ORIGIN, token: TOKEN });
+
+    const bundle = await auth.resolve({ profile: 'work' });
+
+    expect(bundle.credential.token).toBe(TOKEN);
+    expect(keyring.signals).toEqual([undefined]);
   });
 });
 

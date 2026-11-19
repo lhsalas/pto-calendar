@@ -20,12 +20,14 @@ directory is never consulted. The facade has four operations:
   only an explicit `'file'` writes a plaintext token into the owner-only
   directory. An existing profile keeps its origin and storage: changing either
   requires local removal and new setup, not an override.
-- `resolve({ profile?, baseUrl?, env?, allowLoopbackHttp? } = {})` returns one
-  frozen bundle with `baseUrl`, `credential: { origin, token }`,
+- `resolve({ profile?, baseUrl?, env?, allowLoopbackHttp?, signal? } = {})`
+  returns one frozen bundle with `baseUrl`, `credential: { origin, token }`,
   `allowLoopbackHttp`, `profile` and `source`. The optional `baseUrl` must
   normalize to the bound origin, so a credential is never returned for a
   different server. Pass the bundle directly to the API client; do not log
-  or serialize it for display.
+  or serialize it for display. The optional `signal` belongs to the trusted
+  host, never to a tool argument: it cancels the lookup, and its absence
+  preserves the behavior of every existing caller.
 - `status({ profile?, baseUrl?, env?, allowLoopbackHttp? } = {})` reports only
   the local `{ profile, origin, source, ready, guidance }` state. It never
   returns a token, a path or a raw error object.
@@ -80,6 +82,19 @@ and it never places it in an argument or an environment variable.
   never triggers a plaintext downgrade and never selects another local source.
 - Resolve or load the profile before sending API requests. Status reports only
   non-secret local configuration, not remote token validity.
+- A resolution may carry one optional trusted `AbortSignal`. The signal is
+  read at the start of the resolution, again after the profile record was
+  read, and again after the credential was read: a cancelled resolution
+  never opens the credential store, never uses a credential that arrived
+  late, and never holds the profile lock longer than the call. The lookup
+  stops the credential helper through the same termination path as its
+  timeout, so the helper process, the profile lock and the caller's slot are
+  released as soon as the call is cancelled. The failure is the existing
+  fixed `INPUT_CANCELLED` code: the reason of the signal is never read, so it
+  can never carry a cause, a secret or client text into an error. Only an
+  actual signal is admitted; anything else is refused with the fixed
+  `INVALID_OPTIONS` code before a single store is touched. `setProfile`,
+  `status` and `removeProfile` are unchanged and never take a signal.
 
 ## Local presence and remote state
 

@@ -1,0 +1,43 @@
+{
+  "name": "@pto-calendar/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local stdio tools for reading PTO Calendar",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=24.22.3",
+    "npm": ">=10.0.0"
+  },
+  "bin": {
+    "pto-mcp": "./bin/pto-mcp.mjs"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "build:test": "cd .. && npm run build -w packages/api-client -w packages/agent-auth -w mcp",
+    "lint": "eslint . && npm run format:check",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build:test && vitest run",
+    "test:coverage": "npm run build:test && vitest run --coverage",
+    "format:check": "prettier --ignore-path ../.gitignore --check \"**/*.{ts,mjs,js,json,md}\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@pto-calendar/agent-auth": "0.1.0",
+    "@pto-calendar/api-client": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@vitest/coverage-v8": "^5.1.0",
+    "eslint": "^10.15.0",
+    "eslint-config-prettier": "^10.1.8",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.0",
+    "vitest": "^5.1.0"
+  }
+}

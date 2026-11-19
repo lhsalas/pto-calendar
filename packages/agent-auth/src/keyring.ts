@@ -36,8 +36,14 @@ import { normalizeOrigin, requireProfileName, requireToken } from './validation.
  * the same thing in a read, in a write and in a removal.
  */
 export interface Keyring {
-  /** The token stored for the profile at the origin, or null when there is none. */
-  get(profile: string, origin: string): Promise<string | null>;
+  /**
+   * The token stored for the profile at the origin, or null when there is none.
+   *
+   * The optional signal belongs to the trusted host. An aborted lookup stops
+   * the helper through the same termination path as a timeout and fails with
+   * the fixed cancellation code; the reason of the signal is never read.
+   */
+  get(profile: string, origin: string, signal?: AbortSignal): Promise<string | null>;
   /** Stores the token of the profile at the origin. */
   set(profile: string, origin: string, token: string): Promise<void>;
   /** Removes the token of the profile at the origin and reports whether one was there. */
@@ -220,6 +226,16 @@ function startHelper(
 }
 
 /**
+ * Whether the trusted signal was aborted.
+ *
+ * The state is read through a function on purpose: the check is never
+ * narrowed away by an earlier one. The reason of the signal is never read.
+ */
+function isCancelled(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
+/**
  * Run the helper once and read its answer.
  *
  * The helper receives only the request on stdin, and its standard error is read
@@ -228,8 +244,19 @@ function startHelper(
  * that cannot be started. The outcome is settled first. Then the request and
  * every answer byte are wiped, and only then is a helper that may still be
  * running stopped. A late event never changes a settled call.
+ *
+ * An optional trusted signal settles the call the same way: the helper is
+ * stopped through the same termination path as a timeout, the timer is
+ * cleared, the listener is detached and the buffers are wiped. The reason of
+ * the signal is never read, so a cancellation can never carry a cause into an
+ * error. A signal that is already aborted never starts a helper at all.
  */
-function runHelper(request: HelperRequest): Promise<HelperResponse> {
+function runHelper(request: HelperRequest, signal?: AbortSignal): Promise<HelperResponse> {
+  if (signal !== undefined) {
+    if (!(signal instanceof AbortSignal)) throw new AgentAuthError('INVALID_OPTIONS');
+    // A lookup that is already cancelled never starts a helper.
+    if (isCancelled(signal)) throw new AgentAuthError('INPUT_CANCELLED');
+  }
   if (!existsSync(HELPER)) {
     throw new AgentAuthError('KEYRING_UNSUPPORTED');
   }
@@ -248,10 +275,15 @@ function runHelper(request: HelperRequest): Promise<HelperResponse> {
     let settled = false;
     let exited = false;
 
+    const onAbort = (): void => {
+      finish(() => reject(new AgentAuthError('INPUT_CANCELLED')));
+    };
+
     const finish = (settle: () => void): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
       settle();
       redact(body, chunks);
       if (!exited) child.kill('SIGKILL');
@@ -260,6 +292,10 @@ function runHelper(request: HelperRequest): Promise<HelperResponse> {
     const timer = setTimeout(() => {
       finish(() => reject(new AgentAuthError('KEYRING_UNAVAILABLE')));
     }, HELPER_TIMEOUT_MS);
+
+    if (signal !== undefined) {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
 
     child.stdout.on('data', (chunk: Buffer) => {
       if (settled) {
@@ -292,9 +328,9 @@ function runHelper(request: HelperRequest): Promise<HelperResponse> {
       );
     });
 
-    child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
+    child.on('close', (code: number | null, exitSignal: NodeJS.Signals | null) => {
       exited = true;
-      if (signal !== null) {
+      if (exitSignal !== null) {
         finish(() => reject(new AgentAuthError('KEYRING_UNAVAILABLE')));
         return;
       }
@@ -343,9 +379,16 @@ function storedToken(value: unknown): string {
 }
 
 /** Read one credential. A lookup never unlocks and never prompts. */
-async function getCredential(profile: string, origin: string): Promise<string | null> {
+async function getCredential(
+  profile: string,
+  origin: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
   const scope = credentialScope(profile, origin);
-  const response = await runHelper({ op: 'get', profile: scope.profile, origin: scope.origin });
+  const response = await runHelper(
+    { op: 'get', profile: scope.profile, origin: scope.origin },
+    signal,
+  );
   if (response.status === 'ok') return storedToken(response.token);
   if (response.status === 'missing') return null;
   if (response.status === 'error') throw helperError(response.code);
@@ -387,7 +430,7 @@ async function removeCredential(profile: string, origin: string): Promise<boolea
 export function createLinuxKeyring(): Keyring {
   assertLinux();
   const keyring: Keyring = {
-    get: (profile, origin) => getCredential(profile, origin),
+    get: (profile, origin, signal) => getCredential(profile, origin, signal),
     set: (profile, origin, token) => setCredential(profile, origin, token),
     remove: (profile, origin) => removeCredential(profile, origin),
   };

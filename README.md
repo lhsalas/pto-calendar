@@ -256,8 +256,13 @@ The [private CLI workspace](cli/README.md) builds the versioned `pto`
 executable. It supports local credential setup, status and removal, plus
 read-only `list` and `get` with human or versioned JSON output. It identifies
 `--mine` through the service, and marks incomplete paginated results explicitly.
-This is workspace source, not a distributed artifact, a production activation,
-or an MCP server.
+This is workspace source, not a distributed artifact or production activation.
+
+The [private MCP workspace](mcp/README.md) builds `pto-mcp`, a local stdio
+server with the read-only `pto_list` and `pto_get` tools. It uses the same
+origin-bound credentials without copying cookies or asking for a token in a
+tool call. A detail note is withheld unless the call explicitly requests
+it and the API authorizes access. No hosted server or client setup is shipped.
 
 ## Seeded Dev Users
 

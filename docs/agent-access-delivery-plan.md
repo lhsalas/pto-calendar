@@ -285,6 +285,9 @@ and failed `If-Match` remains 412 regardless of the chosen version encoding.
   structured outputs include request IDs/completeness/recovery. Profile lookup is
   outside tool arguments; tools accept no secret, arbitrary URL/header, shell
   string, file path, `actAs` or role. Stdout is protocol-only, logs use stderr.
+  [#263] selects pinned SDK 1.32.2 and classic stdio `initialize`, including
+  `2025-11-25`. See [the workspace](../mcp/README.md) for compatibility
+  evidence and an artifact-path placeholder, not client certification.
   Read-only annotations are hints, not access control; mark create idempotent only
   once the backend replay guarantee is tested, not general update/delete replay.
 - [#265]: use pinned, versioned repository-release artifacts/npm-pack tarballs

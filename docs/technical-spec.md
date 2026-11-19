@@ -1226,6 +1226,15 @@ endpoint. The package is discovered by the root `lint`, `typecheck`, `test`,
 `test:coverage` and `build` scripts and by the CI `Lint`, `Typecheck`,
 `Frontend tests` and `Coverage gate` jobs.
 
+### 14.6 Local read-only MCP (#263)
+`pto-mcp` is a private stdio process using classic initialization and the
+shared credential resolver and REST client. It declares only `pto_list`
+and `pto_get`, with bounded closed schemas and structured results. The API
+authorizes every request; a long-lived protocol connection does not keep a
+revoked or expired credential valid. Note display is opt-in for an authorized
+detail call and is always absent from list results. The server exposes no
+HTTP transport, database access or writable tool.
+
 ## 15. Suggested Implementation Choices
 
 ### Confirmed MVP implementation choice
