@@ -90,6 +90,16 @@ done
 case "$tool" in
   psql)
     printf 'psql-open\\n' >> "$MOCK_LOG"
+    if [[ -n "$MOCK_SNAPSHOT_DB" ]]; then
+      opts=(-X -h "$MOCK_HOST" -p "$MOCK_PORT" -U pto -d "$MOCK_SNAPSHOT_DB" -qAt -v ON_ERROR_STOP=1)
+      if [[ "$MOCK_RUNNER" == 'podman-container' ]]; then
+        podman exec -i -e PGPASSWORD=pto pto-calendar-db psql "\${opts[@]}"
+      else
+        PGPASSWORD=pto "$MOCK_PSQL" "\${opts[@]}"
+      fi
+      printf 'psql-close\\n' >> "$MOCK_LOG"
+      exit 0
+    fi
     buffer=""
     while IFS= read -r line; do
       if [[ "$line" == "\\\\q" ]]; then
@@ -182,6 +192,7 @@ interface BackupMockOptions {
   extensionPresent?: boolean;
   constraintPresent?: boolean;
   migrationState?: 'applied' | 'absent' | 'pending';
+  realSnapshot?: boolean;
   schemaDump?: string;
   failDataDump?: boolean;
 }
@@ -215,7 +226,7 @@ function runBackupWithMock(options: BackupMockOptions = {}): BackupMockResult {
       join(installDir, '.env'),
       [
         'DB_USER=pto',
-        'DB_NAME=pto',
+        `DB_NAME=${options.realSnapshot ? TARGET_DB : 'pto'}`,
         'BACKUP_ENCRYPTION_KEY=aB3$xY9#mQ7&vN2*pL5@rT8^wK4!zD6%jH1',
         'OCI_BACKUP_BUCKET=disposable-bucket',
         'OCI_OBJECT_STORAGE_NAMESPACE=disposable-namespace',
@@ -244,6 +255,11 @@ function runBackupWithMock(options: BackupMockOptions = {}): BackupMockResult {
         MOCK_CONSTRAINT: options.constraintPresent === false ? 'f' : 't',
         MOCK_MIGRATION_STATE:
           options.migrationState ?? (options.constraintPresent === false ? 'absent' : 'applied'),
+        MOCK_SNAPSHOT_DB: options.realSnapshot ? TARGET_DB : '',
+        MOCK_RUNNER: options.realSnapshot ? runner : '',
+        MOCK_PSQL: options.realSnapshot ? resolveTool('psql') : '',
+        MOCK_HOST: fixtureHost,
+        MOCK_PORT: fixturePort,
         MOCK_SCHEMA_DUMP: options.schemaDump ?? MOCK_SCHEMA_WITH_CONSTRAINT,
         MOCK_DATA_DUMP: MOCK_DATA_DUMP,
         MOCK_FAIL_DATA_DUMP: options.failDataDump === true ? 'true' : 'false',
@@ -995,6 +1011,33 @@ describe('database backup → restore roundtrip', () => {
     expect(result.log).not.toMatch(/pg_dump|oci /);
     expect(result.log).toContain('psql-close');
   });
+
+  testOrSkip(
+    'exports the real backup snapshot for an empty restore target but rejects a populated target without a ledger',
+    () => {
+      resetTarget();
+      try {
+        runSql('CREATE SCHEMA public;');
+        const options = { realSnapshot: true, schemaDump: MOCK_SCHEMA_LEGACY };
+        const empty = runBackupWithMock(options);
+        expect(empty.stderr).not.toContain('does not exist');
+        expect(empty.status).toBe(0);
+        expect(empty.log).toContain('psql-close');
+        expect(empty.log.match(/oci os object put/g)).toHaveLength(2);
+
+        // Non-table objects must also prevent treating a damaged schema as empty.
+        runSql('CREATE VIEW public.synthetic_recovery_probe AS SELECT 1 AS id;');
+        const populated = runBackupWithMock(options);
+        expect(populated.status).toBe(2);
+        expect(populated.stderr).toContain('no Prisma ledger and public is not an empty schema');
+        expect(populated.log).toContain('psql-close');
+        expect(populated.log).not.toMatch(/pg_dump|oci /);
+      } finally {
+        resetTarget();
+      }
+    },
+    30_000,
+  );
 
   it('still backs up a database that predates the migration', () => {
     const result = runBackupWithMock({

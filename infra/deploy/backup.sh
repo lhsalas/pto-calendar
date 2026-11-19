@@ -108,6 +108,8 @@ cd "${INSTALL_DIR}"
 # A backup taken between the DDL commit and Prisma finishing its ledger row
 # is unsafe too. Check the actual table/constraint and its milestone in this
 # same snapshot. Only booleans and a fixed state label come back with the ID.
+# The restore workflow must also back up genuinely empty targets. Discover
+# the ledger before referencing it and reject unknown nonempty state.
 open_snapshot() {
   local snapshot_id extension_present constraint_present migration_state
   coproc SNAPSHOT { exec docker compose --env-file "${INSTALL_DIR}/.env" \
@@ -118,12 +120,10 @@ open_snapshot() {
   if ! cat >&"${SNAPSHOT[1]}" <<'SQL'
 BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
 SET LOCAL statement_timeout = '20s';
-SELECT pg_catalog.pg_export_snapshot(),
-       EXISTS (SELECT 1 FROM pg_catalog.pg_extension WHERE extname = 'btree_gist'),
-       EXISTS (SELECT 1 FROM pg_catalog.pg_constraint
-               WHERE conname = 'pto_requests_no_owner_overlap' AND contype = 'x'
-                 AND conrelid = pg_catalog.to_regclass('public.pto_requests')),
-       CASE
+SELECT pg_catalog.to_regclass('public._prisma_migrations') IS NOT NULL AS has_ledger
+\gset
+\if :has_ledger
+SELECT CASE
          WHEN EXISTS (SELECT 1 FROM public._prisma_migrations
                       WHERE migration_name = '20261119120000_enforce_pto_non_overlap'
                         AND rolled_back_at IS NULL AND finished_at IS NULL) THEN 'pending'
@@ -131,7 +131,28 @@ SELECT pg_catalog.pg_export_snapshot(),
                       WHERE migration_name = '20261119120000_enforce_pto_non_overlap'
                         AND rolled_back_at IS NULL AND finished_at IS NOT NULL) THEN 'applied'
          ELSE 'absent'
-       END;
+       END AS migration_state
+\gset
+\else
+SELECT CASE WHEN EXISTS (
+         SELECT 1 FROM pg_catalog.pg_namespace AS n
+         WHERE n.nspname = 'public'
+           AND NOT EXISTS (
+             SELECT 1 FROM pg_catalog.pg_depend AS d
+             WHERE d.refclassid = 'pg_catalog.pg_namespace'::pg_catalog.regclass
+               AND d.refobjid = n.oid
+           )
+       ) THEN 'empty'
+       ELSE 'no_ledger'
+       END AS migration_state
+\gset
+\endif
+SELECT pg_catalog.pg_export_snapshot(),
+       EXISTS (SELECT 1 FROM pg_catalog.pg_extension WHERE extname = 'btree_gist'),
+       EXISTS (SELECT 1 FROM pg_catalog.pg_constraint
+               WHERE conname = 'pto_requests_no_owner_overlap' AND contype = 'x'
+                 AND conrelid = pg_catalog.to_regclass('public.pto_requests')),
+       :'migration_state';
 SQL
   then
     fail "could not start the database snapshot transaction" 2
@@ -151,7 +172,8 @@ SQL
     *) fail "unexpected constraint state in the exported snapshot" 2 ;;
   esac
   case "${migration_state}:${constraint_present}" in
-    absent:f|applied:t) ;;
+    empty:f|absent:f|applied:t) ;;
+    no_ledger:*) fail "no Prisma ledger and public is not an empty schema; refusing to upload" 2 ;;
     pending:*) fail "the PTO overlap migration is unfinished; retry the backup after migration recovery or completion" 2 ;;
     *) fail "the PTO overlap constraint and the migration history disagree; refusing to upload" 2 ;;
   esac

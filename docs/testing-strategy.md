@@ -589,6 +589,10 @@ the narrow extension selection, the fail-closed rules and the unchanged
 encryption/upload settings) is asserted statically as well. The
 database-backed tests keep the existing conditional local skip; CI requires
 them.
+The missing-ledger regression test runs the backup script's snapshot query
+against real disposable PostgreSQL. An empty `public` schema can be backed
+up for recovery; a schema containing an object with no migration ledger is
+refused before dumping or uploading.
 
 ### 10.3 Caching
 - Cache `node_modules` and Playwright browsers keyed on lockfile hashes.

@@ -315,6 +315,10 @@ otherwise. Such an archive must never be uploaded.
   #257 migration or a schema that disagrees with its recorded migration
   status, including the window between the DDL commit and Prisma's final
   ledger update. No row data, connection detail or snapshot ID is logged;
+- when there is no Prisma ledger, accepts only an existing `public` schema
+  with no dependent objects. The restore script creates `public` if needed
+  and still requires an encrypted pre-restore backup. Do not remove or
+  fabricate a ledger to make a populated target pass this check;
 - adds `--extension=btree_gist` to the schema dump **only when the snapshot
   has the extension**. A database that predates the migration is dumped
   exactly as before, so an older backup is never blocked;
