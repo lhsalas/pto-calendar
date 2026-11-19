@@ -111,6 +111,46 @@ describe('requireAuth', () => {
     expect(next).toHaveBeenCalledWith();
   });
 
+  it('keeps the replay nonce of the session when it refreshes the session user', async () => {
+    const req = {
+      session: {
+        user: { id: 'u1', role: 'member' as const, sessionVersion: 0, replayNonce: 'n-1' },
+      },
+    } as unknown as Request;
+    const res = makeRes();
+    const next = vi.fn() as unknown as NextFunction;
+    findUniqueMock
+      .mockResolvedValueOnce({ id: 'u1', role: 'member' })
+      .mockResolvedValueOnce({ sessionVersion: 0 });
+
+    await requireAuth(req, res as Response, next);
+
+    expect(req.user).toEqual({
+      id: 'u1',
+      role: 'member',
+      sessionVersion: 0,
+      replayNonce: 'n-1',
+    });
+    expect(req.session?.user).toMatchObject({ replayNonce: 'n-1' });
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('does not invent a replay nonce for a session that never had one', async () => {
+    const req = {
+      session: { user: { id: 'u1', role: 'member' as const, sessionVersion: 0 } },
+    } as unknown as Request;
+    const res = makeRes();
+    const next = vi.fn() as unknown as NextFunction;
+    findUniqueMock
+      .mockResolvedValueOnce({ id: 'u1', role: 'member' })
+      .mockResolvedValueOnce({ sessionVersion: 0 });
+
+    await requireAuth(req, res as Response, next);
+
+    expect(req.user).not.toHaveProperty('replayNonce');
+    expect(next).toHaveBeenCalledWith();
+  });
+
   it('serves the role from cache while checking session version', async () => {
     const sessionUser = { id: 'u2', role: 'member' as const, sessionVersion: 0 };
     findUniqueMock

@@ -6,6 +6,15 @@ export interface SessionUser {
   id: string;
   role: 'member' | 'team_lead' | 'admin';
   sessionVersion: number;
+  /**
+   * A random per-login nonce that scopes a keyed create to this session.
+   *
+   * It is server state inside the signed cookie, never a credential and never
+   * part of an API response. A session created before this field existed has
+   * no nonce: it may still create without a key, but a keyed request is
+   * refused until the user signs in again.
+   */
+  replayNonce?: string;
 }
 
 export function cookieSessionMiddleware(): RequestHandler {

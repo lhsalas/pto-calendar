@@ -81,6 +81,27 @@ model PTORequest {
   @@map("pto_requests")
 }
 
+/// #258: the claim of one create key for one owner and credential. The row
+/// holds a digest of the key, a keyed fingerprint of the payload and the
+/// note-free result of the create. It references no PTO entry and no
+/// personal token, so a deleted entry or a revoked credential never erases or
+/// alters the stored result.
+model PtoCreateReplay {
+  id                 String    @id @default(uuid()) @db.Uuid
+  ownerId            String    @map("owner_id") @db.Uuid
+  credentialKind     String    @map("credential_kind") @db.VarChar(16)
+  credentialId       String    @map("credential_id") @db.Uuid
+  keyDigest          String    @map("key_digest") @db.Char(64)
+  payloadFingerprint String    @map("payload_fingerprint") @db.Char(64)
+  expiresAt          DateTime  @map("expires_at") @db.Timestamptz(3)
+  result             Json?     @db.JsonB
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([ownerId, credentialKind, credentialId, keyDigest], map: "pto_create_replays_scope_key")
+  @@index([expiresAt], map: "pto_create_replays_expires_at_idx")
+  @@map("pto_create_replays")
+}
+
 model AuditLog {
   id          String   @id @default(uuid()) @db.Uuid
   actorUserId String   @map("actor_user_id") @db.Uuid

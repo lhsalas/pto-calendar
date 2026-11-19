@@ -21,6 +21,7 @@ import {
   trustedOperatorActor,
   type AttributedActor,
 } from '../../src/services/audit/auditContext.js';
+import { clearFixtureCreateKeys, ptoCreateKey } from '../helpers/ptoCreateKey.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('Explicit disposable PostgreSQL DATABASE_URL is required');
@@ -116,6 +117,7 @@ describe('credential-attributed audit trail', () => {
 
   afterAll(async () => {
     try {
+      await clearFixtureCreateKeys(db, IDS);
       await db.auditLog.deleteMany({ where: { actorUserId: { in: IDS } } });
       await db.personalAccessToken.deleteMany({ where: { ownerId: { in: IDS } } });
       await db.pTORequest.deleteMany({ where: { userId: { in: IDS } } });
@@ -572,6 +574,7 @@ describe('credential-attributed audit trail', () => {
       const created = await request(app)
         .post('/pto')
         .set('Authorization', `Bearer ${issued.rawToken}`)
+        .set('Idempotency-Key', ptoCreateKey())
         .send({ startDate: '2026-05-12', endDate: '2026-05-12', dayPart: 'morning' });
       expect(created.status).toBe(201);
       const rows = await auditRows('pto_request', created.body.id as string);

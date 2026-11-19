@@ -21,6 +21,7 @@ import {
 import { TOKEN_SCOPES, type TokenScope } from '../../src/services/tokens/tokenDomain.js';
 import { resetUserPassword, setupAccount } from '../../src/services/users/UserService.js';
 import { trustedOperatorActor, type AuditActor } from '../../src/services/audit/auditContext.js';
+import { clearFixtureCreateKeys, ptoCreateKey } from '../helpers/ptoCreateKey.js';
 
 const { logs } = vi.hoisted(() => ({ logs: [] as string[] }));
 vi.mock('../../src/lib/logger.js', async () => {
@@ -190,6 +191,7 @@ describe('scoped PAT HTTP authorization on PostgreSQL', () => {
   });
   afterAll(async () => {
     try {
+      await clearFixtureCreateKeys(db, ids);
       await db.auditLog.deleteMany({ where: { actorUserId: { in: ids } } });
       await db.pTORequest.deleteMany({ where: { userId: { in: ids } } });
       await db.personalAccessToken.deleteMany({ where: { ownerId: { in: ids } } });
@@ -237,9 +239,9 @@ describe('scoped PAT HTTP authorization on PostgreSQL', () => {
         expect(detail.body.note).toBe(
           has('pto:notes:read') && (own || role !== 'member') ? 'stored private note' : null,
         );
-      const created = await request(app)
-        .post('/pto')
-        .set('Authorization', bearer)
+      const create = request(app).post('/pto').set('Authorization', bearer);
+      if (canCreate) create.set('Idempotency-Key', ptoCreateKey());
+      const created = await create
         .send({
           startDate: '2026-12-08',
           endDate: '2026-12-08',
@@ -603,7 +605,12 @@ describe('scoped PAT HTTP authorization on PostgreSQL', () => {
     const bearer = `Bearer ${issued.rawToken}`;
     const nextDay = { startDate: '2026-12-08', endDate: '2026-12-08', dayPart: 'all_day' };
     confidential(
-      await request(production).post('/pto').set('Authorization', bearer).send(nextDay).expect(201),
+      await request(production)
+        .post('/pto')
+        .set('Authorization', bearer)
+        .set('Idempotency-Key', ptoCreateKey())
+        .send(nextDay)
+        .expect(201),
     );
     for (const headers of [
       { Authorization: bearer, Origin: 'https://foreign.test' },

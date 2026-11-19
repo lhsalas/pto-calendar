@@ -739,6 +739,29 @@ paths:
         Origin, but foreign Origin is still rejected. Global limiting applies.
         Writes one internal audit row in the same transaction as the create;
         the row never contains the note text and is not returned.
+        PAT creates require an Idempotency-Key. Cookie creates may omit it;
+        a cookie client that wants to use one needs a session from a current
+        sign-in or account setup. A key belongs to one approved create
+        intent, owner and credential. Reuse that exact key and normalized
+        payload after an unknown outcome, only within the original 24-hour
+        window. Never retry automatically with a new key; reconcile if the
+        key has expired. A replay makes no change and writes no audit row.
+        It returns the original non-note result after checking current
+        authorization, with note null if viewing is no longer allowed or
+        the original row revision has changed or disappeared.
+      parameters:
+        - $ref: '#/components/parameters/RequestIdHeader'
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >
+            Required for PAT creates, optional for cookie creates. Exactly
+            one v1 key with UTC Unix milliseconds and a lowercase UUIDv4.
+            The key expires at its embedded time plus 24 hours. An embedded
+            time more than 120 seconds in the future is invalid.
+          schema:
+            type: string
+            pattern: '^v1\.[0-9]{13}\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
       requestBody:
         required: true
         content:
@@ -747,16 +770,25 @@ paths:
               $ref: '#/components/schemas/CreatePTORequest'
       responses:
         '201':
-          description: PTO created
+          description: PTO created or original successful outcome replayed
           headers:
             X-Request-Id:
               schema: { type: string, format: uuid }
+            Idempotency-Replayed:
+              description: Present for keyed success; indicates whether a previously committed result was used.
+              schema: { type: string, enum: ['false', 'true'] }
+            Idempotency-Key-Expires-At:
+              description: Keyed success only. Absolute UTC retry deadline; replay does not extend it.
+              schema: { type: string, format: date-time }
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/PTO'
         '400':
-          description: Validation error
+          description: >
+            Invalid body or malformed, duplicate, or future key
+            (VALIDATION_ERROR); or IDEMPOTENCY_KEY_REQUIRED for an authorized
+            PAT create without a key.
           headers:
             X-Request-Id:
               schema: { type: string, format: uuid }
@@ -765,7 +797,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '401':
-          description: Not authenticated
+          description: Not authenticated; a legacy session without per-login identity must sign in again to use a key.
           headers:
             X-Request-Id:
               schema: { type: string, format: uuid }
@@ -782,6 +814,9 @@ paths:
             answer is the same for concurrent writes and for every credential
             type. A database transaction write conflict can also return 409,
             without claiming an overlap; no raw driver error is returned.
+            IDEMPOTENCY_CONFLICT means this credential already used the key
+            for a different normalized payload. IDEMPOTENCY_EXPIRED means the
+            original deadline elapsed, even after replay storage is pruned.
           headers:
             X-Request-Id:
               schema: { type: string, format: uuid }

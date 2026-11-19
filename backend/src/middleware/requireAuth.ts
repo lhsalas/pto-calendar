@@ -77,7 +77,13 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       });
       return;
     }
-    const authenticatedUser: SessionUser = { ...live, sessionVersion };
+    const authenticatedUser: SessionUser = {
+      ...live,
+      sessionVersion,
+      // The replay nonce belongs to this session and survives the refresh: it
+      // is what scopes a keyed create to the session that signed in.
+      ...(sessionUser.replayNonce ? { replayNonce: sessionUser.replayNonce } : {}),
+    };
     if (req.session) {
       req.session.user = authenticatedUser;
     }

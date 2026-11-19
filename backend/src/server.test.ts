@@ -571,6 +571,21 @@ describe('server', () => {
     });
   });
 
+  it('exposes only the two replay headers to a cross-origin reader', async () => {
+    const app = createApp();
+    const res = await request(app).get('/health').set('Origin', 'http://localhost:5173');
+    expect(res.status).toBe(200);
+    const exposed = res.headers['access-control-expose-headers'];
+    expect(exposed).toBeDefined();
+    expect(exposed).toContain('Idempotency-Replayed');
+    expect(exposed).toContain('Idempotency-Key-Expires-At');
+    // The origin, the credential policy and the allowed methods are unchanged.
+    expect(res.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+    expect(res.headers['access-control-allow-credentials']).toBe('true');
+    expect(exposed).not.toContain('Set-Cookie');
+    expect(exposed).not.toContain('Authorization');
+  });
+
   describe('trust proxy (app.set)', () => {
     const originalEnv = { ...process.env };
     const restoreEnv = (): void => {

@@ -514,6 +514,25 @@ encryption, the instance-principal upload, the target confirmation and the
 secret handling are unchanged, and the restore path (schema, then data, with
 the shared sanitizers) restores the extension before the constraint.
 
+**Atomic-overlap checkpoint:** #257 merged in PR #300 as
+`167eb0460649fa387b4240691053681ec834c424`. Master CI `44457818345` passed all
+ten non-waived jobs; no deployment ran. Schema and data backups share one
+PostgreSQL snapshot, including during an explicitly confirmed restore.
+
+**Create-replay scope (#258):** A verified PAT create requires one
+`Idempotency-Key`; cookie clients can still omit it. A key contains a UTC
+millisecond timestamp and a lowercase UUIDv4, expires after exactly
+24 hours, and is rejected if it is over 120 seconds ahead of database time.
+Within that window, one owner and credential can replay one canonical create
+intent and receive its original 201; a different payload returns
+`IDEMPOTENCY_CONFLICT`, and an expired key returns `IDEMPOTENCY_EXPIRED`
+even after cleanup. Distinct intents still obey #257. Keys, credentials
+and note text are not copied into replay storage. Replays recheck current
+authority and note visibility and never audit or mutate a second time.
+Future CLI/MCP adapters persist the key and deadline for one explicitly
+approved intent and reconcile unknown results at expiry; they must not
+generate a fresh key and automatically retry. No package or rollout here.
+
 Rows give the safe serial default. Parallel development is restricted to the
 approved waves below after prerequisites merge; every row is one deliverable/PR.
 

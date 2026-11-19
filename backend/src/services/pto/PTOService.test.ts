@@ -5,6 +5,7 @@ import type { AttributedActor } from '../audit/auditContext.js';
 import type { CreatePtoInput } from './schemas.js';
 import {
   createPto,
+  createPtoIdempotently,
   deletePto,
   findOverlapping,
   getPtoById,
@@ -12,6 +13,10 @@ import {
   toPublicPto,
   updatePto,
 } from './PTOService.js';
+import type { AuthContext } from '../auth/authContext.js';
+import { payloadFingerprint, signingKeys } from './createReplay.js';
+import type { ParsedPtoKey } from './idempotencyKey.js';
+import type { PtoReplayCredential } from './replayCredential.js';
 
 vi.mock('../../lib/prisma.js', () => {
   const pTORequest = {
@@ -22,9 +27,13 @@ vi.mock('../../lib/prisma.js', () => {
     delete: vi.fn(),
   };
   const auditLog = { create: vi.fn(), findMany: vi.fn() };
-  const tx = { pTORequest, auditLog };
+  const queryRaw = vi.fn();
+  const executeRaw = vi.fn();
+  const tx = { pTORequest, auditLog, $queryRaw: queryRaw, $executeRaw: executeRaw };
   const $transaction = vi.fn((fn: (txClient: typeof tx) => Promise<unknown>) => fn(tx));
-  return { prisma: { pTORequest, auditLog, $transaction } };
+  return {
+    prisma: { pTORequest, auditLog, $queryRaw: queryRaw, $executeRaw: executeRaw, $transaction },
+  };
 });
 
 import { prisma } from '../../lib/prisma.js';
@@ -35,6 +44,8 @@ const mockCreate = prisma.pTORequest.create as unknown as ReturnType<typeof vi.f
 const mockUpdate = prisma.pTORequest.update as unknown as ReturnType<typeof vi.fn>;
 const mockDelete = prisma.pTORequest.delete as unknown as ReturnType<typeof vi.fn>;
 const mockAuditCreate = prisma.auditLog.create as unknown as ReturnType<typeof vi.fn>;
+const mockQueryRaw = prisma.$queryRaw as unknown as ReturnType<typeof vi.fn>;
+const mockExecuteRaw = prisma.$executeRaw as unknown as ReturnType<typeof vi.fn>;
 const mockTx = prisma.$transaction as unknown as ReturnType<typeof vi.fn>;
 
 const USER_ID = '11111111-1111-1111-1111-111111111111';
@@ -1162,6 +1173,320 @@ describe('PTOService extended', () => {
       });
       expect(mockAuditCreate).not.toHaveBeenCalled();
     });
+  });
+
+  describe('createPtoIdempotently', () => {
+    const KEY: ParsedPtoKey = {
+      value: 'v1.1778284800000.11111111-1111-4111-8111-111111111111',
+      issuedAtMs: Date.parse('2026-05-10T00:00:00.000Z'),
+      expiresAt: new Date('2026-05-11T00:00:00.000Z'),
+    };
+    const INPUT = { startDate: '2026-05-11', endDate: '2026-05-11', dayPart: 'morning' as const };
+    const AUTH: AuthContext = {
+      method: 'session',
+      actor: { id: USER_ID, role: 'member' },
+      requestId: 'req-pto-1',
+    };
+    const PAT_WITHOUT_NOTES: AuthContext = {
+      method: 'pat',
+      actor: { id: USER_ID, role: 'member' },
+      requestId: 'req-pto-1',
+      tokenId: TOKEN_ID,
+      scopes: ['pto:read', 'pto:create'],
+      expiresAt: new Date('2026-06-01T00:00:00.000Z'),
+    };
+    const CREATED = {
+      id: PTO_ID,
+      userId: USER_ID,
+      version: 1,
+      startDate: new Date('2026-05-11T00:00:00.000Z'),
+      endDate: new Date('2026-05-11T00:00:00.000Z'),
+      dayPart: 'morning' as const,
+      note: 'Doctor',
+      createdAt: new Date('2026-05-01T10:00:00.000Z'),
+      updatedAt: new Date('2026-05-01T10:00:00.000Z'),
+    };
+    const SNAPSHOT = {
+      id: PTO_ID,
+      userId: USER_ID,
+      startDate: '2026-05-11',
+      endDate: '2026-05-11',
+      dayPart: 'morning',
+      version: 1,
+      createdAt: '2026-05-01T10:00:00.000Z',
+      updatedAt: '2026-05-01T10:00:00.000Z',
+    };
+    const BEFORE = new Date('2026-05-10T00:00:00.000Z');
+
+    function credential(
+      recheck: () => Promise<AuthContext> = async () => AUTH,
+    ): PtoReplayCredential {
+      return { ownerId: USER_ID, kind: 'pat', credentialId: TOKEN_ID, recheck: vi.fn(recheck) };
+    }
+
+    /** Answers the replay statements by their SQL text. */
+    function replayQueries(options: {
+      clock?: Date[];
+      claim?: unknown[];
+      stored?: unknown[];
+    }): void {
+      const clocks = options.clock ?? [BEFORE];
+      let clockCalls = 0;
+      mockQueryRaw.mockImplementation(async (sql: unknown) => {
+        const text = (sql as { text: string }).text;
+        if (text.includes('clock_timestamp() AS at')) {
+          const at = clocks[Math.min(clockCalls++, clocks.length - 1)]!;
+          return [{ at }];
+        }
+        if (text.includes('INSERT INTO')) return options.claim ?? [{ id: 'replay-id' }];
+        if (text.includes('SELECT "payload_fingerprint"')) return options.stored ?? [];
+        return [];
+      });
+    }
+
+    beforeEach(() => {
+      mockQueryRaw.mockReset();
+      mockExecuteRaw.mockReset();
+      mockExecuteRaw.mockResolvedValue(1);
+    });
+
+    it('claims the key, creates the entry and stores the note-free result', async () => {
+      replayQueries({});
+      mockFindFirst.mockResolvedValueOnce(null);
+      mockCreate.mockResolvedValueOnce(CREATED);
+      const recheck = vi.fn(async () => AUTH);
+
+      const outcome = await createPtoIdempotently(INPUT, KEY, credential(recheck));
+
+      expect(outcome.replayed).toBe(false);
+      expect(outcome.auth).toBe(AUTH);
+      expect(outcome.expiresAt).toEqual(KEY.expiresAt);
+      expect(outcome.row.id).toBe(PTO_ID);
+      expect(recheck).toHaveBeenCalledTimes(1);
+      expect(mockCreate).toHaveBeenCalledTimes(1);
+      expect(mockAuditCreate).toHaveBeenCalledTimes(1);
+      // The stored result carries the row metadata, never the note.
+      expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+      const stored = mockExecuteRaw.mock.calls[0]![0] as { values: unknown[] };
+      expect(JSON.stringify(stored.values)).not.toContain('Doctor');
+    });
+
+    it('replays the stored result without creating or auditing again', async () => {
+      replayQueries({
+        claim: [],
+        stored: [{ payloadFingerprint: fingerprintOf(), result: SNAPSHOT }],
+      });
+      mockFindUnique.mockResolvedValueOnce({
+        id: PTO_ID,
+        userId: USER_ID,
+        version: 1,
+        note: 'Doctor',
+      });
+
+      const outcome = await createPtoIdempotently(INPUT, KEY, credential());
+
+      expect(outcome.replayed).toBe(true);
+      expect(outcome.row.id).toBe(PTO_ID);
+      expect(outcome.row.note).toBe('Doctor');
+      expect(outcome.row.version).toBe(1);
+      expect(mockCreate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('keeps the note of a replayed entry only for the caller that may read it', async () => {
+      replayQueries({
+        claim: [],
+        stored: [{ payloadFingerprint: fingerprintOf(), result: SNAPSHOT }],
+      });
+      mockFindUnique.mockResolvedValueOnce({
+        id: PTO_ID,
+        userId: USER_ID,
+        version: 1,
+        note: 'Doctor',
+      });
+      const outcome = await createPtoIdempotently(
+        INPUT,
+        KEY,
+        credential(async () => PAT_WITHOUT_NOTES),
+      );
+
+      expect(outcome.row.note).toBeNull();
+    });
+
+    it('keeps a changed or deleted entry without its note and with its stored metadata', async () => {
+      replayQueries({
+        claim: [],
+        stored: [{ payloadFingerprint: fingerprintOf(), result: SNAPSHOT }],
+      });
+      mockFindUnique.mockResolvedValueOnce({
+        id: PTO_ID,
+        userId: USER_ID,
+        version: 2,
+        note: 'Changed note',
+      });
+
+      const changed = await createPtoIdempotently(INPUT, KEY, credential());
+      expect(changed.row.note).toBeNull();
+      expect(changed.row.version).toBe(1);
+      expect(changed.row.startDate).toEqual(new Date('2026-05-11T00:00:00.000Z'));
+
+      replayQueries({
+        claim: [],
+        stored: [{ payloadFingerprint: fingerprintOf(), result: SNAPSHOT }],
+      });
+      mockFindUnique.mockResolvedValueOnce(null);
+      const deleted = await createPtoIdempotently(INPUT, KEY, credential());
+      expect(deleted.row.note).toBeNull();
+      expect(deleted.row.id).toBe(PTO_ID);
+    });
+
+    it('refuses a key that was used for a different payload', async () => {
+      replayQueries({
+        claim: [],
+        stored: [{ payloadFingerprint: 'b'.repeat(64), result: SNAPSHOT }],
+      });
+
+      await expect(createPtoIdempotently(INPUT, KEY, credential())).rejects.toMatchObject({
+        status: 409,
+        code: 'IDEMPOTENCY_CONFLICT',
+      });
+      expect(mockCreate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('refuses a key that cannot be verified any more', async () => {
+      replayQueries({
+        claim: [],
+        stored: [{ payloadFingerprint: 'b'.repeat(64), result: SNAPSHOT }],
+      });
+
+      await expect(createPtoIdempotently(INPUT, KEY, credential())).rejects.toMatchObject({
+        status: 409,
+        code: 'IDEMPOTENCY_CONFLICT',
+      });
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    it('refuses a stored result whose shape is unknown', async () => {
+      replayQueries({
+        claim: [],
+        stored: [{ payloadFingerprint: fingerprintOf(), result: { id: 7 } }],
+      });
+
+      await expect(createPtoIdempotently(INPUT, KEY, credential())).rejects.toMatchObject({
+        status: 409,
+        code: 'IDEMPOTENCY_CONFLICT',
+      });
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    it('refuses an expired key before it claims anything', async () => {
+      replayQueries({ clock: [KEY.expiresAt] });
+
+      await expect(createPtoIdempotently(INPUT, KEY, credential())).rejects.toMatchObject({
+        status: 409,
+        code: 'IDEMPOTENCY_EXPIRED',
+      });
+      expect(mockCreate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('refuses an issuance timestamp too far ahead of database time', async () => {
+      replayQueries({ clock: [new Date(KEY.issuedAtMs - 120_001)] });
+      await expect(createPtoIdempotently(INPUT, KEY, credential())).rejects.toMatchObject({
+        status: 400,
+        code: 'VALIDATION_ERROR',
+      });
+      expect(mockCreate).not.toHaveBeenCalled();
+      expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a stored result naming a different owner', async () => {
+      replayQueries({
+        claim: [],
+        stored: [{ payloadFingerprint: fingerprintOf(), result: { ...SNAPSHOT, userId: 'other' } }],
+      });
+      await expect(createPtoIdempotently(INPUT, KEY, credential())).rejects.toMatchObject({
+        status: 409,
+        code: 'IDEMPOTENCY_CONFLICT',
+      });
+      expect(mockFindUnique).not.toHaveBeenCalled();
+    });
+
+    it('does not return a replay if the rechecked PAT expires while recovering the note', async () => {
+      const pat = { ...PAT_WITHOUT_NOTES, expiresAt: new Date(BEFORE.getTime() + 1000) };
+      replayQueries({
+        clock: [BEFORE, BEFORE, pat.expiresAt],
+        claim: [],
+        stored: [{ payloadFingerprint: fingerprintOf(), result: SNAPSHOT }],
+      });
+      mockFindUnique.mockResolvedValueOnce(null);
+      await expect(
+        createPtoIdempotently(
+          INPUT,
+          KEY,
+          credential(async () => pat),
+        ),
+      ).rejects.toMatchObject({
+        status: 401,
+        code: 'UNAUTHENTICATED',
+      });
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('refuses a key that expired while it waited for the other writer', async () => {
+      replayQueries({ clock: [BEFORE, KEY.expiresAt] });
+
+      await expect(createPtoIdempotently(INPUT, KEY, credential())).rejects.toMatchObject({
+        status: 409,
+        code: 'IDEMPOTENCY_EXPIRED',
+      });
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    it('refuses a key whose stored row is gone', async () => {
+      replayQueries({ claim: [], stored: [] });
+
+      await expect(createPtoIdempotently(INPUT, KEY, credential())).rejects.toMatchObject({
+        status: 409,
+        code: 'IDEMPOTENCY_CONFLICT',
+      });
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    it('keeps the overlap answer of the preflight and writes no audit row', async () => {
+      replayQueries({});
+      mockFindFirst.mockResolvedValueOnce({ id: 'another-id' });
+
+      await expect(createPtoIdempotently(INPUT, KEY, credential())).rejects.toMatchObject({
+        status: 409,
+        code: 'CONFLICT',
+      });
+      expect(mockCreate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('removes expired rows in a bounded selection', async () => {
+      replayQueries({});
+      mockFindFirst.mockResolvedValueOnce(null);
+      mockCreate.mockResolvedValueOnce(CREATED);
+
+      await createPtoIdempotently(INPUT, KEY, credential());
+
+      const cleanup = mockQueryRaw.mock.calls.find((call) =>
+        (call[0] as { text: string }).text.includes('DELETE FROM'),
+      );
+      expect(cleanup).toBeDefined();
+      expect((cleanup![0] as { text: string }).text).toContain('SKIP LOCKED');
+    });
+
+    /** The fingerprint of the stored payload under the active signing key. */
+    function fingerprintOf(): string {
+      return payloadFingerprint(
+        { startDate: '2026-05-11', endDate: '2026-05-11', dayPart: 'morning', note: null },
+        signingKeys()[0]!,
+      );
+    }
   });
 
   describe('toPublicPto', () => {

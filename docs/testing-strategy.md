@@ -594,6 +594,14 @@ against real disposable PostgreSQL. An empty `public` schema can be backed
 up for recovery; a schema containing an object with no migration ledger is
 refused before dumping or uploading.
 
+**Create-replay verification (#258):** Real PostgreSQL tests hold a claim
+transaction and observe the second writer's database lock. They assert
+one committed PTO/audit for two identical calls, recovery after the first
+rolls back, and recovery after commit without a successful first reply.
+They also cover credential/payload isolation, expired keys after cleanup,
+authorization changes during the wait, and a note changed or removed after
+creation. Existing overlap, audit and browser compatibility cases remain.
+
 ### 10.3 Caching
 - Cache `node_modules` and Playwright browsers keyed on lockfile hashes.
 

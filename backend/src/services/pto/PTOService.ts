@@ -9,6 +9,27 @@ import type { AttributedActor } from '../audit/auditContext.js';
 import { validatePtoPatch, validatePtoPayload, type ValidatedPto } from './validation.js';
 import { staleWrite } from './preconditions.js';
 import { ownerOverlapConflict, throwIfPtoWriteConflict } from './constraintErrors.js';
+import {
+  cleanupExpiredReplays,
+  claimReplay,
+  databaseClock,
+  fingerprintMatches,
+  idempotencyConflict,
+  idempotencyExpired,
+  keyDigest,
+  parseReplayResult,
+  payloadFingerprint,
+  readReplay,
+  signingKeys,
+  storeReplayResult,
+  type PtoCreateReplayResult,
+  type PtoReplayScope,
+} from './createReplay.js';
+import { attributedActorFromAuth } from '../audit/auditContext.js';
+import { redactPtoNote } from '../authorization/patPolicy.js';
+import type { AuthContext } from '../auth/authContext.js';
+import { IDEMPOTENCY_MAX_FUTURE_MS, type ParsedPtoKey } from './idempotencyKey.js';
+import type { PtoReplayCredential } from './replayCredential.js';
 import type { CreatePtoInput, PatchPtoInput } from './schemas.js';
 
 export type PublicPto = Pick<
@@ -224,6 +245,44 @@ async function guardedDelete(
 }
 
 /**
+ * Creates the row and its audit row on one transaction. The ordinary create
+ * and the keyed create share it, so both write the same row and the same
+ * audit summary.
+ */
+async function createRowWithAudit(
+  tx: Prisma.TransactionClient,
+  actor: AttributedActor,
+  validated: ValidatedPto,
+): Promise<PublicPto> {
+  const row = await tx.pTORequest.create({
+    data: {
+      userId: actor.id,
+      startDate: toDateOnly(validated.startDate),
+      endDate: toDateOnly(validated.endDate),
+      dayPart: validated.dayPart,
+      note: validated.note,
+    },
+    select: PUBLIC_PTO_SELECT,
+  });
+  await recordAudit(
+    auditEntryFor(actor, {
+      action: 'create_pto',
+      entityType: 'pto_request',
+      entityId: row.id,
+      targetOwnerId: row.userId,
+      details: {
+        startDate: validated.startDate,
+        endDate: validated.endDate,
+        dayPart: validated.dayPart,
+        noteWritten: validated.note !== null,
+      },
+    }),
+    tx,
+  );
+  return row;
+}
+
+/**
  * The authenticated actor becomes the owner, and the create plus its audit row
  * commit together. Audit details carry dates, day part and whether a note was
  * written, never the note text.
@@ -235,34 +294,157 @@ export async function createPto(actor: AttributedActor, input: CreatePtoInput): 
     ownerOverlapConflict();
   }
   try {
-    return await prisma.$transaction(async (tx) => {
-      const row = await tx.pTORequest.create({
-        data: {
-          userId: actor.id,
-          startDate: toDateOnly(validated.startDate),
-          endDate: toDateOnly(validated.endDate),
-          dayPart: validated.dayPart,
-          note: validated.note,
-        },
-        select: PUBLIC_PTO_SELECT,
-      });
-      await recordAudit(
-        auditEntryFor(actor, {
-          action: 'create_pto',
-          entityType: 'pto_request',
-          entityId: row.id,
-          targetOwnerId: row.userId,
-          details: {
-            startDate: validated.startDate,
-            endDate: validated.endDate,
-            dayPart: validated.dayPart,
-            noteWritten: validated.note !== null,
-          },
-        }),
-        tx,
-      );
-      return row;
-    });
+    return await prisma.$transaction(async (tx) => createRowWithAudit(tx, actor, validated));
+  } catch (err) {
+    throwIfPtoWriteConflict(err);
+    rethrowSafeDriverFailure(err);
+  }
+}
+
+/** What one keyed create returns to the route. */
+export interface PtoCreateOutcome {
+  /** The created or replayed row. Its note follows the current note policy. */
+  row: PublicPto;
+  /** The authorization as it was inside the transaction. */
+  auth: AuthContext;
+  /** True when the stored result of an earlier create was returned. */
+  replayed: boolean;
+  /** When the key expires, in UTC. */
+  expiresAt: Date;
+}
+
+/** The note-free snapshot of a created row. */
+function replaySnapshot(row: PublicPto): PtoCreateReplayResult {
+  return {
+    id: row.id,
+    userId: row.userId,
+    startDate: fromDateOnly(row.startDate),
+    endDate: fromDateOnly(row.endDate),
+    dayPart: row.dayPart,
+    version: row.version,
+    createdAt: toIso(row.createdAt),
+    updatedAt: toIso(row.updatedAt),
+  };
+}
+
+/**
+ * Rebuilds the answer of a replay.
+ *
+ * The stored result keeps the identity, the dates, the day part and the
+ * version of the row unchanged. The note is recovered only for the same
+ * immutable record, that is the same owner, id and version, and only when
+ * the current caller may read it; otherwise the note stays null.
+ */
+async function replayedRow(
+  tx: Prisma.TransactionClient,
+  auth: AuthContext,
+  stored: PtoCreateReplayResult,
+): Promise<PublicPto> {
+  const current = await tx.pTORequest.findUnique({
+    where: { id: stored.id },
+    select: { id: true, userId: true, version: true, note: true },
+  });
+  const sameRecord =
+    current !== null && current.userId === stored.userId && current.version === stored.version;
+  const visible = redactPtoNote(auth, {
+    userId: stored.userId,
+    note: sameRecord ? current.note : null,
+  });
+  return {
+    id: stored.id,
+    userId: stored.userId,
+    startDate: toDateOnly(stored.startDate),
+    endDate: toDateOnly(stored.endDate),
+    dayPart: stored.dayPart,
+    note: visible.note,
+    version: stored.version,
+    createdAt: new Date(stored.createdAt),
+    updatedAt: new Date(stored.updatedAt),
+  };
+}
+
+async function assertReplayStillLive(
+  tx: Prisma.TransactionClient,
+  key: ParsedPtoKey,
+  auth: AuthContext,
+): Promise<void> {
+  const now = (await databaseClock(tx)).getTime();
+  if (auth.method === 'pat' && now >= auth.expiresAt.getTime()) {
+    throw new HttpError(401, 'UNAUTHENTICATED', 'Authentication is required.');
+  }
+  if (now >= key.expiresAt.getTime()) idempotencyExpired();
+}
+
+/**
+ * Creates one PTO entry under a client key.
+ *
+ * The key is claimed first, in the same transaction as the create, so two
+ * concurrent writers with one key cannot both create. The claim waits for a
+ * concurrent claim of the same key and then reads the stored row in a separate
+ * statement, so the answer uses the committed row and never the snapshot
+ * from before the wait. Every expiry decision uses the database clock, and
+ * the live credential decides the access before a stored result or a
+ * mismatch is reported. Nothing is retried automatically.
+ */
+export async function createPtoIdempotently(
+  input: CreatePtoInput,
+  key: ParsedPtoKey,
+  credential: PtoReplayCredential,
+): Promise<PtoCreateOutcome> {
+  const validated: ValidatedPto = validatePtoPayload(input);
+  const keys = signingKeys();
+  const fingerprint = payloadFingerprint(validated, keys[0]!);
+  const scope: PtoReplayScope = {
+    ownerId: credential.ownerId,
+    kind: credential.kind,
+    credentialId: credential.credentialId,
+    keyDigest: keyDigest(key.value),
+  };
+  try {
+    return await prisma.$transaction(
+      async (tx) => {
+        // The database clock bounds admission even when application hosts differ.
+        const now = (await databaseClock(tx)).getTime();
+        if (key.issuedAtMs > now + IDEMPOTENCY_MAX_FUTURE_MS) {
+          throw new HttpError(
+            400,
+            'VALIDATION_ERROR',
+            'The Idempotency-Key timestamp is in the future.',
+          );
+        }
+        if (now >= key.expiresAt.getTime()) idempotencyExpired();
+        const claim = await claimReplay(tx, { ...scope, fingerprint, expiresAt: key.expiresAt });
+        // The claim can block. Get current authority and recheck the deadline
+        // before returning any saved state, mismatch, or new result.
+        const auth = await credential.recheck(tx);
+        await assertReplayStillLive(tx, key, auth);
+        if (!claim.claimed) {
+          const stored = await readReplay(tx, scope);
+          if (!stored || !fingerprintMatches(stored.payloadFingerprint, validated, keys))
+            idempotencyConflict();
+          const result = parseReplayResult(stored.result);
+          if (!result || result.userId !== scope.ownerId) idempotencyConflict();
+          const row = await replayedRow(tx, auth, result);
+          await assertReplayStillLive(tx, key, auth);
+          return { row, auth, replayed: true, expiresAt: key.expiresAt };
+        }
+        await cleanupExpiredReplays(tx);
+        const actor = attributedActorFromAuth(auth);
+        const overlap = await findOverlapping(
+          actor.id,
+          validated.startDate,
+          validated.endDate,
+          undefined,
+          tx,
+        );
+        if (overlap) ownerOverlapConflict();
+        const created = await createRowWithAudit(tx, actor, validated);
+        await storeReplayResult(tx, claim.id, replaySnapshot(created));
+        await assertReplayStillLive(tx, key, auth);
+        return { row: created, auth, replayed: false, expiresAt: key.expiresAt };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
+    );
   } catch (err) {
     throwIfPtoWriteConflict(err);
     rethrowSafeDriverFailure(err);
