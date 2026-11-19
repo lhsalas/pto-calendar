@@ -734,6 +734,83 @@ describe('PTO edit / delete / detail / audit', () => {
     });
   });
 
+  describe('a record that disappears after the authorized read', () => {
+    beforeEach(async () => {
+      const agent = request.agent(app);
+      await login(agent, SEED.dev1.email, SEED.dev1.password);
+      ownPtoId = await createOwnPto(agent);
+    });
+
+    it.each(['put', 'patch', 'delete'] as const)(
+      'reports a stale write for a %s when the record disappears before the transaction',
+      async (method) => {
+        // Return the observed row to the route after removing our synthetic
+        // fixture. The route authorizes the observation; the transaction
+        // must classify the subsequent missing row as stale.
+        const original = appPrisma.pTORequest.findUnique.bind(appPrisma.pTORequest);
+        let injected = false;
+        const spy = vi.spyOn(appPrisma.pTORequest, 'findUnique').mockImplementation((async (
+          ...args: unknown[]
+        ) => {
+          const row = await (original as (...a: unknown[]) => Promise<unknown>)(...args);
+          if (!injected && row && typeof row === 'object' && 'id' in row && row.id === ownPtoId) {
+            injected = true;
+            await prisma.pTORequest.delete({ where: { id: ownPtoId } });
+          }
+          return row;
+        }) as never);
+        const agent = request.agent(app);
+        try {
+          await login(agent, SEED.dev1.email, SEED.dev1.password);
+          const res =
+            method === 'put'
+              ? await agent
+                  .put(`/pto/${ownPtoId}`)
+                  .set('If-Match', ifMatch(1))
+                  .send({ startDate: '2026-05-12', endDate: '2026-05-12', dayPart: 'evening' })
+              : method === 'patch'
+                ? await agent
+                    .patch(`/pto/${ownPtoId}`)
+                    .set('If-Match', ifMatch(1))
+                    .send({ dayPart: 'evening' })
+                : await agent.delete(`/pto/${ownPtoId}`).set('If-Match', ifMatch(1));
+          expect(injected).toBe(true);
+          expect(res.status).toBe(412);
+          expect(res.body.error.code).toBe('STALE_WRITE');
+          // The answer names neither the note nor the version.
+          expect(JSON.stringify(res.body)).not.toContain('Doctor');
+          expect(JSON.stringify(res.body)).not.toContain('version');
+          // The lost race writes no success audit row.
+          const audit = await auditRowsFor(ownPtoId);
+          expect(audit).toHaveLength(1);
+          expect(audit[0]?.action).toBe('create_pto');
+        } finally {
+          spy.mockRestore();
+        }
+      },
+    );
+
+    it('keeps a record that was never there a missing record', async () => {
+      const agent = request.agent(app);
+      await login(agent, SEED.dev1.email, SEED.dev1.password);
+      const missing = '00000000-0000-0000-0000-000000000000';
+      for (const res of [
+        await agent
+          .put(`/pto/${missing}`)
+          .set('If-Match', ifMatch(1))
+          .send({ startDate: '2026-05-12', endDate: '2026-05-12', dayPart: 'evening' }),
+        await agent
+          .patch(`/pto/${missing}`)
+          .set('If-Match', ifMatch(1))
+          .send({ dayPart: 'evening' }),
+        await agent.delete(`/pto/${missing}`).set('If-Match', ifMatch(1)),
+      ]) {
+        expect(res.status).toBe(404);
+        expect(res.body.error.code).toBe('NOT_FOUND');
+      }
+    });
+  });
+
   describe('DELETE /pto/:id', () => {
     beforeEach(async () => {
       const agent = request.agent(app);

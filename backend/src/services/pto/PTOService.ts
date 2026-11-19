@@ -165,6 +165,30 @@ async function readLiveRow(tx: Prisma.TransactionClient, id: string): Promise<Li
 }
 
 /**
+ * The live row of a write.
+ *
+ * The route reads the record and authorizes the caller for it before the
+ * transaction starts. When that prior observation exists, a record that
+ * disappeared or changed owner in between is a stale write, not a missing
+ * record: the caller's version no longer describes the stored record. Without
+ * that observation a missing record stays a missing record, and a foreign one
+ * stays forbidden.
+ */
+function assertLiveRecord(
+  existing: LivePtoRow | null,
+  authorizedOwnerId: string | undefined,
+): LivePtoRow {
+  if (!existing) {
+    if (authorizedOwnerId !== undefined) staleWrite();
+    throw new HttpError(404, 'NOT_FOUND', 'PTO entry not found.');
+  }
+  if (authorizedOwnerId !== undefined && existing.userId !== authorizedOwnerId) {
+    staleWrite();
+  }
+  return existing;
+}
+
+/**
  * The write is guarded by the id, the owner and the expected version, so a
  * record that changed in the meantime is never overwritten. The guarded write
  * that finds no row is a lost race, not a success.
@@ -251,19 +275,21 @@ export async function createPto(actor: AttributedActor, input: CreatePtoInput): 
  * Replaces the record. The write names the revision it read, so a stale
  * snapshot is refused instead of overwriting a newer one, and the guarded
  * update and its audit row commit together.
+ *
+ * `authorizedOwnerId` is the owner the caller was authorized for in the read
+ * that preceded this write. It turns a record that vanished or changed owner
+ * in between into a stale write instead of a missing or forbidden record.
  */
 export async function updatePto(
   actor: AttributedActor,
   id: string,
   input: CreatePtoInput,
   expectedVersion: number,
+  authorizedOwnerId?: string,
 ): Promise<PublicPto> {
   try {
     return await prisma.$transaction(async (tx) => {
-      const existing = await readLiveRow(tx, id);
-      if (!existing) {
-        throw new HttpError(404, 'NOT_FOUND', 'PTO entry not found.');
-      }
+      const existing = assertLiveRecord(await readLiveRow(tx, id), authorizedOwnerId);
       if (!canModifyPTO(actor, existing)) {
         throw new HttpError(403, 'FORBIDDEN', 'You are not allowed to modify this PTO entry.');
       }
@@ -327,19 +353,21 @@ export async function updatePto(
  * the same rules as a fresh record. The write names the revision it read and
  * is guarded by it, so a stale snapshot is refused instead of overwriting a
  * newer one.
+ *
+ * `authorizedOwnerId` is the owner the caller was authorized for in the read
+ * that preceded this write. It turns a record that vanished or changed owner
+ * in between into a stale write instead of a missing or forbidden record.
  */
 export async function patchPto(
   actor: AttributedActor,
   id: string,
   patch: PatchPtoInput,
   expectedVersion: number,
+  authorizedOwnerId?: string,
 ): Promise<PublicPto> {
   try {
     return await prisma.$transaction(async (tx) => {
-      const existing = await readLiveRow(tx, id);
-      if (!existing) {
-        throw new HttpError(404, 'NOT_FOUND', 'PTO entry not found.');
-      }
+      const existing = assertLiveRecord(await readLiveRow(tx, id), authorizedOwnerId);
       if (!canModifyPTO(actor, existing)) {
         throw new HttpError(403, 'FORBIDDEN', 'You are not allowed to modify this PTO entry.');
       }
@@ -402,18 +430,20 @@ export async function patchPto(
 /**
  * The delete returns the removed row, so the audit summary describes exactly what was removed.
  * The delete names the revision it read, so a newer record is never removed.
+ *
+ * `authorizedOwnerId` is the owner the caller was authorized for in the read
+ * that preceded this write. It turns a record that vanished or changed owner
+ * in between into a stale write instead of a missing or forbidden record.
  */
 export async function deletePto(
   actor: AttributedActor,
   id: string,
   expectedVersion: number,
+  authorizedOwnerId?: string,
 ): Promise<void> {
   try {
     await prisma.$transaction(async (tx) => {
-      const existing = await readLiveRow(tx, id);
-      if (!existing) {
-        throw new HttpError(404, 'NOT_FOUND', 'PTO entry not found.');
-      }
+      const existing = assertLiveRecord(await readLiveRow(tx, id), authorizedOwnerId);
       if (!canModifyPTO(actor, existing)) {
         throw new HttpError(403, 'FORBIDDEN', 'You are not allowed to delete this PTO entry.');
       }

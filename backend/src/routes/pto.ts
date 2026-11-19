@@ -86,7 +86,16 @@ ptoRouter.put('/:id', requireAuth, async (req, res, next) => {
       return;
     }
     assertPtoRecordAccess(req.auth!, 'update', existing);
-    const updated = await updatePto(attributedActorFromAuth(req.auth!), id, input, expectedVersion);
+    // The record this caller was just authorized for is the observation the
+    // write is based on: if it disappears or changes owner before the write,
+    // the write is stale rather than missing or forbidden.
+    const updated = await updatePto(
+      attributedActorFromAuth(req.auth!),
+      id,
+      input,
+      expectedVersion,
+      existing.userId,
+    );
     res.json(redactPtoNote(req.auth!, toPublicPto(updated)));
   } catch (err) {
     next(err);
@@ -109,7 +118,13 @@ ptoRouter.patch('/:id', requireAuth, async (req, res, next) => {
       return;
     }
     assertPtoRecordAccess(req.auth!, 'update', existing);
-    const patched = await patchPto(attributedActorFromAuth(req.auth!), id, patch, expectedVersion);
+    const patched = await patchPto(
+      attributedActorFromAuth(req.auth!),
+      id,
+      patch,
+      expectedVersion,
+      existing.userId,
+    );
     res.json(redactPtoNote(req.auth!, toPublicPto(patched)));
   } catch (err) {
     next(err);
@@ -126,7 +141,7 @@ ptoRouter.delete('/:id', requireAuth, async (req, res, next) => {
       return;
     }
     assertPtoRecordAccess(req.auth!, 'delete', existing);
-    await deletePto(attributedActorFromAuth(req.auth!), id, expectedVersion);
+    await deletePto(attributedActorFromAuth(req.auth!), id, expectedVersion, existing.userId);
     res.status(204).end();
   } catch (err) {
     next(err);

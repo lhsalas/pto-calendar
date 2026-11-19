@@ -159,6 +159,7 @@ describe('PTO HTTP scopes and note serialization', () => {
       id,
       body,
       1,
+      f.record.userId,
     );
     const notes = fixture({
       scopes: ['pto:create', 'pto:update:self', 'pto:read', 'pto:notes:read'],
@@ -284,6 +285,10 @@ describe('PTO HTTP scopes and note serialization', () => {
     expect(vi.mocked(createPto).mock.calls[0]![0]).toEqual(verified);
     expect(vi.mocked(updatePto).mock.calls[0]![0]).toEqual(verified);
     expect(vi.mocked(deletePto).mock.calls[0]![0]).toEqual(verified);
+    // Every write names the owner the route just authorized, so a record
+    // that disappears before the write is a stale write, not a missing one.
+    expect(vi.mocked(updatePto).mock.calls[0]![4]).toBe(f.record.userId);
+    expect(vi.mocked(deletePto).mock.calls[0]![3]).toBe(f.record.userId);
     expect(JSON.stringify(vi.mocked(createPto).mock.calls)).not.toContain('forged');
     expect(JSON.stringify(vi.mocked(updatePto).mock.calls)).not.toContain('forged');
     // A replacement write refuses the forged keys instead of ignoring them.
@@ -460,6 +465,7 @@ describe('PTO HTTP scopes and note serialization', () => {
       id,
       { endDate: '2026-12-02' },
       1,
+      f.record.userId,
     );
   });
 
@@ -480,6 +486,42 @@ describe('PTO HTTP scopes and note serialization', () => {
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
     }
     expect(patchPto).not.toHaveBeenCalled();
+  });
+
+  it('reports a stale write on every write route when the record disappears', async () => {
+    const f = fixture({ scopes: ['pto:update:self', 'pto:delete:self'] });
+    const stale = () =>
+      new HttpError(
+        412,
+        'STALE_WRITE',
+        'This PTO entry changed since it was loaded. Reload the entry and apply the change again.',
+      );
+    vi.mocked(updatePto).mockRejectedValueOnce(stale());
+    vi.mocked(patchPto).mockRejectedValueOnce(stale());
+    vi.mocked(deletePto).mockRejectedValueOnce(stale());
+    for (const res of [
+      await request(f.app)
+        .put(`/pto/${id}`)
+        .set('Authorization', f.bearer)
+        .set(IF_MATCH, VERSION)
+        .send(body)
+        .expect(412),
+      await request(f.app)
+        .patch(`/pto/${id}`)
+        .set('Authorization', f.bearer)
+        .set(IF_MATCH, VERSION)
+        .send({ dayPart: 'evening' })
+        .expect(412),
+      await request(f.app)
+        .delete(`/pto/${id}`)
+        .set('Authorization', f.bearer)
+        .set(IF_MATCH, VERSION)
+        .expect(412),
+    ]) {
+      expect(res.body.error.code).toBe('STALE_WRITE');
+      expect(JSON.stringify(res.body)).not.toContain('note');
+      expect(JSON.stringify(res.body)).not.toContain('version');
+    }
   });
 
   it('returns 404 for an unknown partial write', async () => {

@@ -669,6 +669,67 @@ describe('PTOService extended', () => {
       expect(mockAuditCreate).not.toHaveBeenCalled();
     });
 
+    it('reports a stale write when an authorized record disappears before the transaction', async () => {
+      // The route read and authorized the record; the transaction no longer
+      // finds it, so the write is stale and not a missing record.
+      mockFindUnique.mockResolvedValueOnce(null);
+
+      await expect(
+        updatePto(
+          ACTOR_MEMBER,
+          PTO_ID,
+          {
+            startDate: '2026-05-12',
+            endDate: '2026-05-12',
+            dayPart: 'morning',
+          },
+          1,
+          USER_ID,
+        ),
+      ).rejects.toMatchObject({ status: 412, code: 'STALE_WRITE' });
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('reports a stale write when an authorized record changed owner before the transaction', async () => {
+      mockFindUnique.mockResolvedValueOnce({ ...EXISTING_ROW, userId: OTHER_ID });
+
+      await expect(
+        updatePto(
+          ACTOR_MEMBER,
+          PTO_ID,
+          {
+            startDate: '2026-05-12',
+            endDate: '2026-05-12',
+            dayPart: 'morning',
+          },
+          1,
+          USER_ID,
+        ),
+      ).rejects.toMatchObject({ status: 412, code: 'STALE_WRITE' });
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('keeps a missing record missing without a prior authorized observation', async () => {
+      mockFindUnique.mockResolvedValueOnce(null);
+
+      await expect(
+        updatePto(
+          ACTOR_MEMBER,
+          PTO_ID,
+          {
+            startDate: '2026-05-12',
+            endDate: '2026-05-12',
+            dayPart: 'morning',
+          },
+          1,
+        ),
+      ).rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
     it('reports a lost race as a stale write and writes no audit row', async () => {
       mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
       mockFindFirst.mockResolvedValueOnce(null);
@@ -805,6 +866,29 @@ describe('PTOService extended', () => {
       expect(mockAuditCreate).not.toHaveBeenCalled();
     });
 
+    it('reports a stale write when an authorized record disappears before the transaction', async () => {
+      mockFindUnique.mockResolvedValueOnce(null);
+
+      await expect(
+        patchPto(ACTOR_MEMBER, PTO_ID, { dayPart: 'evening' }, 1, USER_ID),
+      ).rejects.toMatchObject({ status: 412, code: 'STALE_WRITE' });
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('keeps a missing record missing without a prior authorized observation', async () => {
+      mockFindUnique.mockResolvedValueOnce(null);
+
+      await expect(patchPto(ACTOR_MEMBER, PTO_ID, { dayPart: 'evening' }, 1)).rejects.toMatchObject(
+        {
+          status: 404,
+          code: 'NOT_FOUND',
+        },
+      );
+      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
     it('returns 409 when the merged record overlaps another PTO of the same user', async () => {
       mockFindUnique.mockResolvedValueOnce({ ...EXISTING_ROW, dayPart: 'all_day' });
       mockFindFirst.mockResolvedValueOnce({ id: 'another-id' });
@@ -934,6 +1018,39 @@ describe('PTOService extended', () => {
       mockAuditCreate.mockRejectedValueOnce(new Error('audit insert failed'));
       await expect(deletePto(ACTOR_MEMBER, PTO_ID, 1)).rejects.toThrow('audit insert failed');
       expect(mockDelete).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports a stale write when an authorized record disappears before the transaction', async () => {
+      mockFindUnique.mockResolvedValueOnce(null);
+
+      await expect(deletePto(ACTOR_MEMBER, PTO_ID, 1, USER_ID)).rejects.toMatchObject({
+        status: 412,
+        code: 'STALE_WRITE',
+      });
+      expect(mockDelete).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('reports a stale write when an authorized record changed owner before the transaction', async () => {
+      mockFindUnique.mockResolvedValueOnce({ ...EXISTING_ROW, userId: OTHER_ID });
+
+      await expect(deletePto(ACTOR_MEMBER, PTO_ID, 1, USER_ID)).rejects.toMatchObject({
+        status: 412,
+        code: 'STALE_WRITE',
+      });
+      expect(mockDelete).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('keeps a missing record missing without a prior authorized observation', async () => {
+      mockFindUnique.mockResolvedValueOnce(null);
+
+      await expect(deletePto(ACTOR_MEMBER, PTO_ID, 1)).rejects.toMatchObject({
+        status: 404,
+        code: 'NOT_FOUND',
+      });
+      expect(mockDelete).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
     });
 
     it('refuses a stale snapshot and a lost race without removing anything', async () => {
