@@ -128,6 +128,11 @@ Confirmed architecture:
   store, with owner-only file storage only by explicit opt-in. Resolve
   without prompting, and treat local removal separately from remote revoke.
   No requests, browser state or CLI/MCP protocol behavior are introduced.
+- **Read-only terminal client** (`cli/`) — the private `pto` executable
+  composes those two packages. Explicit setup handles hidden TTY or stdin;
+  status checks the same origin at `/auth/me`. List/get expose bounded reads,
+  sanitized output, and an explicit incomplete result. No cookie reuse,
+  remote mutations, or changes to the REST API or production flags.
 
 ## 4. Roles and Access Model
 
