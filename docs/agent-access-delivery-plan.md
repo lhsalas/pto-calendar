@@ -257,6 +257,15 @@ and failed `If-Match` remains 412 regardless of the chosen version encoding.
   argument; managed env injection is not a vault. Reject ambiguous origin/profile
   overrides; do not discover arbitrary cwd `.env` files. Local removal is not
   remote revocation. Never prompt for credentials mid-tool-call.
+
+  `packages/agent-auth` implements the local policy separately from the HTTP
+  client. Profiles record the selected Linux storage backend, origin and
+  explicit development HTTP opt-in. The resolved binding is safe to pass to
+  the API client only from the trusted host configuration path, never from
+  model/tool-supplied arguments. An unavailable or locked store does not
+  grant permission to use plaintext; prepare a separate explicit setup
+  method. Runtime-injected environment pairs are never written to either
+  store. This adds no live release, adapter command or server activation.
 - [#261], [#262]: `cli` provides auth set/status/local remove, list/get, human and
   stable JSON output/exit codes; data-only stdout and diagnostics on stderr.
   Writes preview exact actor/owner/ID/dates/diff, require interactive confirmation

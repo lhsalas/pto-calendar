@@ -122,6 +122,12 @@ Confirmed architecture:
 - **Health route** (`backend/src/routes/health.ts`) — `GET /health` (liveness, no DB) and `GET /ready` (readiness, DB probe)
 - **Shared Zod schemas** (`backend/src/services/auth/schemas.ts`, `backend/src/services/pto/schemas.ts`) — request validation defined once, imported by routes and the validation layer
 - **Shared API client module** (`packages/api-client/`) — the runtime-neutral typed REST client shared by the planned CLI and local MCP adapters: origin binding and credential injection, bounded read retries with real abort/deadline handling, the sanitized error envelope and the paged-read traversal with completeness metadata
+- **Local agent credential module** (`packages/agent-auth/`) — trusted-host
+  profile selection, exact origin binding, hidden setup input, and
+  separately redacted local status. Prefer a supported Linux Secret Service
+  store, with owner-only file storage only by explicit opt-in. Resolve
+  without prompting, and treat local removal separately from remote revoke.
+  No requests, browser state or CLI/MCP protocol behavior are introduced.
 
 ## 4. Roles and Access Model
 

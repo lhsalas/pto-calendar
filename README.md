@@ -9,7 +9,8 @@ pto-calendar/
 ├── backend/     # Node.js + Express + TypeScript + Prisma + PostgreSQL
 ├── frontend/    # React + TypeScript (Vite) + Tailwind CSS
 ├── packages/
-│   └── api-client/  # Shared typed HTTP client for the REST API (#259)
+│   ├── api-client/  # Shared typed HTTP client for the REST API (#259)
+│   └── agent-auth/  # Origin-bound local profiles for agent adapters (#260)
 └── docs/        # Project documentation (see below)
 ```
 
@@ -195,14 +196,14 @@ The standalone host flow (`npm run dev`) and the dev-only Postgres (`npm run db:
 | Command                       | Effect                                              |
 | ----------------------------- | --------------------------------------------------- |
 | `npm run dev`                 | Run backend + frontend together (concurrently)      |
-| `npm run build`               | Production build for all three workspaces           |
+| `npm run build`               | Build the apps and private workspaces               |
 | `npm run start`               | Start the compiled backend (`node dist/index.js`)   |
-| `npm run lint`                | ESLint across all three workspaces                  |
-| `npm run typecheck`           | `tsc --noEmit` in all three workspaces              |
+| `npm run lint`                | ESLint across all workspaces                        |
+| `npm run typecheck`           | `tsc --noEmit` in all workspaces                    |
 | `npm run format`              | Prettier write                                      |
 | `npm run format:check`        | Prettier check                                      |
-| `npm run test`                | Vitest unit suites in all three workspaces          |
-| `npm run test:coverage`       | Vitest with coverage for all three workspaces       |
+| `npm run test`                | Vitest unit suites in all workspaces                |
+| `npm run test:coverage`       | Vitest with coverage for all workspaces             |
 | `npm run test:e2e`            | Playwright E2E suite                                |
 | `npm run db:up` / `db:down`   | Docker compose for local Postgres                   |
 | `npm run db:migrate`          | `prisma migrate dev` (creates new migrations)       |
@@ -244,6 +245,11 @@ the local workspace source. See
 surface and the coverage policy, and
 [`docs/agent-access-delivery-plan.md`](docs/agent-access-delivery-plan.md) for
 the approved delivery contract.
+
+[`packages/agent-auth`](packages/agent-auth/README.md) holds the separate local
+credential resolver. It prefers a supported OS keyring, requires explicit
+opt-in for owner-only Linux plaintext files, and never sends a token to a
+different origin. This does not activate or release a CLI or MCP server.
 
 ## Seeded Dev Users
 

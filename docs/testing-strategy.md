@@ -30,12 +30,13 @@ This document defines the testing and automation strategy for the PTO calendar M
 | Backend integration | Vitest + Supertest | Boots Express app in-process |
 | Frontend unit/component | Vitest + React Testing Library | `@testing-library/user-event` for interactions |
 | Shared API client unit | Vitest | Runtime-neutral Node suite; service-free loopback fixtures only |
+| Local agent credential unit | Vitest | Fake store/terminal ports, private Linux temporary directories; never a real user keychain |
 | API mocking in component tests | MSW | Reuses OpenAPI schemas where possible |
 | E2E | Playwright | Strong cookie/session support, trace viewer, cross-browser |
 | Coverage | `@vitest/coverage-v8` | `text`, `lcov`, `json-summary` reporters |
 | Lint | ESLint | TypeScript + React plugins |
 | Format | Prettier | Hooked via lint-staged |
-| Type check | `tsc --noEmit` | Backend, frontend and shared API client in CI |
+| Type check | `tsc --noEmit` | Backend, frontend, shared API client and local agent credential package in CI |
 | Mutation (post-MVP) | Stryker | Optional, not enforced for MVP |
 
 React and React DOM use the same 19.x runtime line in the frontend and root
@@ -49,10 +50,10 @@ Mode, including cleanup of timers on unmount.
 Coverage targets are declared in `vitest.config.ts`. The backend unit CI job runs
 `npm run test:coverage -w backend` and enforces its configured thresholds. Its
 `backend-unit-coverage` artifact comes from `backend/coverage-unit`, separate
-from integration's `backend-coverage` (`backend/coverage`) and frontend's
-`frontend-coverage`. For local security changes, run that direct unit coverage
-command with a fake test-only environment; a plain `npm test` does not enforce
-the coverage thresholds.
+from integration's `backend-coverage` (`backend/coverage`), frontend's
+`frontend-coverage`, `api-client-coverage` and `agent-auth-coverage`. For local
+security changes, run that direct unit coverage command with a fake test-only
+environment; a plain `npm test` does not enforce the coverage thresholds.
 
 **Shared API client (#259):** `packages/api-client` is a third workspace with
 its own gate in `packages/api-client/vitest.config.ts`. The package totals
@@ -63,6 +64,26 @@ validation — require **100%** on every metric. Only test files are excluded
 from the report; no source file is exempt. The CI artifact is
 `api-client-coverage` (`packages/api-client/coverage`), produced by the
 `Frontend tests` job and required by the `Coverage gate` job.
+
+**Local agent credentials (#260):** `packages/agent-auth` adds matching root
+scripts and the `agent-auth-coverage` (`packages/agent-auth/coverage`)
+artifact. Its single instrumented unit run executes in the existing
+`Frontend tests` job, next to the frontend and #259 API-client runs; unlike the
+API client's separate test and coverage invocations, the credential workspace
+has one coverage-enforcing run. Its report is downloaded and summarized by the
+existing `Coverage gate` job; no job, required status check or existing
+artifact is renamed or replaced. Module totals require at least 90% lines,
+statements and functions and 80% branches. Credential selection, validation,
+file permissions, keyring transport and secret-entry paths require 100%
+TypeScript unit coverage on every metric. The existing backend, frontend and
+#259 API-client coverage floors are unchanged.
+
+The independent #260 provider rehearsal compiled the workspace and exercised
+exact-scope create/read/update/remove and locked refusal on disposable Gnome
+Keyring 51.1 on Fedora 45, with libsecret 0.21.8.2, PyGObject 3.58.1,
+Python 3.15.2 and a private D-Bus. It used no HTTP, desktop keychain, or real
+credentials. This tests one Linux provider combination; it does not replace
+the CI gates or certify other hosts or production.
 
 **Known baseline diagnostic (2026-11-15):** the coordinator reproduced
 `npm run test:coverage -w backend` failure on unchanged master `156cc6f` and the
@@ -83,7 +104,7 @@ diagnostics. The frontend keeps the previous core recommended-rule baseline;
 the three unrelated core additions in ESLint 10 are not enabled by this
 migration. Both workspaces use one ESLint version.
 
-Both workspaces declare TypeScript `~6.0.3`, resolving one 6.0.x compiler.
+All four workspaces declare TypeScript `~6.0.3`, resolving one 6.0.x compiler.
 This stays inside the existing typescript-eslint 8.72 peer range
 (`>=4.8.4 <6.1.0`); TypeScript 7 remains blocked by Dependabot's `>=7`
 ignore rule. Keep the strict compiler settings, NodeNext/backend and
@@ -506,22 +527,26 @@ Jobs (run in order, with `needs:` dependencies):
 | # | Job | Runs on | Needs | Steps |
 |---|---|---|---|---|
 | 1 | `lint` | ubuntu-latest | — | install, eslint, prettier check |
-| 2 | `typecheck` | ubuntu-latest | — | install, `tsc --noEmit` (backend + frontend + api-client) |
+| 2 | `typecheck` | ubuntu-latest | — | install, `tsc --noEmit` (backend + frontend + api-client + agent-auth) |
 | 3 | `test-backend-unit` | ubuntu-latest | — | backend unit suite with coverage and separate unit artifact |
 | 4 | `test-backend-integration` | ubuntu-latest + postgres + redis services | — | vitest run backend integration suite, coverage |
-| 5 | `test-frontend` | ubuntu-latest | — | vitest run frontend, coverage; then the independent api-client unit and coverage runs with the `api-client-coverage` artifact |
-| 6 | `build` | ubuntu-latest | lint, typecheck | build backend + frontend + api-client |
+| 5 | `test-frontend` | ubuntu-latest | — | vitest run frontend, coverage; then the independent api-client test/coverage runs and the single instrumented agent-auth unit run, with the `api-client-coverage` and `agent-auth-coverage` artifacts |
+| 6 | `build` | ubuntu-latest | lint, typecheck | build backend + frontend + api-client + agent-auth |
 | 7 | `deployment-config` | ubuntu-latest | lint, typecheck | validate OCI Compose/Caddy headers, deployment scripts, workflow guards, retirement isolation, supply-chain pins, and the Node.js runtime baseline |
 | 8 | `security` | ubuntu-latest | — | audit the locked npm graphs, scan the pinned production base images for OS and runtime vulnerabilities |
 | 9 | `e2e` | ubuntu-latest + postgres service | build | playwright install, playwright test, upload trace/video on failure |
 | 10 | `docker-smoke` | ubuntu-latest | build | start the all-in-one compose stack, poll `/health`, assert the images run the supported Node.js baseline, login + validate auto-seeded holidays + validate the seed endpoint, tear down with `-v` |
-| 11 | `coverage-gate` | ubuntu-latest | 3, 4, 5 | check integration/frontend/api-client reports exist; post coverage summary as PR comment |
+| 11 | `coverage-gate` | ubuntu-latest | 3, 4, 5 | check integration/frontend/api-client/agent-auth reports exist; post coverage summary as PR comment |
 
-The shared API client workspace (#259) is verified inside the existing
-`Frontend tests` job rather than in a new job, preserving all existing job
-names, artifacts and status checks. Its new `api-client-coverage`
-artifact is downloaded and summarized by the existing `Coverage gate` job
-alongside the backend and frontend reports.
+The shared API client (#259) and local agent credential (#260) workspaces are
+verified inside the existing `Frontend tests` job rather than in new jobs,
+preserving all existing job names, artifacts and status checks. The API client
+keeps separate test and coverage invocations; the credential workspace has one
+instrumented unit run. The `api-client-coverage` and `agent-auth-coverage`
+artifacts are downloaded and summarized by the existing `Coverage gate` job
+alongside the backend and frontend reports. The #259 API-client gate and the
+original backend and frontend gates keep their existing thresholds and per-path
+floors.
 
 ### 10.1a Node.js runtime baseline
 
@@ -768,20 +793,22 @@ assessment, an owner and an expiry date.
 ```
 
 The root `lint`, `typecheck`, `test`, `test:coverage` and `build` scripts run
-the backend, the frontend **and** the shared API client workspace
-(`packages/api-client`) in turn. The per-workspace form is
-`npm run <script> -w packages/api-client`.
+the backend, the frontend, the shared API client workspace
+(`packages/api-client`) and the local agent credential workspace
+(`packages/agent-auth`) in turn. The per-workspace form is
+`npm run <script> -w packages/api-client` or `-w packages/agent-auth`.
 
 ## 12. Reporting & Artifacts
 
 - Coverage uploaded as `lcov`; CI posts a Markdown diff comment on PRs.
 - CI artifacts: `backend-unit-coverage` (`backend/coverage-unit`),
   `backend-coverage` (`backend/coverage`), `frontend-coverage`
-  (`frontend/coverage`) and `api-client-coverage`
-  (`packages/api-client/coverage`).
-- The `Coverage gate` job requires the integration, frontend and API client
-  reports and summarizes their totals in the PR comment. The backend unit job
-  separately requires its own report.
+  (`frontend/coverage`), `api-client-coverage`
+  (`packages/api-client/coverage`) and `agent-auth-coverage`
+  (`packages/agent-auth/coverage`).
+- The `Coverage gate` job requires the integration, frontend, API client and
+  agent-auth reports and summarizes their totals in the PR comment. The
+  backend unit job separately requires its own report.
 - Playwright `trace.zip`, `video.webm`, and `junit.xml` uploaded on failure.
 - JUnit reports surfaced in the GitHub Actions UI summary.
 - Nightly coverage trend stored as artifact (post-MVP).
