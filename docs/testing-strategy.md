@@ -29,12 +29,13 @@ This document defines the testing and automation strategy for the PTO calendar M
 | Backend unit | Vitest | Matches Vite/TS stack; faster than Jest |
 | Backend integration | Vitest + Supertest | Boots Express app in-process |
 | Frontend unit/component | Vitest + React Testing Library | `@testing-library/user-event` for interactions |
+| Shared API client unit | Vitest | Runtime-neutral Node suite; service-free loopback fixtures only |
 | API mocking in component tests | MSW | Reuses OpenAPI schemas where possible |
 | E2E | Playwright | Strong cookie/session support, trace viewer, cross-browser |
 | Coverage | `@vitest/coverage-v8` | `text`, `lcov`, `json-summary` reporters |
 | Lint | ESLint | TypeScript + React plugins |
 | Format | Prettier | Hooked via lint-staged |
-| Type check | `tsc --noEmit` | Backend and frontend in CI |
+| Type check | `tsc --noEmit` | Backend, frontend and shared API client in CI |
 | Mutation (post-MVP) | Stryker | Optional, not enforced for MVP |
 
 React and React DOM use the same 19.x runtime line in the frontend and root
@@ -52,6 +53,16 @@ from integration's `backend-coverage` (`backend/coverage`) and frontend's
 `frontend-coverage`. For local security changes, run that direct unit coverage
 command with a fake test-only environment; a plain `npm test` does not enforce
 the coverage thresholds.
+
+**Shared API client (#259):** `packages/api-client` is a third workspace with
+its own gate in `packages/api-client/vitest.config.ts`. The package totals
+require at least **90%** lines, statements and functions and at least **80%**
+branches. The security-sensitive surfaces — origin binding, the sanitized
+error envelope, the transport and retry policy, the wire parser and input
+validation — require **100%** on every metric. Only test files are excluded
+from the report; no source file is exempt. The CI artifact is
+`api-client-coverage` (`packages/api-client/coverage`), produced by the
+`Frontend tests` job and required by the `Coverage gate` job.
 
 **Known baseline diagnostic (2026-11-15):** the coordinator reproduced
 `npm run test:coverage -w backend` failure on unchanged master `156cc6f` and the
@@ -495,16 +506,22 @@ Jobs (run in order, with `needs:` dependencies):
 | # | Job | Runs on | Needs | Steps |
 |---|---|---|---|---|
 | 1 | `lint` | ubuntu-latest | — | install, eslint, prettier check |
-| 2 | `typecheck` | ubuntu-latest | — | install, `tsc --noEmit` (backend + frontend) |
+| 2 | `typecheck` | ubuntu-latest | — | install, `tsc --noEmit` (backend + frontend + api-client) |
 | 3 | `test-backend-unit` | ubuntu-latest | — | backend unit suite with coverage and separate unit artifact |
 | 4 | `test-backend-integration` | ubuntu-latest + postgres + redis services | — | vitest run backend integration suite, coverage |
-| 5 | `test-frontend` | ubuntu-latest | — | vitest run frontend, coverage |
-| 6 | `build` | ubuntu-latest | lint, typecheck | build backend + frontend |
+| 5 | `test-frontend` | ubuntu-latest | — | vitest run frontend, coverage; then the independent api-client unit and coverage runs with the `api-client-coverage` artifact |
+| 6 | `build` | ubuntu-latest | lint, typecheck | build backend + frontend + api-client |
 | 7 | `deployment-config` | ubuntu-latest | lint, typecheck | validate OCI Compose/Caddy headers, deployment scripts, workflow guards, retirement isolation, supply-chain pins, and the Node.js runtime baseline |
 | 8 | `security` | ubuntu-latest | — | audit the locked npm graphs, scan the pinned production base images for OS and runtime vulnerabilities |
 | 9 | `e2e` | ubuntu-latest + postgres service | build | playwright install, playwright test, upload trace/video on failure |
 | 10 | `docker-smoke` | ubuntu-latest | build | start the all-in-one compose stack, poll `/health`, assert the images run the supported Node.js baseline, login + validate auto-seeded holidays + validate the seed endpoint, tear down with `-v` |
-| 11 | `coverage-gate` | ubuntu-latest | 3, 4, 5 | check integration/frontend reports exist; post coverage summary as PR comment |
+| 11 | `coverage-gate` | ubuntu-latest | 3, 4, 5 | check integration/frontend/api-client reports exist; post coverage summary as PR comment |
+
+The shared API client workspace (#259) is verified inside the existing
+`Frontend tests` job rather than in a new job, preserving all existing job
+names, artifacts and status checks. Its new `api-client-coverage`
+artifact is downloaded and summarized by the existing `Coverage gate` job
+alongside the backend and frontend reports.
 
 ### 10.1a Node.js runtime baseline
 
@@ -750,9 +767,21 @@ assessment, an owner and an expiry date.
 "deploy:scripts:check": "node infra/tests/deploy-scripts.test.mjs"
 ```
 
+The root `lint`, `typecheck`, `test`, `test:coverage` and `build` scripts run
+the backend, the frontend **and** the shared API client workspace
+(`packages/api-client`) in turn. The per-workspace form is
+`npm run <script> -w packages/api-client`.
+
 ## 12. Reporting & Artifacts
 
 - Coverage uploaded as `lcov`; CI posts a Markdown diff comment on PRs.
+- CI artifacts: `backend-unit-coverage` (`backend/coverage-unit`),
+  `backend-coverage` (`backend/coverage`), `frontend-coverage`
+  (`frontend/coverage`) and `api-client-coverage`
+  (`packages/api-client/coverage`).
+- The `Coverage gate` job requires the integration, frontend and API client
+  reports and summarizes their totals in the PR comment. The backend unit job
+  separately requires its own report.
 - Playwright `trace.zip`, `video.webm`, and `junit.xml` uploaded on failure.
 - JUnit reports surfaced in the GitHub Actions UI summary.
 - Nightly coverage trend stored as artifact (post-MVP).

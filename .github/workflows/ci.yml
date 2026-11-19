@@ -137,6 +137,20 @@ jobs:
         with:
           name: frontend-coverage
           path: frontend/coverage
+      # The shared API client package (#259) runs its own independent unit and
+      # coverage suites here, so the existing job names and required status
+      # checks stay unchanged.
+      - run: npm run test -w packages/api-client
+      - run: npm run test:coverage -w packages/api-client
+      - name: Verify api-client unit reports
+        run: test -f packages/api-client/coverage/lcov.info && test -f packages/api-client/coverage/coverage-summary.json
+      - name: Upload api-client coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: api-client-coverage
+          path: packages/api-client/coverage
+          if-no-files-found: error
 
   build:
     name: Build
@@ -447,10 +461,17 @@ jobs:
         with:
           name: frontend-coverage
           path: frontend/coverage
+      - name: Download api-client coverage
+        uses: actions/download-artifact@v8
+        with:
+          name: api-client-coverage
+          path: packages/api-client/coverage
       - name: Verify lcov reports exist
         run: |
           test -f backend/coverage/lcov.info
           test -f frontend/coverage/lcov.info
+          test -s packages/api-client/coverage/lcov.info
+          test -s packages/api-client/coverage/coverage-summary.json
       - name: Post coverage summary comment
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -490,13 +511,18 @@ jobs:
 
           backend = parse_lcov("backend/coverage/lcov.info")
           frontend = parse_lcov("frontend/coverage/lcov.info")
+          api_client = parse_lcov("packages/api-client/coverage/lcov.info")
 
           lines = []
           lines.append("### Coverage summary")
           lines.append("")
           lines.append("| Workspace | Lines | Branches | Functions |")
           lines.append("|---|---|---|---|")
-          for label, data in (("backend", backend), ("frontend", frontend)):
+          for label, data in (
+              ("backend", backend),
+              ("frontend", frontend),
+              ("api-client", api_client),
+          ):
               lp = (data["lines"][1] / data["lines"][0] * 100) if data["lines"][0] else 100
               bp = (data["branches"][1] / data["branches"][0] * 100) if data["branches"][0] else 100
               fp = (data["functions"][1] / data["functions"][0] * 100) if data["functions"][0] else 100

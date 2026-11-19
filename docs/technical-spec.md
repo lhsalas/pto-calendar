@@ -79,6 +79,35 @@ Confirmed architecture:
   until a token operation needs the pool; `app.closeResources()` closes that
   runtime permanently and is awaited by graceful shutdown after HTTP drain,
   before Prisma disconnect. Integration test teardown also awaits it.
+- **Shared API client package ([#259](https://github.com/lhsalas/pto-calendar/issues/259))**: `packages/api-client`
+  is a private, unpublished npm workspace holding the shared typed HTTP client
+  for the REST API. It is runtime-neutral Node ESM: no Vite, no browser
+  globals, no cookie jar, no database driver and no dependency on the backend
+  or frontend sources. The backend remains authoritative for validation,
+  scopes, live role/ownership, privacy, audit and write integrity; the client
+  only encodes the wire contract.
+
+  The caller supplies an explicit base URL and an explicit credential
+  (origin + token). The credential origin is normalized and matched exactly
+  against the request origin; HTTPS is required and plain HTTP is accepted
+  only for an explicit literal loopback development opt-in. URL userinfo,
+  cross-origin redirects, caller-supplied request URLs and caller-supplied
+  header maps are all rejected. The client builds every request internally
+  against a frozen authority, sends the exact backend PAT wire format and
+  never follows a redirect.
+
+  Reads use a real `AbortSignal` deadline that spans the body and the backoff
+  window, with bounded read retries and safe `Retry-After` handling. Writes
+  are never retried automatically; a create is replayed only with the same
+  caller-supplied idempotency key, and the client never mints one. Errors are
+  reported through a sanitized envelope (`code`, `status`, `requestId`,
+  `retryAfterMs`, `unknownWriteOutcome`); upstream messages, bodies, URLs,
+  headers, tokens and arbitrary causes are never copied into an error.
+
+  The package is built as ESM with type declarations, targets the same
+  Node.js floor as the repository root and is consumed from the local
+  workspace source only. It has no registry, release or public SDK support
+  promise.
 - **Authentication**: Email/password authentication for manually seeded users with bcrypt password hashing and HTTP-only cookie sessions
 
 ### 3.2 Core modules
@@ -92,6 +121,7 @@ Confirmed architecture:
 - **Lifecycle module** (`backend/src/lib/lifecycle.ts`) — graceful shutdown (SIGTERM/SIGINT drain + `prisma.$disconnect` + `SHUTDOWN_TIMEOUT_MS` fallback + uncaughtException/unhandledRejection handlers)
 - **Health route** (`backend/src/routes/health.ts`) — `GET /health` (liveness, no DB) and `GET /ready` (readiness, DB probe)
 - **Shared Zod schemas** (`backend/src/services/auth/schemas.ts`, `backend/src/services/pto/schemas.ts`) — request validation defined once, imported by routes and the validation layer
+- **Shared API client module** (`packages/api-client/`) — the runtime-neutral typed REST client shared by the planned CLI and local MCP adapters: origin binding and credential injection, bounded read retries with real abort/deadline handling, the sanitized error envelope and the paged-read traversal with completeness metadata
 
 ## 4. Roles and Access Model
 
@@ -1173,6 +1203,17 @@ function expandPTOToDates(pto) {
 
 ### 14.4 Automation, tooling, CI/CD, and coverage policy
 See `testing-strategy.md` for the full automation plan: tooling matrix (Vitest, Supertest, React Testing Library, MSW, Playwright, GitHub Actions), coverage targets with strict gates on authorization and PTO validation, ephemeral Postgres for integration tests, pre-commit hooks, and merge policy.
+
+### 14.5 Shared API client tests (#259)
+`packages/api-client` has its own Vitest suite with a per-package coverage gate:
+package totals require at least 90% lines, statements and functions and at least
+80% branches, and the security-sensitive surfaces (origin binding, the error
+envelope, the transport and retry policy, the wire parser and input validation)
+require 100% on every metric. The suite is service-free — it uses in-process
+loopback fixtures only and never touches PostgreSQL, Redis or a hosted
+endpoint. The package is discovered by the root `lint`, `typecheck`, `test`,
+`test:coverage` and `build` scripts and by the CI `Lint`, `Typecheck`,
+`Frontend tests` and `Coverage gate` jobs.
 
 ## 15. Suggested Implementation Choices
 

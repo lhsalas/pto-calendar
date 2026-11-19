@@ -234,6 +234,22 @@ and failed `If-Match` remains 412 regardless of the chosen version encoding.
   **incomplete** and do not answer as though no other records exist. A normal
   end at `hasMore: false` means traversal completed, not that it was a
   consistent snapshot; inserts, deletes, and moves can be undetectable.
+
+  **Delivered by [#259] as `packages/api-client`:** a private, unpublished npm
+  workspace holding the runtime-neutral Node ESM client. It is consumed from
+  the local workspace source; no registry publication, release tag or public
+  SDK support commitment is made. The package exports built ESM plus type
+  declarations, targets the repository Node.js floor and exposes the client
+  factory, the typed request/result shapes and the sanitized error type — no
+  transport, URL, header or credential accessor is exported. Its own coverage
+  gate requires 100% on every metric for the security-sensitive surfaces
+  (origin binding, error envelope, transport/retry policy, wire parsing and
+  input validation) and at least 90% lines/statements/functions and 80%
+  branches for the package totals. The package is discovered by the root
+  `lint`, `typecheck`, `test`, `test:coverage` and `build` scripts and by the
+  existing `Frontend tests` and `Coverage gate` CI jobs. It adds the
+  `api-client-coverage` artifact without changing any existing job or artifact
+  names.
 - [#260]: shared credential/profile module (for example `packages/agent-auth`)
   prefers a supported OS store. Owner-only file fallback needs **explicit**
   acceptance, restrictive permissions/ACLs and atomic/symlink-safe handling; no
@@ -535,6 +551,15 @@ generate a fresh key and automatically retry. No package or rollout here.
 
 Rows give the safe serial default. Parallel development is restricted to the
 approved waves below after prerequisites merge; every row is one deliverable/PR.
+
+**Shared-client checkpoint (#259):** the shared client ships as the private
+`packages/api-client` workspace described in §4. It adds no route, no flag and
+no production behavior: the backend, the frontend, the browser session flow and
+the security scan job are unchanged. The workspace is a client-side library
+only, so the following rows (#260 credential storage, #261/#262 CLI, #263/#264
+MCP, #265 packaging and the #266–#268 client acceptances) still own every
+credential, consent, distribution and rollout decision. Nothing here approves
+publishing the package, enabling personal-token writes or deploying anything.
 
 | Order | Issue / deliverable | Prerequisites |
 | --- | --- | --- |
