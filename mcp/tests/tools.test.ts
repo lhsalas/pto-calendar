@@ -281,6 +281,18 @@ describe('the advertised tools', () => {
     }
   });
 
+  it('say in the discovery that even a complete read is not a point-in-time snapshot', () => {
+    const list = TOOL_DEFINITIONS.find((tool) => tool.name === 'pto_list');
+    const description = list?.description ?? '';
+    // The model sees this text before it calls the tool, so the discovery
+    // itself has to carry the snapshot statement and the bounded recovery.
+    expect(description).toContain('never a point-in-time snapshot');
+    expect(description).toContain('not even when it reports complete');
+    expect(description).toContain('narrower explicit date range');
+    expect(description).toContain('splitting the range into smaller ranges');
+    expect(description).toContain('never by retrying the same call in a loop');
+  });
+
   it('survive the parsing of the SDK tool list and stay closed', () => {
     const parsed = ListToolsResultSchema.parse({ tools: TOOL_DEFINITIONS });
     for (const tool of parsed.tools) {
@@ -460,6 +472,38 @@ describe('the list tool', () => {
     expect(result.partial?.complete).toBe(false);
     expect(result.partial?.reason).toBe('budget');
     expect(result.partial?.pages).toBe(6);
+  });
+
+  it('documents a bounded recovery for an incomplete read', async () => {
+    const { dependencies } = harness({
+      handlers: {
+        list: async () => ({
+          items: [ITEM],
+          complete: false,
+          reason: 'budget',
+          pages: 6,
+        }),
+      },
+    });
+    const result = await executeReadTool(
+      'pto_list',
+      { from: '2026-03-02', to: '2026-03-04' },
+      LAUNCH,
+      {},
+      liveSignal(),
+      dependencies,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const message = result.error.message;
+    // The recovery is bounded and explicit: a narrower range or smaller
+    // ranges, never an automatic retry loop and never a snapshot claim.
+    expect(message).toContain('narrower explicit date range');
+    expect(message).toContain('splitting the range into smaller ranges');
+    expect(message).toContain('never retry the same call in a loop');
+    expect(message).toContain('not a point-in-time snapshot');
+    expect(message).not.toContain('automatically');
+    expect(message.length).toBeLessThanOrEqual(400);
   });
 
   it('reports defensive result truncation as incomplete despite a complete client result', async () => {
@@ -928,6 +972,59 @@ describe('the local credential', () => {
       dependencies,
     );
     expect(authCalls[0]!.env).toEqual({ PTO_API_ORIGIN: ORIGIN, PTO_API_TOKEN: TOKEN });
+  });
+
+  it('passes the signal of the call to the credential resolver', async () => {
+    const { dependencies, authCalls } = harness();
+    const controller = new AbortController();
+
+    await executeReadTool(
+      'pto_list',
+      { from: '2026-03-02', to: '2026-03-04' },
+      LAUNCH,
+      {},
+      controller.signal,
+      dependencies,
+    );
+
+    expect(authCalls[0]!.signal).toBe(controller.signal);
+  });
+
+  it('reports a cancelled credential lookup as a cancellation and never reaches the service', async () => {
+    const { dependencies, clientCalls, clientOptions } = harness({
+      auth: new AgentAuthError('INPUT_CANCELLED'),
+    });
+    const result = await executeReadTool(
+      'pto_list',
+      { from: '2026-03-02', to: '2026-03-04' },
+      LAUNCH,
+      {},
+      liveSignal(),
+      dependencies,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('CANCELLED');
+    // The cancellation never reaches the service, and no client is built.
+    expect(clientCalls.list).toHaveLength(0);
+    expect(clientCalls.identity).toHaveLength(0);
+    expect(clientOptions).toHaveLength(0);
+  });
+
+  it('reports a cancelled credential lookup of a detail call as a cancellation', async () => {
+    const { dependencies, clientCalls } = harness({
+      auth: new AgentAuthError('INPUT_CANCELLED'),
+    });
+    const result = await executeReadTool(
+      'pto_get',
+      { id: '44444444-4444-4444-8444-444444444444' },
+      LAUNCH,
+      {},
+      liveSignal(),
+      dependencies,
+    );
+    expect(failureOf(result).code).toBe('CANCELLED');
+    expect(clientCalls.detail).toHaveLength(0);
   });
 
   it('reports a missing credential without asking for one', async () => {

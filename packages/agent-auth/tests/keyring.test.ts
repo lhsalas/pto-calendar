@@ -750,6 +750,121 @@ describe('the Linux OS credential store', () => {
     child.respond({ status: 'absent' });
     await expect(promise).resolves.toBe(false);
   });
+
+  it('never starts a helper for a lookup that is already cancelled', async () => {
+    const keyring = createLinuxKeyring();
+    const controller = new AbortController();
+    controller.abort();
+
+    const error = await rejectionOf(keyring.get(PROFILE, ORIGIN, controller.signal));
+    expectAgentAuthError(error, 'INPUT_CANCELLED');
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses a cancellation value that is not an actual signal', async () => {
+    const keyring = createLinuxKeyring();
+
+    const error = await rejectionOf(keyring.get(PROFILE, ORIGIN, {} as AbortSignal));
+    expectAgentAuthError(error, 'INVALID_OPTIONS');
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('stops the helper and the timer when a lookup is cancelled', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const keyring = createLinuxKeyring();
+    const controller = new AbortController();
+    const outcome = observe(keyring.get(PROFILE, ORIGIN, controller.signal));
+    await settleEvents();
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(outcome.settled).toBe(false);
+
+    controller.abort();
+    await settleEvents();
+    expect(outcome.settled).toBe(true);
+    expectAgentAuthError(outcome.error, 'INPUT_CANCELLED');
+    expect(child.kill).toHaveBeenCalledTimes(1);
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+
+    // The timeout of the call is cancelled with it: the deadline never fires.
+    await vi.advanceTimersByTimeAsync(HELPER_TIMEOUT_MS * 2);
+    expect(outcome.settled).toBe(true);
+    expectAgentAuthError(outcome.error, 'INPUT_CANCELLED');
+    expect(child.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('wipes the request and the answer of a cancelled lookup', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const keyring = createLinuxKeyring();
+    const controller = new AbortController();
+    const outcome = observe(keyring.get(PROFILE, ORIGIN, controller.signal));
+    await settleEvents();
+    const written = child.stdin.chunks;
+    child.stdout.push(Buffer.from(`{"status":"ok","token":"${TOKEN}`, 'utf8'));
+    let wipedAtStop = false;
+    child.kill.mockImplementation(() => {
+      wipedAtStop =
+        written.length === 1 && written.every((chunk) => chunk.every((byte) => byte === 0));
+      return true;
+    });
+
+    controller.abort();
+    await settleEvents();
+    expect(outcome.settled).toBe(true);
+    expectAgentAuthError(outcome.error, 'INPUT_CANCELLED');
+    expect(wipedAtStop).toBe(true);
+    expect(JSON.stringify(outcome.error)).not.toContain(TOKEN);
+  });
+
+  it('never carries the reason of the cancellation into the failure', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const keyring = createLinuxKeyring();
+    const controller = new AbortController();
+    const outcome = observe(keyring.get(PROFILE, ORIGIN, controller.signal));
+    await settleEvents();
+
+    controller.abort('a private reason that must not travel');
+    await settleEvents();
+    expectAgentAuthError(outcome.error, 'INPUT_CANCELLED');
+    expect(JSON.stringify(outcome.error)).not.toContain('private reason');
+  });
+
+  it('settles a cancelled lookup once, even when the helper answers late', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const keyring = createLinuxKeyring();
+    const controller = new AbortController();
+    const outcome = observe(keyring.get(PROFILE, ORIGIN, controller.signal));
+    await settleEvents();
+
+    controller.abort();
+    await settleEvents();
+    expectAgentAuthError(outcome.error, 'INPUT_CANCELLED');
+
+    child.respond({ status: 'ok', token: TOKEN });
+    await settleEvents();
+    expectAgentAuthError(outcome.error, 'INPUT_CANCELLED');
+    expect(outcome.value).toBeUndefined();
+  });
+
+  it('keeps a write and a removal free of the cancellation signal', async () => {
+    const keyring = createLinuxKeyring();
+    const write = keyring.set(PROFILE, ORIGIN, TOKEN);
+    child.respond({ status: 'ok' });
+    await write;
+
+    // A second helper answers the removal: every call owns its own child.
+    const second = new FakeChild();
+    spawnMock.mockImplementation(() => second);
+    const removal = keyring.remove(PROFILE, ORIGIN);
+    second.respond({ status: 'removed' });
+    await expect(removal).resolves.toBe(true);
+
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    for (const call of spawnCalls()) {
+      expect(call.args).toEqual(['-I', '-B', HELPER]);
+      expect(call.options.env).toEqual({ DBUS_SESSION_BUS_ADDRESS: DBUS_ADDRESS });
+    }
+  });
 });
 
 /** The fake configuration of the bundled helper. */

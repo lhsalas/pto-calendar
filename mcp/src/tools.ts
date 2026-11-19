@@ -122,7 +122,7 @@ const MESSAGES: Readonly<Record<ToolErrorCode, string>> = {
     'The service is rate limiting this credential. Wait for the period it asks for, then try again.',
   NETWORK: 'The service could not be reached, or answered with something this server cannot use.',
   INCOMPLETE:
-    'The calendar read is incomplete. The rows that were read are included; missing rows are not confirmed absent.',
+    'The calendar read is incomplete and is not a point-in-time snapshot. The rows that were read are included; missing rows are not confirmed absent. Recover by asking for a narrower explicit date range, or by splitting the range into smaller ranges, and compare the results yourself; never retry the same call in a loop.',
   CANCELLED: 'The tool call was cancelled.',
   LOCAL:
     'The local configuration could not be used. Verify the named profile or complete managed credential pair outside the tool.',
@@ -153,7 +153,7 @@ const AGENT_AUTH_MAPPING: Readonly<Record<AgentAuthErrorCode, ToolErrorCode>> = 
   KEYRING_AMBIGUOUS: 'AUTH',
   KEYRING_FAILED: 'AUTH',
   INPUT_REQUIRED: 'LOCAL',
-  INPUT_CANCELLED: 'LOCAL',
+  INPUT_CANCELLED: 'CANCELLED',
   INPUT_UNAVAILABLE: 'LOCAL',
 };
 
@@ -227,14 +227,20 @@ function managedEnvironment(env: NodeJS.ProcessEnv): AgentAuthEnvironment | unde
  *
  * A named profile and a managed pair are never combined: the facade refuses
  * that combination, so an explicit profile is never silently ignored in
- * favour of the environment.
+ * favour of the environment. The signal of the call is passed on, so a
+ * cancelled call stops the credential lookup instead of waiting for it.
  */
-function resolveInputFor(launch: LaunchOptions, env: NodeJS.ProcessEnv): ResolveInput {
+function resolveInputFor(
+  launch: LaunchOptions,
+  env: NodeJS.ProcessEnv,
+  signal: AbortSignal,
+): ResolveInput {
   const managed = managedEnvironment(env);
   return {
     ...(launch.profile === undefined ? {} : { profile: launch.profile }),
     allowLoopbackHttp: launch.allowLoopbackHttp === true,
     ...(managed === undefined ? {} : { env: managed }),
+    signal,
   };
 }
 
@@ -487,7 +493,7 @@ async function withCredential(
   const budget = budgetOf(dependencies.now, deadline);
   let bundle: AgentAuthCredential;
   try {
-    bundle = await dependencies.createAuth().resolve(resolveInputFor(launch, env));
+    bundle = await dependencies.createAuth().resolve(resolveInputFor(launch, env, signal));
   } catch (error) {
     const code = authCodeOf(error);
     return failure(tool, code, MESSAGES[code], requestId);
@@ -583,7 +589,7 @@ export const TOOL_DEFINITIONS: Tool[] = [
     name: 'pto_list',
     title: 'List PTO records',
     description:
-      'Read the PTO records of an inclusive date range. The read is bounded: at most 100 rows per page, 10 pages and 250 rows per call. The answer states whether the read was complete and why it stopped; an incomplete read never claims a snapshot.',
+      'Read the PTO records of an inclusive date range. The read is bounded: at most 100 rows per page, 10 pages and 250 rows per call. The answer states whether the read was complete and why it stopped. The read is never a point-in-time snapshot, not even when it reports complete: rows can change between two page reads. An incomplete read never claims a snapshot; recover by asking for a narrower explicit date range or by splitting the range into smaller ranges, and never by retrying the same call in a loop.',
     inputSchema: LIST_INPUT_SCHEMA,
     outputSchema: LIST_OUTPUT_SCHEMA,
     annotations: {

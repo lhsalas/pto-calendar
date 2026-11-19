@@ -33,11 +33,19 @@ loopback testing; HTTPS is required for remote origins.
   combined with `ownerId`. Optional `pageSize` is 1–100 (default 50) and
   `maxPages` is 1–10 (default 6). A call reads at most 250 rows and has a
   20-second budget. `complete`, `reason` and `pages` distinguish a finished
-  traversal from partial results. Traversal does not promise a snapshot.
+  traversal from partial results.
 - `pto_get`: required exact record `id`. Optional `includeNote: true`
   requests the note within a 15-second detail budget; the API may still
   withhold it. List notes, unrequested notes and unavailable notes are
   `null`.
+
+The discovery text of `pto_list` states the snapshot rule: a bounded traversal
+is **never** a point-in-time snapshot, not even when it reports `complete:
+true`, because rows can change between two page reads. An incomplete result
+carries the same rule and a bounded recovery: ask for a narrower explicit
+date range, or split the range into smaller ranges, and compare the results.
+Retrying the same call in a loop is not a recovery. The error keeps the same
+stable structured schema, status and category (`INCOMPLETE`).
 
 Both tools declare `readOnlyHint: true`. A hint is not an authorization
 rule: the API checks the credential and scope on each request, including
@@ -51,6 +59,20 @@ are fixed messages on stderr.
 The stdio process caps input frames at 256 KiB and runs at most four tool
 calls at a time. A call over the concurrency limit gets a retryable busy
 result rather than waiting indefinitely.
+
+## Cancellation
+
+A cancelled call — a client cancellation, a closed stdin, or a stopped
+server — reaches the local credential lookup as well as the API request. The
+lookup stops the operating system credential helper through the same
+termination path as its timeout: the helper process, the profile lock and
+the tool slot of the call are released as soon as the call is cancelled, not
+after the helper timeout. No API request is started for a cancelled call, and
+the cancelled request is answered with nothing. The reason of a cancellation
+is never read, so client text can never travel into an error.
+
+A missing credential stays a fixed tool error: the protocol keeps serving,
+and the server never asks for a secret inside a tool call.
 
 ## Protocol selection
 

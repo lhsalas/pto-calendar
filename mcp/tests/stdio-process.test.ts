@@ -1,11 +1,12 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createRequire } from 'node:module';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -30,6 +31,18 @@ const OWNER = '11111111-aaaa-4111-8111-000000000001';
 const FIRST = '11111111-aaaa-4111-8111-000000000002';
 const NOTE = 'synthetic private note for the loopback fixture';
 const LONG = 20_000;
+
+/** The repository root, so the private build can use the reviewed packages. */
+const REPO = fileURLToPath(new URL('../../', import.meta.url));
+
+/** The synthetic helper that replaces the bundled one in the private build. */
+const PENDING_HELPER = fileURLToPath(new URL('./fixtures/pending-lookup.py', import.meta.url));
+
+/** The file the synthetic helper writes when its lookup is pending. */
+const PENDING_MARKER = 'pending-lookup.pid';
+
+/** The longest the helper of the production package may hold a lookup. */
+const HELPER_TIMEOUT_MS = 10_000;
 
 const ROW = {
   id: FIRST,
@@ -67,18 +80,83 @@ interface Fixture {
 const cleanups: Array<() => Promise<void> | void> = [];
 const children: Child[] = [];
 let sandbox: string;
+/** The marker of the synthetic helper of the private build, when one was made. */
+let ownedMarker: string | null = null;
 
 beforeAll(() => {
   if (!existsSync(BUILT)) {
     throw new Error('Build the mcp workspace before the process tests: npm run build -w mcp');
+  }
+  if (!existsSync(join(REPO, 'packages/agent-auth/dist/keyring.js'))) {
+    throw new Error(
+      'Build the credential package before the process tests: npm run build -w packages/agent-auth',
+    );
   }
 });
 
 afterEach(async () => {
   for (const child of children.splice(0)) child.kill();
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  await stopOwnedHelper();
   if (sandbox !== undefined) await rm(sandbox, { recursive: true, force: true });
 });
+
+/**
+ * Stops the synthetic helper of the private build, when one is still running.
+ *
+ * Only the helper this test file started is ever touched: the process id comes
+ * from the marker of the private sandbox, and the command line of the process
+ * is checked before it is stopped. A process that cannot be proven to be ours
+ * is never stopped.
+ */
+async function stopOwnedHelper(): Promise<void> {
+  const marker = ownedMarker;
+  ownedMarker = null;
+  if (marker === null) return;
+  const pid = await readHelperPid(marker);
+  if (pid === null) return;
+  if ((await helperState(pid, marker)) !== 'running') return;
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    // The helper is already gone.
+  }
+}
+
+/** The process id the synthetic helper recorded, when it recorded one. */
+async function readHelperPid(marker: string): Promise<number | null> {
+  try {
+    const value = Number.parseInt((await readFile(marker, 'utf8')).trim(), 10);
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The state of the recorded helper process. */
+type HelperState = 'running' | 'gone' | 'unverified';
+
+/**
+ * Whether the recorded process is still running, and whether it is our helper.
+ *
+ * The command line is checked when the platform exposes it, so a process that
+ * reused the recorded id is never mistaken for the helper. A process that
+ * cannot be proven to be ours is reported as unverified and is never stopped.
+ */
+async function helperState(pid: number, marker: string): Promise<HelperState> {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return 'gone';
+  }
+  try {
+    const cmdline = await readFile(`/proc/${pid}/cmdline`, 'utf8');
+    const directory = marker.slice(0, marker.length - PENDING_MARKER.length);
+    return cmdline.includes(directory) ? 'running' : 'unverified';
+  } catch {
+    return 'unverified';
+  }
+}
 
 async function prepareSandbox(): Promise<void> {
   sandbox = await mkdtemp(join(await realpath(tmpdir()), 'pto-mcp-'));
@@ -142,8 +220,8 @@ class Child {
   #stderr = '';
   #partial = '';
 
-  constructor(args: readonly string[], env: NodeJS.ProcessEnv) {
-    this.process = spawn(process.execPath, [BIN, ...args], {
+  constructor(args: readonly string[], env: NodeJS.ProcessEnv, binary: string = BIN) {
+    this.process = spawn(process.execPath, [binary, ...args], {
       cwd: sandbox,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -216,6 +294,19 @@ async function until(check: () => boolean, label: string, timeoutMs = 10_000): P
   }
 }
 
+/** Waits for a check that reads the state of a process. */
+async function untilAsync(
+  check: () => Promise<boolean>,
+  label: string,
+  timeoutMs = 10_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${label}.`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 /** A child environment with no ambient PTO_* values, an isolated HOME and no keyring. */
 function environment(managed?: { origin: string; token: string }): NodeJS.ProcessEnv {
   const home = join(sandbox, 'home');
@@ -241,6 +332,86 @@ function startServer(fixture: Fixture): Child {
   return new Child(
     ['--allow-loopback-http'],
     environment({ origin: fixture.origin, token: TOKEN }),
+  );
+}
+
+/** The private build of the server, with its own credential package. */
+interface PrivateBuild {
+  /** The executable of the private build. */
+  readonly binary: string;
+  /** The synthetic helper of the private credential package. */
+  readonly helper: string;
+  /** The marker the synthetic helper writes when its lookup is pending. */
+  readonly marker: string;
+  /** The owner-only local store of the profile. */
+  readonly store: string;
+}
+
+/**
+ * Builds a private copy of the server with its own credential package.
+ *
+ * The copy holds the reviewed build of the credential package and a synthetic
+ * helper at the bundled helper path of that copy, so a lookup is observably
+ * pending. The production code has no hook to configure it: the helper path
+ * is always the bundled one, next to the module that spawns it.
+ */
+async function createPrivateBuild(): Promise<PrivateBuild> {
+  const root = join(sandbox, 'private');
+  const modules = join(root, 'node_modules');
+  const packages = join(modules, '@pto-calendar');
+  await mkdir(join(modules, '@modelcontextprotocol'), { recursive: true });
+  await mkdir(packages, { recursive: true });
+
+  // The credential package is a private copy: its own build and its own helper.
+  const credential = join(packages, 'agent-auth');
+  await mkdir(join(credential, 'libexec'), { recursive: true });
+  await cp(join(REPO, 'packages/agent-auth/dist'), join(credential, 'dist'), { recursive: true });
+  await cp(join(REPO, 'packages/agent-auth/package.json'), join(credential, 'package.json'));
+  await cp(PENDING_HELPER, join(credential, 'libexec', 'secret-service.py'));
+
+  // The other packages are the reviewed ones of this repository.
+  await symlink(join(REPO, 'packages/api-client'), join(packages, 'api-client'), 'dir');
+  // Resolve the pinned SDK's dist/cjs/server entry by module name. A clean
+  // npm install hoists it to the root; a local workspace may not.
+  const sdkEntry = createRequire(import.meta.url).resolve('@modelcontextprotocol/sdk/server');
+  const sdkRoot = await realpath(join(dirname(sdkEntry), '../../..'));
+  await symlink(sdkRoot, join(modules, '@modelcontextprotocol', 'sdk'), 'dir');
+
+  // The private build of the server itself.
+  await mkdir(join(root, 'mcp'), { recursive: true });
+  await cp(join(REPO, 'mcp/dist'), join(root, 'mcp/dist'), { recursive: true });
+  await cp(join(REPO, 'mcp/bin'), join(root, 'mcp/bin'), { recursive: true });
+  await cp(join(REPO, 'mcp/package.json'), join(root, 'mcp/package.json'));
+
+  const helper = join(credential, 'libexec', 'secret-service.py');
+  const marker = join(credential, 'libexec', PENDING_MARKER);
+  ownedMarker = marker;
+  return {
+    binary: join(root, 'mcp/bin/pto-mcp.mjs'),
+    helper,
+    marker,
+    store: join(sandbox, 'home', '.config', 'pto-calendar', 'agent-auth'),
+  };
+}
+
+/**
+ * Writes the synthetic profile of the private store.
+ *
+ * The record is metadata only: it binds the loopback origin of the fixture to
+ * the credential store of the operating system, and it holds no secret.
+ */
+async function writeProfile(store: string, origin: string): Promise<void> {
+  await mkdir(store, { recursive: true, mode: 0o700 });
+  await writeFile(
+    join(store, 'default.json'),
+    `${JSON.stringify({
+      version: 1,
+      profile: 'default',
+      origin,
+      allowLoopbackHttp: true,
+      storage: 'keyring',
+    })}\n`,
+    { mode: 0o600 },
   );
 }
 
@@ -627,6 +798,107 @@ describe('compiled stdio server', () => {
       child.process.kill('SIGTERM');
       expect(await child.exit).toEqual({ code: 0, signal: null });
       await until(() => fixture.seen.some((seen) => seen.aborted), 'the aborted read');
+      expectClean(child);
+    },
+    LONG,
+  );
+});
+
+describe('a cancelled credential lookup over real stdio', () => {
+  it(
+    'releases the helper, the profile lock and the tool slot before the helper timeout',
+    async () => {
+      await prepareSandbox();
+      const fixture = await startFixture();
+      const build = await createPrivateBuild();
+      await writeProfile(build.store, fixture.origin);
+      const child = new Child(['--allow-loopback-http'], environment(), build.binary);
+
+      await handshake(child);
+      child.send(call(2, 'pto_list', { from: '2026-12-07', to: '2026-12-07' }));
+
+      // The lookup is pending: the synthetic helper of the private build runs
+      // and has not answered, and the profile is locked while it runs.
+      await until(() => existsSync(build.marker), 'the pending lookup');
+      const helperPid = await readHelperPid(build.marker);
+      expect(helperPid).not.toBeNull();
+      expect(await helperState(helperPid!, build.marker)).toBe('running');
+      expect(existsSync(join(build.store, '.lock.default'))).toBe(true);
+      // Nothing reached the API while the credential was pending.
+      expect(fixture.seen).toHaveLength(0);
+
+      const started = Date.now();
+      child.send({
+        jsonrpc: '2.0',
+        method: 'notifications/cancelled',
+        params: { requestId: 2, reason: 'user stopped waiting' },
+      });
+
+      // The helper is stopped and the profile lock is released, both long
+      // before the ten-second fallback of the credential package.
+      await untilAsync(
+        async () => (await helperState(helperPid!, build.marker)) === 'gone',
+        'the released helper',
+        5_000,
+      );
+      await untilAsync(
+        async () => !existsSync(join(build.store, '.lock.default')),
+        'the released lock',
+        5_000,
+      );
+      expect(Date.now() - started).toBeLessThan(HELPER_TIMEOUT_MS);
+
+      // The cancelled call is answered with nothing, and no request ever
+      // reached the API.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(child.messages().some((message) => message['id'] === 2)).toBe(false);
+      expect(fixture.seen).toHaveLength(0);
+
+      // The server keeps serving: the slot of the cancelled call was released.
+      child.send(request(3, 'ping'));
+      expect(await child.reply(3)).toEqual({ jsonrpc: '2.0', id: 3, result: {} });
+
+      child.end();
+      expect(await child.exit).toEqual({ code: 0, signal: null });
+      expectClean(child);
+    },
+    LONG,
+  );
+
+  it(
+    'releases the helper and the profile lock when the client closes stdin',
+    async () => {
+      await prepareSandbox();
+      const fixture = await startFixture();
+      const build = await createPrivateBuild();
+      await writeProfile(build.store, fixture.origin);
+      const child = new Child(['--allow-loopback-http'], environment(), build.binary);
+
+      await handshake(child);
+      child.send(call(4, 'pto_list', { from: '2026-12-07', to: '2026-12-07' }));
+      await until(() => existsSync(build.marker), 'the pending lookup');
+      const helperPid = await readHelperPid(build.marker);
+      expect(helperPid).not.toBeNull();
+
+      const started = Date.now();
+      child.end();
+
+      // The server stops, the lookup is stopped with it, and the process exits
+      // before the helper timeout of the credential package.
+      expect(await child.exit).toEqual({ code: 0, signal: null });
+      expect(Date.now() - started).toBeLessThan(HELPER_TIMEOUT_MS);
+      await untilAsync(
+        async () => (await helperState(helperPid!, build.marker)) === 'gone',
+        'the released helper',
+        5_000,
+      );
+      await untilAsync(
+        async () => !existsSync(join(build.store, '.lock.default')),
+        'the released lock',
+        5_000,
+      );
+      // No request reached the API while the credential was pending.
+      expect(fixture.seen).toHaveLength(0);
       expectClean(child);
     },
     LONG,
