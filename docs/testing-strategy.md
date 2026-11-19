@@ -553,6 +553,29 @@ unexpected archive members, wrong/weak keys, SQL failure, temporary-file cleanup
 and explicit plaintext retention are covered without cloud credentials. The
 PostgreSQL backup roundtrip integration test remains the real database check.
 
+**Backup/restore coverage for the exclusion constraint (#257):**
+`backend/tests/integration/backupRestore.test.ts` dumps with the very same
+arguments the production backup uses (public schema, no owner, no ACL and the
+`btree_gist` extension **only when the source database has it**), and the
+roundtrip proves that the restored database
+
+- carries the `btree_gist` extension and the named
+  `pto_requests_no_owner_overlap` exclusion constraint,
+- keeps the restored row's dates, day part, note and `version` identical to
+  the source, and
+- really refuses an overlapping PTO for the same owner (the insert fails with
+  the exclusion violation and the row count does not change).
+
+The same file keeps the pre-existing baseline tests intact (the encrypted
+roundtrip and the sanitizer rules) and adds two focused checks: a database
+without the extension is still dumped without it, so an older backup is never
+blocked, and a schema dump that carries the constraint without the extension is
+the shape the backup script must refuse. The script guard itself (the fixed
+existence probe, the narrow extension selection, the fail-closed rule and the
+unchanged encryption/upload settings) is asserted statically, because the
+script itself needs the container and the object store. The database-backed
+tests keep the existing conditional local skip; CI requires them.
+
 ### 10.3 Caching
 - Cache `node_modules` and Playwright browsers keyed on lockfile hashes.
 

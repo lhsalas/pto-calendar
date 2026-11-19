@@ -482,6 +482,38 @@ write; an older client without the precondition receives `428` and must
 refresh. Overlap integrity across rows and adapters stays #257, and the
 replay/idempotency contract stays #258.
 
+**Versioned-write checkpoint — 2026-11-18:** #256 was delivered by PR #299 on
+master `69ed137d217341001884b2023f19599d955bbaed` (master CI run
+`44445963096`). That run passed the ten non-waived jobs; the separately
+authorized #294 waiver skipped `Security scan`, and the run executed no deploy
+step. The dated checkpoints above are kept as history and are not rewritten.
+
+**Atomic-overlap scope — 2026-11-18:** #257 is the implementation scope of
+this change, and this document records the contract it implements rather than
+a delivery status: the delivery record lives in its issue and pull request.
+The inclusive owner/date non-overlap invariant moves to the database boundary
+as a PostgreSQL exclusion constraint (`pto_requests_no_owner_overlap`) over
+the owner and an inclusive `daterange`, backed by the trusted `btree_gist`
+extension. Two half-day entries of one owner on the same date still conflict,
+different owners may overlap, and weekends inside a continuous range stay
+allowed. A constraint violation is the same safe `409 CONFLICT` envelope as
+the friendly preflight check — never a raw driver error — and the #256
+preconditions, transactionally consistent audit rows and the `412`/`428`
+behaviour are preserved. The migration preflights the existing rows and stops
+with a sanitized, actionable report when they already overlap; it never
+deletes or rewrites production PTO, and no automatic SQL clean-up runs.
+
+The backup compatibility this needs is part of the same contract: a schema
+dump that only covers the `public` schema omits the `btree_gist` declaration
+while it keeps the exclusion constraint, so such an archive cannot be
+restored. The repository backup therefore adds the extension to the schema
+dump only when the source database already has it — an older, pre-migration
+database keeps backing up unchanged — and fails closed, uploading nothing,
+when the produced dump carries the constraint without the extension. The
+encryption, the instance-principal upload, the target confirmation and the
+secret handling are unchanged, and the restore path (schema, then data, with
+the shared sanitizers) restores the extension before the constraint.
+
 Rows give the safe serial default. Parallel development is restricted to the
 approved waves below after prerequisites merge; every row is one deliverable/PR.
 

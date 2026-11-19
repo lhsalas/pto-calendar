@@ -92,6 +92,40 @@ function auditData(): Record<string, unknown> {
   return call[0].data;
 }
 
+/**
+ * The shape the pinned driver adapter reports when the database refuses an
+ * overlapping range for one owner: a known request error whose driver adapter
+ * cause keeps the SQLSTATE and the PostgreSQL message.
+ */
+function overlapViolationError(
+  constraint = 'pto_requests_no_owner_overlap',
+): Prisma.PrismaClientKnownRequestError {
+  const message = `conflicting key value violates exclusion constraint "${constraint}"`;
+  return new Prisma.PrismaClientKnownRequestError(
+    `Database error. Code: \`23P01\`. Message: \`${message}\``,
+    {
+      code: 'P2039',
+      clientVersion: '7.10.1',
+      meta: {
+        modelName: 'PTORequest',
+        driverAdapterError: {
+          name: 'DriverAdapterError',
+          cause: {
+            kind: 'postgres',
+            originalCode: '23P01',
+            code: '23P01',
+            severity: 'ERROR',
+            originalMessage: message,
+            message,
+            detail:
+              "Key (user_id, daterange(start_date, end_date, '[]'::text))=(owner, [2026-05-11,2026-05-11]) conflicts with existing key (owner, [2026-05-11,2026-05-11]).",
+          },
+        },
+      },
+    },
+  );
+}
+
 /** The driver error of a guarded write that found no row: a lost race. */
 function missingRowError(): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError('No PTO record was found for the update.', {
@@ -232,6 +266,34 @@ describe('PTOService extended', () => {
       expect(auditData()).toMatchObject({
         details: expect.objectContaining({ noteWritten: false }),
       });
+    });
+
+    it('answers the database overlap guard with the same conflict as the preflight', async () => {
+      mockFindFirst.mockResolvedValueOnce(null);
+      mockCreate.mockRejectedValueOnce(overlapViolationError());
+
+      await expect(
+        createPto(ACTOR_MEMBER, {
+          startDate: '2026-05-11',
+          endDate: '2026-05-11',
+          dayPart: 'morning',
+        }),
+      ).rejects.toMatchObject({ status: 409, code: 'CONFLICT' });
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('answers another exclusion constraint with the safe failure, not a conflict', async () => {
+      mockFindFirst.mockResolvedValueOnce(null);
+      mockCreate.mockRejectedValueOnce(overlapViolationError('another_constraint'));
+
+      const error = await createPto(ACTOR_MEMBER, {
+        startDate: '2026-05-11',
+        endDate: '2026-05-11',
+        dayPart: 'morning',
+      }).catch((err: unknown) => err);
+      expect(error).toMatchObject({ status: 500, code: 'INTERNAL_ERROR' });
+      expect(String(error)).not.toContain('another_constraint');
+      expect(mockAuditCreate).not.toHaveBeenCalled();
     });
 
     it('propagates an audit failure, so no create can commit without its audit row', async () => {
@@ -513,6 +575,26 @@ describe('PTOService extended', () => {
       });
       expect(mockFindFirst).not.toHaveBeenCalled();
       expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockAuditCreate).not.toHaveBeenCalled();
+    });
+
+    it('answers the database overlap guard with the same conflict as the preflight', async () => {
+      mockFindUnique.mockResolvedValueOnce(EXISTING_ROW);
+      mockFindFirst.mockResolvedValueOnce(null);
+      mockUpdate.mockRejectedValueOnce(overlapViolationError());
+
+      await expect(
+        updatePto(
+          ACTOR_MEMBER,
+          PTO_ID,
+          {
+            startDate: '2026-05-12',
+            endDate: '2026-05-12',
+            dayPart: 'morning',
+          },
+          1,
+        ),
+      ).rejects.toMatchObject({ status: 409, code: 'CONFLICT' });
       expect(mockAuditCreate).not.toHaveBeenCalled();
     });
 
@@ -844,6 +926,17 @@ describe('PTOService extended', () => {
       expect(update.data['note']).toBe('Replacement');
       expect(JSON.stringify(auditData())).not.toContain('Replacement');
       expect(auditData().details).not.toHaveProperty('note');
+    });
+
+    it('answers the database overlap guard with the same conflict as the preflight', async () => {
+      mockFindUnique.mockResolvedValueOnce({ ...EXISTING_ROW, dayPart: 'all_day' });
+      mockFindFirst.mockResolvedValueOnce(null);
+      mockUpdate.mockRejectedValueOnce(overlapViolationError());
+
+      await expect(
+        patchPto(ACTOR_MEMBER, PTO_ID, { endDate: '2026-05-13' }, 1),
+      ).rejects.toMatchObject({ status: 409, code: 'CONFLICT' });
+      expect(mockAuditCreate).not.toHaveBeenCalled();
     });
 
     it('refuses a stale snapshot and a foreign record without a write', async () => {

@@ -7,6 +7,11 @@ set -Eeuo pipefail
 readonly DEFAULT_INSTALL_DIR="/opt/pto-calendar"
 readonly DEFAULT_BACKUP_DIR="/opt/backups"
 readonly COMPOSE_FILE="docker-compose.prod.yml"
+# The owner/date exclusion constraint of #257 needs btree_gist, and a
+# public-only schema dump omits the extension declaration. Both names are
+# fixed constants: they are never taken from the environment.
+readonly REQUIRED_EXTENSION="btree_gist"
+readonly OVERLAP_CONSTRAINT="pto_requests_no_owner_overlap"
 
 INSTALL_DIR="${INSTALL_DIR:-${DEFAULT_INSTALL_DIR}}"
 BACKUP_DIR="${BACKUP_DIR:-${DEFAULT_BACKUP_DIR}}"
@@ -56,11 +61,46 @@ PASSPHRASE="${WORKDIR}/passphrase"
 
 log "dumping public schema and data from the db container"
 cd "${INSTALL_DIR}"
+
+# The extension is a database-level object, so the source decides whether the
+# schema dump mentions it. The query is fixed and returns only a boolean; no
+# row data, secret or connection detail is read or logged.
+probe_extension() {
+  local raw
+  raw="$(docker compose --env-file "${INSTALL_DIR}/.env" -f "${INSTALL_DIR}/${COMPOSE_FILE}" \
+    exec -T db psql -X -U "${DB_USER}" -d "${DB_NAME}" -tAc \
+    "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'btree_gist');")" ||
+    fail "could not read the extension state of ${DB_NAME}" 2
+  raw="${raw//[[:space:]]/}"
+  case "${raw}" in
+    t) return 0 ;;
+    f) return 1 ;;
+    *) fail "unexpected extension probe result for ${DB_NAME}" 2 ;;
+  esac
+}
+
+SCHEMA_DUMP_ARGS=(--schema-only --schema=public --no-owner --no-acl)
+if probe_extension; then
+  # The source has btree_gist, so the dump must carry the declaration: the
+  # exclusion constraint cannot be applied on a target without it.
+  SCHEMA_DUMP_ARGS+=(--extension="${REQUIRED_EXTENSION}")
+  log "the source database has ${REQUIRED_EXTENSION}; including it in the schema dump"
+fi
+
 docker compose --env-file "${INSTALL_DIR}/.env" -f "${INSTALL_DIR}/${COMPOSE_FILE}" exec -T db \
-  pg_dump -U "${DB_USER}" -d "${DB_NAME}" --schema-only --schema=public --no-owner --no-acl > "${SCHEMA}"
+  pg_dump -U "${DB_USER}" -d "${DB_NAME}" "${SCHEMA_DUMP_ARGS[@]}" > "${SCHEMA}"
 docker compose --env-file "${INSTALL_DIR}/.env" -f "${INSTALL_DIR}/${COMPOSE_FILE}" exec -T db \
   pg_dump -U "${DB_USER}" -d "${DB_NAME}" --data-only --schema=public --no-owner --no-acl > "${DATA}"
 [[ -s "${SCHEMA}" && -s "${DATA}" ]] || fail "database dump produced an empty file" 2
+
+# A schema dump that carries the exclusion constraint without the extension
+# cannot be applied on a target: the constraint needs btree_gist. That happens
+# when the schema changed between the probe and the dump, so the backup fails
+# closed instead of uploading an archive that cannot be restored.
+if grep -Eq "^[[:space:]]+ADD CONSTRAINT ${OVERLAP_CONSTRAINT}[[:space:]]+EXCLUDE" "${SCHEMA}" &&
+  ! grep -q "^CREATE EXTENSION IF NOT EXISTS ${REQUIRED_EXTENSION} WITH SCHEMA public;" "${SCHEMA}"; then
+  fail "the schema dump has ${OVERLAP_CONSTRAINT} but no ${REQUIRED_EXTENSION} extension; refusing to upload a backup that cannot be restored" 2
+fi
 
 tar -C "${WORKDIR}" -czf "${ARCHIVE}" schema.sql data.sql
 rm -f "${SCHEMA}" "${DATA}"

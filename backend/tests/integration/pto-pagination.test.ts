@@ -74,17 +74,23 @@ const [owner, foreign, lead, admin, patOwner] = users as [
 ];
 const userIds = users.map((user) => user.id);
 
-/**
- * The owner whose rows sort first for an equal start date. Both owners are
- * created with random identifiers, so the fixture pins the order instead of
- * assuming one.
- */
-const [bulkOwner, tailOwner] = [owner.id, foreign.id].sort() as [string, string];
+const tailOwner = owner.id;
 
 const BULK_COUNT = 1050;
 const BULK_FOREIGN_COUNT = 1010;
 const bulkIds = sortedIds(BULK_COUNT);
 const bulkForeignIds = sortedIds(BULK_FOREIGN_COUNT);
+
+/**
+ * The non-overlap invariant forbids two rows of one owner on the same day,
+ * so the bulk pages are built from one row per distinct owner. The owners
+ * are synthetic and own a single row each.
+ */
+const bulkOwners: FixtureUser[] = Array.from({ length: BULK_COUNT }, (_unused, index) =>
+  newUser('member', `bulk-june-${index}`),
+);
+const tiedOtherOwner: FixtureUser = newUser('member', 'tied-other');
+const allFixtureUserIds = [...userIds, ...bulkOwners.map((user) => user.id), tiedOtherOwner.id];
 
 interface RowSpec {
   id: string;
@@ -94,29 +100,30 @@ interface RowSpec {
   note?: string | null;
 }
 
-/** June: one owner, one shared start date, more rows than the legacy cap. */
-const bulkRows: RowSpec[] = bulkIds.map((id) => ({
+/** June: many owners share one start date, more rows than the legacy cap. */
+const bulkRows: RowSpec[] = bulkIds.map((id, index) => ({
   id,
-  userId: bulkOwner,
+  userId: bulkOwners[index]!.id,
   startDate: '2026-06-01',
   endDate: '2026-06-01',
 }));
 
-/** July: an unrelated owner fills the page before the filtered owner's rows. */
-const bulkForeignRows: RowSpec[] = bulkForeignIds.map((id) => ({
+/** July: unrelated owners fill the page before the filtered owner's rows. */
+const bulkForeignRows: RowSpec[] = bulkForeignIds.map((id, index) => ({
   id,
-  userId: bulkOwner,
+  userId: bulkOwners[index]!.id,
   startDate: '2026-07-01',
   endDate: '2026-07-01',
 }));
-const tailRows: RowSpec[] = Array.from({ length: 3 }, () => ({
+/** The filtered owner uses three different days, because one day holds one row. */
+const tailRows: RowSpec[] = ['2026-07-02', '2026-07-03', '2026-07-06'].map((date) => ({
   id: randomUUID(),
   userId: tailOwner,
-  startDate: '2026-07-01',
-  endDate: '2026-07-01',
+  startDate: date,
+  endDate: date,
 }));
 
-/** August: an earlier overlap, a foreign owner and two tied owner rows. */
+/** August: an earlier range, a foreign owner and two rows tied across owners. */
 const earlierOverlap: RowSpec = {
   id: randomUUID(),
   userId: owner.id,
@@ -129,13 +136,27 @@ const foreignTie: RowSpec = {
   startDate: '2026-08-15',
   endDate: '2026-08-15',
 };
-const tiedOwnerRows: RowSpec[] = ['a', 'b'].map((suffix) => ({
-  id: randomUUID(),
-  userId: owner.id,
-  startDate: '2026-08-15',
-  endDate: '2026-08-15',
-  note: suffix === 'a' ? 'private owner note' : null,
-}));
+/**
+ * Two rows that share a start date. One owner cannot hold two rows on the
+ * same day any more, so the tie is exercised across owners and the owner
+ * comparison stays the tie-break.
+ */
+const tiedOwnerRows: RowSpec[] = [
+  {
+    id: randomUUID(),
+    userId: owner.id,
+    startDate: '2026-08-15',
+    endDate: '2026-08-15',
+    note: 'private owner note',
+  },
+  {
+    id: randomUUID(),
+    userId: tiedOtherOwner.id,
+    startDate: '2026-08-15',
+    endDate: '2026-08-15',
+    note: null,
+  },
+];
 
 /** One dedicated range per mutation scenario so the scenarios stay isolated. */
 const exactRows: RowSpec[] = ['1', '2', '3', '4', '5'].map((suffix) => ({
@@ -201,6 +222,17 @@ async function mint(user: FixtureUser, scopes: string[]): Promise<string> {
 
 const AUGUST = { start: '2026-08-10', end: '2026-08-31' };
 
+/** The order the API returns: start date, then owner, then id. */
+function expectedOrder(rows: RowSpec[]): string[] {
+  return [...rows]
+    .sort((left, right) => {
+      if (left.startDate !== right.startDate) return left.startDate < right.startDate ? -1 : 1;
+      if (left.userId !== right.userId) return left.userId < right.userId ? -1 : 1;
+      return left.id < right.id ? -1 : 1;
+    })
+    .map((row) => row.id);
+}
+
 function query(overrides: Record<string, string> = {}): string {
   return new URLSearchParams({ ...AUGUST, ...overrides }).toString();
 }
@@ -227,7 +259,7 @@ describe('GET /pto paging, owner filtering and cursor validation', () => {
     resetEnvForTests();
     __resetAuthUserCacheForTests();
     __resetAgentQuotaForTests();
-    await db.user.createMany({ data: users });
+    await db.user.createMany({ data: [...users, ...bulkOwners, tiedOtherOwner] });
     await db.pTORequest.createMany({
       data: allRows.map((row) => ({
         id: row.id,
@@ -243,10 +275,10 @@ describe('GET /pto paging, owner filtering and cursor validation', () => {
 
   afterAll(async () => {
     try {
-      await db.auditLog.deleteMany({ where: { actorUserId: { in: userIds } } });
-      await db.pTORequest.deleteMany({ where: { userId: { in: userIds } } });
-      await db.personalAccessToken.deleteMany({ where: { ownerId: { in: userIds } } });
-      await db.user.deleteMany({ where: { id: { in: userIds } } });
+      await db.auditLog.deleteMany({ where: { actorUserId: { in: allFixtureUserIds } } });
+      await db.pTORequest.deleteMany({ where: { userId: { in: allFixtureUserIds } } });
+      await db.personalAccessToken.deleteMany({ where: { ownerId: { in: allFixtureUserIds } } });
+      await db.user.deleteMany({ where: { id: { in: allFixtureUserIds } } });
     } finally {
       await Promise.all([
         app?.closeResources(),
@@ -289,7 +321,7 @@ describe('GET /pto paging, owner filtering and cursor validation', () => {
       expect(lastHasMore).toBe(false);
       expect(pages).toBe(6);
       expect(seen).toHaveLength(BULK_COUNT);
-      expect(seen).toEqual(bulkIds);
+      expect(seen).toEqual(expectedOrder(bulkRows));
     });
 
     it('keeps the legacy array cap but never loses a filtered owner to it', async () => {
@@ -299,8 +331,11 @@ describe('GET /pto paging, owner filtering and cursor validation', () => {
         .set('Cookie', cookie)
         .expect(200);
       expect(unfiltered.body).toHaveLength(1000);
+      expect(unfiltered.body.map((item: { id: string }) => item.id)).toEqual(
+        expectedOrder(bulkForeignRows).slice(0, 1000),
+      );
       expect(
-        unfiltered.body.every((item: { user: { id: string } }) => item.user.id === bulkOwner),
+        unfiltered.body.every((item: { user: { id: string } }) => item.user.id !== tailOwner),
       ).toBe(true);
 
       const filtered = await request(app)
@@ -328,7 +363,7 @@ describe('GET /pto paging, owner filtering and cursor validation', () => {
       expect(last.body.hasMore).toBe(false);
       expect(last.body.nextCursor).toBeNull();
       expect([...paged.body.items, ...last.body.items].map((i: { id: string }) => i.id)).toEqual(
-        tailRows.map((row) => row.id).sort(),
+        expectedOrder(tailRows),
       );
     });
   });
@@ -338,17 +373,11 @@ describe('GET /pto paging, owner filtering and cursor validation', () => {
       const cookie = await login(owner);
       const res = await request(app).get(`/pto?${query()}`).set('Cookie', cookie).expect(200);
       const ids = res.body.map((item: { id: string }) => item.id);
-      const expected = [earlierOverlap, foreignTie, ...tiedOwnerRows]
-        .sort((left, right) => {
-          if (left.startDate !== right.startDate) return left.startDate < right.startDate ? -1 : 1;
-          if (left.userId !== right.userId) return left.userId < right.userId ? -1 : 1;
-          return left.id < right.id ? -1 : 1;
-        })
-        .map((row) => row.id);
+      const expected = expectedOrder([earlierOverlap, foreignTie, ...tiedOwnerRows]);
       expect(ids).toEqual(expected);
 
-      // Page boundaries exercise each part of the SQL sort key, including a
-      // cursor whose anchor starts before the requested overlapping range.
+      // A same-owner/date tie cannot exist now. Cross-owner ties and a
+      // cursor whose anchor starts before the requested range still page.
       let cursor: string | null = null;
       for (const [index, id] of expected.entries()) {
         const page = await request(app)

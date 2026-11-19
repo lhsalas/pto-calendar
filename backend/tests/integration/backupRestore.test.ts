@@ -8,16 +8,56 @@ import { createPrismaClient } from '../../src/lib/prismaClient.js';
 const repoRoot = join(import.meta.dirname, '..', '..', '..');
 const SCHEMA_SANITIZER = join(repoRoot, 'infra/deploy/sql-sanitize-schema.sed');
 const DATA_SANITIZER = join(repoRoot, 'infra/deploy/sql-sanitize-data.sed');
+const BACKUP_SCRIPT = join(repoRoot, 'infra/deploy/backup.sh');
 
-const SOURCE_URL =
-  process.env.BACKUP_TEST_SOURCE_URL ??
-  'postgresql://pto:pto@localhost:5432/pto_test?schema=public';
-const TARGET_URL =
-  process.env.BACKUP_TEST_TARGET_URL ??
-  'postgresql://pto:pto@localhost:5432/pto_restore_test?schema=public';
 const LOCAL_CONTAINER = 'pto-calendar-db';
 const TARGET_DB = 'pto_restore_test';
 const SOURCE_DB = 'pto_test';
+/** The maintenance database never carries an application extension. */
+const PLAIN_DB = 'postgres';
+
+function fixtureUrl(value: string, db: string): URL {
+  const url = new URL(value);
+  if (
+    !['postgresql:', 'postgres:'].includes(url.protocol) ||
+    !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
+    url.pathname !== `/${db}` ||
+    url.username !== 'pto' ||
+    url.password !== 'pto' ||
+    url.hash ||
+    [...url.searchParams].some(([key, value]) => key !== 'schema' || value !== 'public')
+  ) {
+    throw new Error(`Backup integration requires the disposable loopback ${db} fixture.`);
+  }
+  return url;
+}
+
+const source = fixtureUrl(
+  process.env.BACKUP_TEST_SOURCE_URL ??
+    'postgresql://pto:pto@localhost:5432/pto_test?schema=public',
+  SOURCE_DB,
+);
+const defaultTarget = new URL(source.href);
+defaultTarget.pathname = `/${TARGET_DB}`;
+const target = fixtureUrl(process.env.BACKUP_TEST_TARGET_URL ?? defaultTarget.href, TARGET_DB);
+const fixturePort = source.port || '5432';
+if (target.hostname !== source.hostname || (target.port || '5432') !== fixturePort) {
+  throw new Error('The disposable backup source and target must share a PostgreSQL server.');
+}
+const SOURCE_URL = source.href;
+const TARGET_URL = target.href;
+const fixtureHost = source.hostname.replace(/^\[|\]$/g, '');
+
+/**
+ * #257: the owner/date exclusion constraint needs btree_gist, and a
+ * public-only schema dump omits the extension declaration. The production
+ * backup adds the extension only when the source database has it, and the
+ * fixture dump uses the very same arguments so the roundtrip proves the
+ * archive that is actually uploaded.
+ */
+const REQUIRED_EXTENSION = 'btree_gist';
+const OVERLAP_CONSTRAINT = 'pto_requests_no_owner_overlap';
+const EXTENSION_DECLARATION = /^CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public;/m;
 
 const PASSPHRASE = 'correct horse battery staple';
 
@@ -28,6 +68,9 @@ function detectRunner(): Runner {
     const probe = spawnSync(candidate, ['--version'], { stdio: 'ignore' });
     if (probe.status === 0) return 'pg_dump';
   }
+  // The standard compose container only serves port 5432. Do not silently
+  // use it when the explicitly selected fixture is on a different port.
+  if (fixturePort !== '5432') return 'none';
   const containerProbe = spawnSync('podman', ['ps', '--format', '{{.Names}}'], {
     encoding: 'utf8',
   });
@@ -59,14 +102,24 @@ function runPgSql(sqlArgs: string[], input?: string): string {
   if (!tool) {
     throw new Error('sqlArgs must include a tool name');
   }
-  const subArgs = sqlArgs.slice(1);
+  const subArgs = [
+    ...(tool === 'psql' ? ['-X'] : []),
+    '-h',
+    fixtureHost,
+    '-p',
+    fixturePort,
+    '-U',
+    source.username,
+    ...sqlArgs.slice(1),
+  ];
   const resolvedTool = runner === 'pg_dump' ? resolveTool(tool) : tool;
   const fullArgs =
     runner === 'pg_dump'
       ? subArgs
       : ['exec', '-i', '-e', `PGPASSWORD=pto`, LOCAL_CONTAINER, resolvedTool, ...subArgs];
   const cmd = runner === 'pg_dump' ? resolvedTool : 'podman';
-  const env = runner === 'pg_dump' ? { PGPASSWORD: 'pto' } : undefined;
+  const env =
+    runner === 'pg_dump' ? { PATH: process.env.PATH, PGPASSWORD: source.password } : undefined;
   const result = spawnSync(cmd, fullArgs, {
     encoding: 'utf8',
     input,
@@ -82,23 +135,7 @@ function runPgSql(sqlArgs: string[], input?: string): string {
 }
 
 function runSql(sql: string): void {
-  runPgSql(
-    [
-      'psql',
-      '-h',
-      'localhost',
-      '-p',
-      '5432',
-      '-U',
-      'pto',
-      '-d',
-      TARGET_DB,
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-q',
-    ],
-    sql,
-  );
+  runPgSql(['psql', '-d', TARGET_DB, '-v', 'ON_ERROR_STOP=1', '-q'], sql);
 }
 
 // A dump taken from another database can reference roles and settings the
@@ -120,55 +157,40 @@ function sanitizeSql(sourcePath: string, sanitizerPath: string): string {
 }
 
 function resetTarget(): void {
-  try {
-    runPgSql([
-      'psql',
-      '-h',
-      'localhost',
-      '-p',
-      '5432',
-      '-U',
-      'pto',
-      '-d',
-      TARGET_DB,
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-c',
-      'DROP SCHEMA public CASCADE;',
-    ]);
-  } catch {
-    // ignore — the schema didn't exist, which is exactly what we wanted
-  }
+  runSql('DROP SCHEMA IF EXISTS public CASCADE;');
 }
 
-function dumpSchema(): string {
-  return runPgSql([
-    'pg_dump',
-    '-h',
-    'localhost',
-    '-p',
-    '5432',
-    '-U',
-    'pto',
-    '--schema-only',
-    '--no-owner',
-    '--schema=public',
-    '--dbname',
-    SOURCE_DB,
+function extensionInstalled(dbName: string): boolean {
+  const raw = runPgSql([
+    'psql',
+    '-d',
+    dbName,
+    '-tAc',
+    "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'btree_gist');",
   ]);
+  return raw.trim() === 't';
+}
+
+/**
+ * The schema dump with the production arguments: public schema, no owner, no
+ * ACL and — only when the source database has the extension — the extension
+ * declaration itself.
+ */
+function dumpSchema(dbName: string = SOURCE_DB, includeExtension = true): string {
+  const args = ['pg_dump', '--schema-only', '--no-owner', '--no-acl', '--schema=public'];
+  if (includeExtension && extensionInstalled(dbName)) {
+    args.push(`--extension=${REQUIRED_EXTENSION}`);
+  }
+  args.push('--dbname', dbName);
+  return runPgSql(args);
 }
 
 function dumpData(): string {
   return runPgSql([
     'pg_dump',
-    '-h',
-    'localhost',
-    '-p',
-    '5432',
-    '-U',
-    'pto',
     '--data-only',
     '--no-owner',
+    '--no-acl',
     '--schema=public',
     '--dbname',
     SOURCE_DB,
@@ -177,39 +199,16 @@ function dumpData(): string {
 
 function ensureTargetDatabase(): void {
   try {
-    runPgSql([
-      'psql',
-      '-h',
-      'localhost',
-      '-p',
-      '5432',
-      '-U',
-      'pto',
-      '-d',
-      TARGET_DB,
-      '-c',
-      'SELECT 1',
-    ]);
+    runPgSql(['psql', '-d', TARGET_DB, '-c', 'SELECT 1']);
     return;
   } catch {
     // fall through and create
   }
   try {
-    runPgSql([
-      'psql',
-      '-h',
-      'localhost',
-      '-p',
-      '5432',
-      '-U',
-      'pto',
-      '-d',
-      'postgres',
-      '-c',
-      `CREATE DATABASE ${TARGET_DB};`,
-    ]);
+    runPgSql(['psql', '-d', PLAIN_DB, '-c', `CREATE DATABASE ${TARGET_DB};`]);
   } catch {
-    // race-safe: ignore "database already exists" if another process raced us.
+    // Only succeed if another process created the exact disposable target.
+    runPgSql(['psql', '-d', TARGET_DB, '-c', 'SELECT 1']);
   }
 }
 
@@ -275,6 +274,62 @@ async function selectCount(url: string, table: string): Promise<number> {
   return Number(count);
 }
 
+/** Counts the rows a fixed catalog query matches; the query is a literal. */
+async function selectScalar(url: string, sql: string): Promise<number> {
+  const client = createPrismaClient(url);
+  try {
+    const rows = await client.$queryRawUnsafe<{ value: bigint }[]>(sql);
+    return Number(rows[0]?.value ?? 0n);
+  } finally {
+    await client.$disconnect();
+  }
+}
+
+/** One PTO row as the stored columns, so a restore can be compared field by field. */
+async function selectPtoRow(url: string, id: string): Promise<Record<string, unknown> | null> {
+  const client = createPrismaClient(url);
+  try {
+    const row = await client.pTORequest.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        userId: true,
+        startDate: true,
+        endDate: true,
+        dayPart: true,
+        note: true,
+        version: true,
+      },
+    });
+    return row;
+  } finally {
+    await client.$disconnect();
+  }
+}
+
+/**
+ * Tries to store an overlapping PTO for the same owner. The exclusion
+ * constraint of #257 must refuse it; the returned message is null when the
+ * write was accepted.
+ */
+async function tryOverlappingPto(
+  url: string,
+  userId: string,
+  startDate: Date,
+): Promise<string | null> {
+  const client = createPrismaClient(url);
+  try {
+    await client.pTORequest.create({
+      data: { userId, startDate, endDate: startDate, dayPart: 'morning' },
+    });
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  } finally {
+    await client.$disconnect();
+  }
+}
+
 const sourcePrisma = createPrismaClient(SOURCE_URL);
 const runner = detectRunner();
 const testOrSkip = runner === 'none' ? it.skip : it;
@@ -285,6 +340,9 @@ const testOrSkip = runner === 'none' ? it.skip : it;
 // dependency on another file's side effect would make this test fail
 // whenever a file grows.
 const FIXTURE_EMAIL = `backup-restore-${process.pid}@example.test`;
+const FIXTURE_START = new Date('2024-01-08T00:00:00.000Z');
+let fixtureUserId = '';
+let fixturePtoId = '';
 
 async function createSourceFixture(): Promise<void> {
   const client = createPrismaClient(SOURCE_URL);
@@ -307,6 +365,8 @@ async function createSourceFixture(): Promise<void> {
         note: 'backup restore fixture',
       },
     });
+    fixtureUserId = user.id;
+    fixturePtoId = pto.id;
     await client.auditLog.create({
       data: {
         actorUserId: user.id,
@@ -460,8 +520,70 @@ describe('database backup → restore roundtrip', () => {
           target: sourceCount,
         });
       }
+
+      // #257: the restored database must be able to enforce the owner/date
+      // exclusion, which only works when the extension travelled with the
+      // archive.
+      expect(
+        await selectScalar(
+          TARGET_URL,
+          `SELECT count(*)::bigint AS value FROM pg_extension WHERE extname = '${REQUIRED_EXTENSION}'`,
+        ),
+      ).toBe(1);
+      expect(
+        await selectScalar(
+          TARGET_URL,
+          `SELECT count(*)::bigint AS value FROM pg_constraint WHERE conname = '${OVERLAP_CONSTRAINT}'`,
+        ),
+      ).toBe(1);
+
+      // The restored row keeps its version, note and dates.
+      const sourceRow = await selectPtoRow(SOURCE_URL, fixturePtoId);
+      const targetRow = await selectPtoRow(TARGET_URL, fixturePtoId);
+      expect(sourceRow).not.toBeNull();
+      expect(targetRow).toEqual(sourceRow);
+      expect(targetRow?.note).toBe('backup restore fixture');
+      expect(targetRow?.version).toBe(1);
+
+      // The restored constraint really refuses an overlap for the same owner.
+      const before = await selectCount(TARGET_URL, 'pto_requests');
+      const refusal = await tryOverlappingPto(TARGET_URL, fixtureUserId, FIXTURE_START);
+      expect(refusal, 'the restored database accepted an overlapping PTO').not.toBeNull();
+      expect(refusal).toContain(`exclusion constraint "${OVERLAP_CONSTRAINT}"`);
+      expect(await selectCount(TARGET_URL, 'pto_requests')).toBe(before);
     },
     120_000,
+  );
+
+  testOrSkip(
+    'a database without the extension is still dumped without it',
+    async () => {
+      // The maintenance database never carries btree_gist, so it stands in for
+      // a database that predates the migration: the backup must not be
+      // blocked and must not mention an extension it does not have.
+      expect(extensionInstalled(PLAIN_DB)).toBe(false);
+      const legacy = dumpSchema(PLAIN_DB);
+      expect(legacy).not.toMatch(EXTENSION_DECLARATION);
+      expect(legacy).not.toContain(OVERLAP_CONSTRAINT);
+      expect(legacy.length).toBeGreaterThan(0);
+    },
+    60_000,
+  );
+
+  testOrSkip(
+    'explicitly including the extension fixes the incomplete public-only dump',
+    async () => {
+      // This is the shape the production backup must refuse: the constraint
+      // needs btree_gist, and a public-only dump omits the declaration.
+      const withoutExtension = dumpSchema(SOURCE_DB, false);
+      expect(withoutExtension).toContain(OVERLAP_CONSTRAINT);
+      expect(withoutExtension).not.toMatch(EXTENSION_DECLARATION);
+
+      // The archive that is uploaded does carry the extension.
+      const withExtension = dumpSchema(SOURCE_DB);
+      expect(withExtension).toMatch(EXTENSION_DECLARATION);
+    },
+    60_000,
   );
 
   it('strips target-incompatible statements from a dump taken by a newer client', () => {
@@ -496,5 +618,34 @@ describe('database backup → restore roundtrip', () => {
 
     expect(sanitizedData).not.toContain('transaction_timeout');
     expect(sanitizedData).toContain('SELECT 1;');
+  });
+
+  it('the backup script only adds the extension it knows and fails closed without it', () => {
+    // The script cannot run without the container and the object store, so the
+    // guard it adds is asserted here instead of in a live backup.
+    expect(existsSync(BACKUP_SCRIPT)).toBe(true);
+    const script = readFileSync(BACKUP_SCRIPT, 'utf8');
+
+    expect(script).toContain(`readonly REQUIRED_EXTENSION="${REQUIRED_EXTENSION}"`);
+    expect(script).toContain(`readonly OVERLAP_CONSTRAINT="${OVERLAP_CONSTRAINT}"`);
+    // A fixed existence query: no table data, no secret and no log output.
+    expect(script).toContain(
+      "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'btree_gist');",
+    );
+    expect(script).toContain('SCHEMA_DUMP_ARGS+=(--extension="${REQUIRED_EXTENSION}")');
+    // The fail-closed rule looks for the one known extension, not for any
+    // extension statement.
+    expect(script).toContain(
+      '^CREATE EXTENSION IF NOT EXISTS ${REQUIRED_EXTENSION} WITH SCHEMA public;',
+    );
+    expect(script).toMatch(/refusing to upload a backup that cannot be restored/);
+
+    // The extension selection stays narrow: only the one known extension.
+    expect(script).not.toMatch(/--extension="?\$\{(?!REQUIRED_EXTENSION\})/);
+    // The encryption, the upload authentication and the cleanup are untouched.
+    expect(script).toContain('--cipher-algo AES256');
+    expect(script).toContain('--symmetric');
+    expect(script).toContain('--auth instance_principal');
+    expect(script).toContain('trap cleanup EXIT INT TERM');
   });
 });

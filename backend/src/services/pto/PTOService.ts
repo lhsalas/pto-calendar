@@ -8,6 +8,7 @@ import { auditEntryFor, record as recordAudit } from '../audit/AuditLogService.j
 import type { AttributedActor } from '../audit/auditContext.js';
 import { validatePtoPatch, validatePtoPayload, type ValidatedPto } from './validation.js';
 import { staleWrite } from './preconditions.js';
+import { ownerOverlapConflict, throwIfPtoWriteConflict } from './constraintErrors.js';
 import type { CreatePtoInput, PatchPtoInput } from './schemas.js';
 
 export type PublicPto = Pick<
@@ -202,7 +203,7 @@ async function guardedUpdate(
     return await tx.pTORequest.update({ where, data, select: PUBLIC_PTO_SELECT });
   } catch (err) {
     if (isMissingRow(err)) staleWrite();
-    rethrowSafeDriverFailure(err);
+    throw err;
   }
 }
 
@@ -231,11 +232,7 @@ export async function createPto(actor: AttributedActor, input: CreatePtoInput): 
   const validated: ValidatedPto = validatePtoPayload(input);
   const overlap = await findOverlapping(actor.id, validated.startDate, validated.endDate);
   if (overlap) {
-    throw new HttpError(
-      409,
-      'CONFLICT',
-      'This PTO overlaps an existing PTO entry for the same user.',
-    );
+    ownerOverlapConflict();
   }
   try {
     return await prisma.$transaction(async (tx) => {
@@ -267,6 +264,7 @@ export async function createPto(actor: AttributedActor, input: CreatePtoInput): 
       return row;
     });
   } catch (err) {
+    throwIfPtoWriteConflict(err);
     rethrowSafeDriverFailure(err);
   }
 }
@@ -308,11 +306,7 @@ export async function updatePto(
         tx,
       );
       if (overlap) {
-        throw new HttpError(
-          409,
-          'CONFLICT',
-          'This PTO overlaps an existing PTO entry for the same user.',
-        );
+        ownerOverlapConflict();
       }
       const updated = await guardedUpdate(
         tx,
@@ -343,6 +337,7 @@ export async function updatePto(
       return updated;
     });
   } catch (err) {
+    throwIfPtoWriteConflict(err);
     rethrowSafeDriverFailure(err);
   }
 }
@@ -387,11 +382,7 @@ export async function patchPto(
         tx,
       );
       if (overlap) {
-        throw new HttpError(
-          409,
-          'CONFLICT',
-          'This PTO overlaps an existing PTO entry for the same user.',
-        );
+        ownerOverlapConflict();
       }
       const noteProvided = Object.hasOwn(patch, 'note');
       const updated = await guardedUpdate(
@@ -423,6 +414,7 @@ export async function patchPto(
       return updated;
     });
   } catch (err) {
+    throwIfPtoWriteConflict(err);
     rethrowSafeDriverFailure(err);
   }
 }
