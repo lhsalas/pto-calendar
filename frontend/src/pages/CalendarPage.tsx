@@ -154,6 +154,13 @@ export function CalendarPage(): JSX.Element {
         <h1 className="font-display text-xl font-semibold tracking-tight">Calendar</h1>
         <div className="flex flex-wrap items-center gap-3 text-sm text-ink-muted dark:text-ink-muted-dark">
           <ThemeToggle />
+          <Link
+            to="/settings/tokens"
+            data-testid="api-access-link"
+            className="min-h-11 rounded border border-border px-3 py-2 text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
+          >
+            API access
+          </Link>
           {canManageUsers(user) ? (
             <>
               <Link

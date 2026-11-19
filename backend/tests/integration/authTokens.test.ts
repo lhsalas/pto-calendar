@@ -146,6 +146,34 @@ describe('session-only personal token management on PostgreSQL', () => {
     },
   );
 
+  it('publishes the server-computed status of the own tokens', async () => {
+    const agent = await login();
+    const issued = await agent.post('/auth/tokens').send({ name: 'Laptop', password }).expect(201);
+    confidential(issued);
+    expect(issued.body.token.status).toBe('active');
+    const listed = await agent.get('/auth/tokens').expect(200);
+    confidential(listed);
+    expect(listed.body.tokens).toHaveLength(1);
+    expect(listed.body.tokens[0].status).toBe('active');
+    expect(Object.keys(listed.body.tokens[0]).sort()).toEqual([
+      'createdAt',
+      'displayPrefix',
+      'expiresAt',
+      'id',
+      'lastUsedAt',
+      'name',
+      'revokedAt',
+      'scopes',
+      'status',
+    ]);
+    expect(JSON.stringify(listed.body)).not.toContain(issued.body.rawToken);
+    expect(JSON.stringify(listed.body)).not.toContain(password);
+    confidential(await agent.delete(`/auth/tokens/${issued.body.token.id}`).expect(204));
+    const revoked = await agent.get('/auth/tokens').expect(200);
+    confidential(revoked);
+    expect(revoked.body.tokens[0].status).toBe('revoked');
+  });
+
   it('requires current passwords every time, preserves show-once secrecy and keeps logout separate from revocation', async () => {
     const agent = await login();
     const bad = await agent

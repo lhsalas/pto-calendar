@@ -1287,7 +1287,7 @@ components:
     PersonalTokenMetadata:
       type: object
       additionalProperties: false
-      required: [id, name, displayPrefix, scopes, createdAt, expiresAt, lastUsedAt, revokedAt]
+      required: [id, name, displayPrefix, scopes, createdAt, expiresAt, lastUsedAt, revokedAt, status]
       properties:
         id: { type: string, format: uuid }
         name: { type: string, maxLength: 120 }
@@ -1304,6 +1304,14 @@ components:
           description: Absolute UTC expiry, at most 365*24h after creation.
         lastUsedAt: { type: string, format: date-time, nullable: true }
         revokedAt: { type: string, format: date-time, nullable: true }
+        status:
+          type: string
+          enum: [active, expired, revoked, invalidated]
+          description: >-
+            Server-computed state of the owner's own token. Revoked wins over
+            expired, which wins over invalidated; invalidated covers a changed
+            session version, a reset account and a live role that no longer
+            fits the token's team scopes. Clients must not derive it locally.
     Role:
       type: string
       enum: [member, team_lead, admin]

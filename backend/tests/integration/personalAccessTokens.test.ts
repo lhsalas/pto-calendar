@@ -270,6 +270,132 @@ describe('personal access tokens on PostgreSQL', () => {
     }
   });
 
+  it('computes the owner-visible status from the row and the live owner', async () => {
+    const plain = await issueToken(tokens, sessionActor(ownerId), 0, { name: 'plain' });
+    const team = await issueToken(tokens, sessionActor(ownerId), 0, {
+      name: 'team',
+      scopes: ['pto:update:team'],
+    });
+    const statusOf = async (id: string): Promise<string | undefined> =>
+      (await listTokens(tokens, ownerId)).find((token) => token.id === id)?.status;
+
+    expect(await statusOf(plain.token.id)).toBe('active');
+    expect(await statusOf(team.token.id)).toBe('active');
+
+    // A live role that no longer fits the team scopes invalidates that token
+    // only; a read-only token of the same owner stays live.
+    await db.user.update({ where: { id: ownerId }, data: { role: 'member' } });
+    expect(await statusOf(team.token.id)).toBe('invalidated');
+    expect(await statusOf(plain.token.id)).toBe('active');
+    await db.user.update({ where: { id: ownerId }, data: { role: 'team_lead' } });
+    expect(await statusOf(team.token.id)).toBe('active');
+
+    // A reset account has no usable password, so its tokens are invalidated.
+    // The token is still unexpired here, so the invalidation is the only
+    // reason it is no longer live.
+    await db.user.update({ where: { id: ownerId }, data: { passwordHash: null } });
+    expect(await statusOf(plain.token.id)).toBe('invalidated');
+    await db.user.update({
+      where: { id: ownerId },
+      data: { passwordHash: 'test-only-hash' },
+    });
+    expect(await statusOf(plain.token.id)).toBe('active');
+
+    // A changed session version invalidates the credentials of the old session.
+    await db.user.update({
+      where: { id: ownerId },
+      data: { sessionVersion: { increment: 1 } },
+    });
+    expect(await statusOf(plain.token.id)).toBe('invalidated');
+    expect(await statusOf(team.token.id)).toBe('invalidated');
+  });
+
+  it('changes status after the database reaches expiry and lets revocation win', async () => {
+    const issued = await issueToken(tokens, sessionActor(ownerId), 0, { name: 'expiry' });
+    const statusOf = async (): Promise<string | undefined> =>
+      (await listTokens(tokens, ownerId)).find((token) => token.id === issued.token.id)?.status;
+
+    expect(await statusOf()).toBe('active');
+
+    // The expiry is read from the database's own UTC wall clock, so a token
+    // that ends in the future stays active.
+    await db.$executeRaw`
+      UPDATE personal_access_tokens
+      SET expires_at = (clock_timestamp() AT TIME ZONE 'UTC') + INTERVAL '1 minute'
+      WHERE id = ${issued.token.id}::uuid`;
+    expect(await statusOf()).toBe('active');
+
+    // Keep the stored instant after creation so the lifetime constraint
+    // still holds. The TIMESTAMP(3) column can round a sub-millisecond
+    // value up, so the next read is not guaranteed to be after expiry.
+    await db.$executeRaw`
+      UPDATE personal_access_tokens
+      SET expires_at = GREATEST(
+        (clock_timestamp() AT TIME ZONE 'UTC'), created_at + INTERVAL '1 millisecond')
+      WHERE id = ${issued.token.id}::uuid`;
+    // Synchronize on the persisted deadline, not on the behavior under test.
+    // Once PostgreSQL has reached it, a single status read must be expired.
+    await vi.waitFor(
+      async () => {
+        const [row] = await db.$queryRaw<{ reached: boolean }[]>`
+          SELECT expires_at <= (clock_timestamp() AT TIME ZONE 'UTC') AS reached
+          FROM personal_access_tokens WHERE id = ${issued.token.id}::uuid
+        `;
+        expect(row?.reached).toBe(true);
+      },
+      { timeout: 2000, interval: 10 },
+    );
+    expect(await statusOf()).toBe('expired');
+
+    // Expiry wins over invalidation, and revocation wins over both.
+    await db.user.update({
+      where: { id: ownerId },
+      data: { sessionVersion: { increment: 1 } },
+    });
+    expect(await statusOf()).toBe('expired');
+    expect(await revokeToken(tokens, sessionActor(ownerId), issued.token.id)).toBe(true);
+    expect(await statusOf()).toBe('revoked');
+  });
+
+  it("lists only the owner's own tokens and never a credential or an owner field", async () => {
+    const issued = await issueToken(tokens, sessionActor(ownerId), 0, { name: 'owned' });
+    const foreign = await issueToken(otherTokens, sessionActor(otherId), 0, { name: 'foreign' });
+    const listed = await listTokens(tokens, ownerId);
+    expect(listed.map((token) => token.id)).toEqual([issued.token.id]);
+    expect(await listTokens(otherTokens, otherId)).toHaveLength(1);
+    expect((await listTokens(tokens, otherId)).map((token) => token.id)).not.toContain(
+      issued.token.id,
+    );
+    // An owner without tokens gets an empty list, never another owner's rows.
+    expect(await listTokens(tokens, randomUUID())).toEqual([]);
+
+    const stored = await db.personalAccessToken.findUniqueOrThrow({
+      where: { id: issued.token.id },
+    });
+    const serialized = JSON.stringify(listed);
+    expect(serialized).not.toContain(stored.secretDigest);
+    expect(serialized).not.toContain(issued.rawToken);
+    expect(serialized).not.toContain(issued.rawToken.split('.')[1]!);
+    expect(serialized).not.toContain(ownerId);
+    expect(serialized).not.toContain(otherId);
+    expect(serialized).not.toContain('test-only-hash');
+    for (const token of listed) {
+      expect(Object.keys(token).sort()).toEqual([
+        'createdAt',
+        'displayPrefix',
+        'expiresAt',
+        'id',
+        'lastUsedAt',
+        'name',
+        'revokedAt',
+        'scopes',
+        'status',
+      ]);
+      expect(token.status).toBe('active');
+    }
+    expect(foreign.token.id).not.toBe(issued.token.id);
+  });
+
   it('rejects verification held behind a row lock until after absolute expiry', async () => {
     const issued = await issueToken(tokens, sessionActor(ownerId), 0, { name: 'Blocked expiry' });
     await db.personalAccessToken.update({

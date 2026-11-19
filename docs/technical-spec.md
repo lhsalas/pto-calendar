@@ -883,6 +883,20 @@ For each day in the visible calendar grid:
 - Queue: newest on top, max 3 visible (oldest auto-evicted), same `tone+title` dedupes in place (refreshes timestamp and content).
 - Motion: `motion/react` slide+fade enter (~180ms) and exit (~120ms); hairline progress bar driven by `requestAnimationFrame`; pauses on `hover` or `focus-within` and resumes on leave; `prefers-reduced-motion` reduces to opacity-only.
 
+### 11.7 Personal access token settings page (#254)
+
+- Route `/settings/tokens` renders `TokenSettingsPage` (`frontend/src/pages/settings/TokenSettingsPage.tsx`) behind the ordinary `RequireAuth` guard. Every role (`member`, `team_lead`, `admin`) reaches it; it is not under `/admin` and carries no team-lead guard. An unauthenticated visit is redirected to `/login`.
+- The calendar header carries the entry point: a `Link` to `/settings/tokens` labelled **API access** (`data-testid="api-access-link"`), rendered for every signed-in user.
+- The page heading is **Personal access tokens**. It has three sections: *Issue a token* (`Generate token`, `data-testid="generate-token-button"`), *Your tokens* (one card per owned token) and *Revoke every token* (`Revoke all tokens`, `data-testid="revoke-all-button"`).
+- Issuance dialog (`TokenCreateDialog`): `Token name`, `Current password`, `Expires after` (30/90/180/365 days) and the scope picker (`TokenScopePicker`). The defaults are read-only (`pto:read`) and 90 days. The picker applies the server's scope dependencies: note reading needs read access, and the team scopes are only offered to a live team lead or administrator.
+- The password lives in component state only, is cleared when the form is submitted or closed, and is never stored, logged, put in the URL or echoed back. Credential requests are sent with `cache: 'no-store'` and `redirect: 'error'` so a raw token cannot enter the HTTP cache and a redirect is never re-requested with the session cookie.
+- Reveal dialog (`TokenRevealDialog`): the raw secret is shown exactly once, in a read-only `New token` field (`data-testid="new-token-value"`), with `Copy token` and `Done`. Copying uses the Clipboard API and reports the result accessibly — an inline `role="status"` / `role="alert"` line plus a toast that never carries the secret. The secret is kept in component memory only and is dropped when the dialog closes, when the page navigates and when the document is hidden for navigation (`pagehide`).
+- Token cards (`TokenCard`) show owned metadata only: name, display prefix, scopes, created/expiry/last-used and the server-computed status (`Active`, `Expired`, `Revoked`, `Invalidated`). The absolute expiry is rendered in the reader's time zone with the zone name, and a token inside the seven-day window gets an explicit near-expiry warning. An existing secret is never revealed.
+- Revocation: `Revoke <token name>` and `Revoke all tokens` open `TokenConfirmDialog` (titles `Revoke token` and `Revoke all tokens`, confirm button `Confirm revocation`). Revocation needs a valid session only — no password — and the owned list is refreshed afterwards.
+- The dialogs reuse the shared modal trap (Escape to close, Tab cycling, scroll lock, initial focus) and add focus restoration through `useTokenDialog`: the control that opened a dialog gets its focus back when the dialog closes.
+- The CLI/local MCP section is placeholder-only. It states that no client is distributed yet, so there is nothing to install and nothing to paste, and it explains that an assistant can see whatever the tool sends it — including note text — and that this reaches whichever AI provider is configured, so a token must never be pasted into a chat or a shared document.
+- No token is written to `localStorage`, no `VITE_*` token configuration exists, and the rollout flags `PAT_AUTH_ENABLED` / `PAT_WRITES_ENABLED` stay off by default in every environment. A token issued in this page therefore cannot reach a bearer route until an operator enables bearer authentication; the separate read-only/write rollout gates are unchanged.
+
 ## 12. Query and Rendering Logic
 
 ### 12.1 Visible date-range overlap query
@@ -995,6 +1009,7 @@ function expandPTOToDates(pto) {
 - useModalA11y: Esc-to-close, scroll-lock, focus-trap, Tab cycle (8 tests)
 - mobile-chrome project (Pixel 5) verifies the responsive layout, ≥44px tap targets, modal scroll-lock on small viewports
 - keyboard focus indicators on inputs, buttons, chips, calendar cells, and the modal close button
+- own-token settings (#254, `frontend/e2e/token-settings.spec.ts`, chromium-only): the member journey from the calendar **API access** entry to a read-only 90-day token, the copy-once reveal, the clear-on-close/navigation rule, revoke-one and revoke-all without a password, and the cookie-free bearer proof on `GET /auth/me` (200 before revocation, 401 after)
 
 ### 14.4 Automation, tooling, CI/CD, and coverage policy
 See `testing-strategy.md` for the full automation plan: tooling matrix (Vitest, Supertest, React Testing Library, MSW, Playwright, GitHub Actions), coverage targets with strict gates on authorization and PTO validation, ephemeral Postgres for integration tests, pre-commit hooks, and merge policy.

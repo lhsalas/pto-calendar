@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw';
-import type { PTOWithUser, User } from '../../src/types/api';
+import type { PTOWithUser, TokenMetadata, User } from '../../src/types/api';
 
 export const STUB_USER: User = {
   id: '11111111-1111-1111-1111-111111111111',
@@ -193,6 +193,40 @@ export const holidaysSeedOk = http.post('/holidays/seed', () =>
 
 export const holidaysRange = http.get('/holidays', () => HttpResponse.json([]));
 
+export const STUB_TOKEN: TokenMetadata = {
+  id: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+  name: 'Laptop',
+  displayPrefix: 'pto_pat_cccccccc-cccc-cccc-cccc-cccccccccccc',
+  scopes: ['pto:read'],
+  createdAt: '2026-06-01T10:00:00.000Z',
+  expiresAt: '2026-09-01T10:00:00.000Z',
+  lastUsedAt: null,
+  revokedAt: null,
+  status: 'active',
+};
+
+export const STUB_RAW_TOKEN = 'pto_pat_cccccccc-cccc-cccc-cccc-cccccccccccc.' + 'a'.repeat(64);
+
+export const tokensListEmpty = http.get('/auth/tokens', () => HttpResponse.json({ tokens: [] }));
+
+export const tokensListOne = http.get('/auth/tokens', () =>
+  HttpResponse.json({ tokens: [STUB_TOKEN] }),
+);
+
+export const tokenCreateOk = http.post('/auth/tokens', () =>
+  HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 }),
+);
+
+export const tokenRevokeOk = http.delete(
+  '/auth/tokens/:id',
+  () => new HttpResponse(null, { status: 204 }),
+);
+
+export const tokenRevokeAllOk = http.post(
+  '/auth/tokens/revoke-all',
+  () => new HttpResponse(null, { status: 204 }),
+);
+
 export const handlers = [
   unauthenticated,
   loginOk,
@@ -200,4 +234,5 @@ export const handlers = [
   ptoListEmpty,
   ptoCreateOk,
   holidaysRange,
+  tokensListEmpty,
 ];

@@ -117,3 +117,87 @@ describe('apiRequest hardening', () => {
     // Vitest's default 5s test timeout would fire if the timer leaked.
   });
 });
+
+describe('apiRequest deadline mode', () => {
+  it('aborts the request when the deadline expires', async () => {
+    let observed: AbortSignal | undefined;
+    globalThis.fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      observed = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        const sig = init?.signal;
+        if (!sig) return;
+        if (sig.aborted) {
+          reject(new DOMException('Aborted', 'AbortError'));
+          return;
+        }
+        sig.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'));
+        });
+      });
+    }) as unknown as typeof fetch;
+
+    await expect(apiRequest('/deadline', { deadline: true, timeoutMs: 20 })).rejects.toMatchObject({
+      status: 0,
+      body: { code: 'TIMEOUT', message: 'Request timed out.' },
+    });
+    // The request itself is aborted, not just abandoned.
+    expect(observed?.aborted).toBe(true);
+  });
+
+  it('applies the deadline to the response body as well', async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      status: 200,
+      ok: true,
+      statusText: 'OK',
+      // The headers arrive, the body never does.
+      text: () => new Promise<string>(() => undefined),
+    })) as unknown as typeof fetch;
+
+    await expect(apiRequest('/slow-body', { deadline: true, timeoutMs: 20 })).rejects.toMatchObject(
+      {
+        status: 0,
+        body: { code: 'TIMEOUT', message: 'Request timed out.' },
+      },
+    );
+  });
+
+  it('reports a caller abort separately from a timeout and aborts the request', async () => {
+    let observed: AbortSignal | undefined;
+    globalThis.fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      observed = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        const sig = init?.signal;
+        sig?.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'));
+        });
+      });
+    }) as unknown as typeof fetch;
+
+    const controller = new AbortController();
+    const promise = apiRequest('/caller-abort-deadline', {
+      deadline: true,
+      signal: controller.signal,
+      timeoutMs: 5000,
+    });
+    controller.abort();
+    await expect(promise).rejects.toMatchObject({
+      status: 0,
+      body: { code: 'ABORTED', message: 'Request was aborted.' },
+    });
+    expect(observed?.aborted).toBe(true);
+  });
+
+  it('keeps the default race timeout for callers that do not opt in', async () => {
+    globalThis.fetch = vi.fn(
+      (_input, init) =>
+        new Promise<Response>((resolve) => {
+          void init;
+          setTimeout(() => resolve(new Response('{}', { status: 200 })), 200);
+        }),
+    ) as unknown as typeof fetch;
+    await expect(apiRequest('/slow', { timeoutMs: 10 })).rejects.toMatchObject({
+      status: 0,
+      body: { code: 'TIMEOUT' },
+    });
+  });
+});

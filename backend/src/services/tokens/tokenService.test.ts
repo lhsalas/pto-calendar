@@ -70,7 +70,8 @@ function fixture() {
   const read = vi.fn(async () =>
     result([{ ...record, ...owner, id: record.id, ownerId: owner.id }]),
   );
-  const list = vi.fn(async () => result([]));
+  const listRows: unknown[] = [];
+  const list = vi.fn(async () => result(listRows));
   const txQuery = vi.fn((text: string, values: unknown[] = []) => {
     statements.push(text);
     if (text.includes('FOR UPDATE')) return lock();
@@ -119,6 +120,7 @@ function fixture() {
     query,
     read,
     list,
+    listRows,
     statements,
     record: () => record,
   };
@@ -144,6 +146,29 @@ describe('native personal token service', () => {
     expect(JSON.stringify(issued.token)).not.toContain(String(values[4]));
     expect(JSON.stringify(issued.token)).not.toContain(issued.rawToken);
     expect(issued.token.id).toBe(issued.rawToken.slice(8).split('.')[0]);
+  });
+
+  it('issues an active token whose metadata carries no owner or credential field', async () => {
+    const f = fixture();
+    const issued = await issueToken(f.db, ACTOR, 4, { name: 'Laptop' });
+    expect(issued.token.status).toBe('active');
+    expect(Object.keys(issued.token).sort()).toEqual([
+      'createdAt',
+      'displayPrefix',
+      'expiresAt',
+      'id',
+      'lastUsedAt',
+      'name',
+      'revokedAt',
+      'scopes',
+      'status',
+    ]);
+    // The insert returns only the safe base columns; the status is assembled
+    // from the verified issuance, never projected from a hidden column.
+    const returning = (f.insert.mock.calls[0]![0] as string).split('RETURNING')[1]!;
+    expect(returning).not.toContain('secret_digest');
+    expect(returning).not.toContain('status');
+    expect(returning).not.toContain('owner_id');
   });
 
   it('writes the creation audit on the same transaction, after the token insert, with public IDs only', async () => {
@@ -349,6 +374,68 @@ describe('native personal token service', () => {
     f.own.mockResolvedValueOnce(result([]));
     await expect(revokeToken(f.db, ACTOR, 'foreign-or-unknown')).resolves.toBe(false);
     expect(f.audits).toHaveLength(0);
+  });
+
+  it('returns the server-computed status with the owner-scoped list and no credential column', async () => {
+    const f = fixture();
+    const base = {
+      name: 'Laptop',
+      displayPrefix: 'pto_pat_one',
+      scopes: ['pto:read'],
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      expiresAt: new Date('2026-04-01T00:00:00.000Z'),
+      lastUsedAt: null,
+      revokedAt: null,
+    };
+    f.listRows.push(
+      { ...base, id: 'one', status: 'expired' },
+      { ...base, id: 'two', status: 'revoked' },
+      { ...base, id: 'three', status: 'invalidated' },
+      { ...base, id: 'four', status: 'active' },
+    );
+    const listed = await listTokens(f.db, 'owner');
+    expect(listed.map((token) => token.status)).toEqual([
+      'expired',
+      'revoked',
+      'invalidated',
+      'active',
+    ]);
+    for (const token of listed) {
+      expect(Object.keys(token).sort()).toEqual([
+        'createdAt',
+        'displayPrefix',
+        'expiresAt',
+        'id',
+        'lastUsedAt',
+        'name',
+        'revokedAt',
+        'scopes',
+        'status',
+      ]);
+    }
+    // The owner selector is the only parameter, and the status is computed in
+    // the same read against the quoted owner table.
+    expect(f.query).toHaveBeenLastCalledWith(expect.stringContaining('WHERE owner_id = $1::uuid'), [
+      'owner',
+    ]);
+    const sql = f.query.mock.calls[0]![0] as string;
+    expect(sql).toContain('FROM "public"."users" u');
+    expect(sql).toContain('u.id = owner_id');
+    expect(sql).toContain('u.session_version IS DISTINCT FROM issued_session_version');
+    expect(sql).toContain('u.password_hash IS NULL');
+    expect(sql).toContain("u.role::text NOT IN ('team_lead', 'admin')");
+    expect(sql).toContain("clock_timestamp() AT TIME ZONE 'UTC'");
+    // Revoked wins over expired, which wins over invalidated.
+    expect(sql.indexOf("'revoked'")).toBeLessThan(sql.indexOf("'expired'"));
+    expect(sql.indexOf("'expired'")).toBeLessThan(sql.indexOf("'invalidated'"));
+    expect(sql.indexOf("'invalidated'")).toBeLessThan(sql.indexOf("'active'"));
+    // No credential column is projected, and no second query is issued.
+    expect(sql).not.toContain('secret_digest');
+    expect(sql).not.toContain('AS "passwordHash"');
+    expect(sql).not.toContain('AS "sessionVersion"');
+    expect(sql).not.toContain('AS "ownerId"');
+    expect(sql).not.toContain('AS "secretDigest"');
+    expect(f.query).toHaveBeenCalledOnce();
   });
 
   it('revokes one own token with a single audit row, and treats a repeat as an idempotent no-op', async () => {
