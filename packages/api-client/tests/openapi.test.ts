@@ -2,6 +2,18 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import YAML from 'yaml';
 import { describe, expect, it } from 'vitest';
+import {
+  isV1CreateKey,
+  MAX_CURSOR_LENGTH,
+  MAX_NOTE_LENGTH,
+  MAX_PAGE_LIMIT,
+  MAX_RANGE_DAYS,
+  MAX_VERSION,
+  PTO_DAY_PARTS,
+  PTO_ROLES,
+  PTO_SCOPES,
+  requireIfMatch,
+} from '../src/wire.js';
 
 /**
  * The contract test against the maintained root OpenAPI document.
@@ -9,6 +21,12 @@ import { describe, expect, it } from 'vitest';
  * The client encodes the wire shapes once. This test proves that the shapes
  * it encodes are the ones the API documents, so a change in the contract
  * cannot pass unnoticed.
+ *
+ * Every literal below is anchored to a value the client really has: the
+ * document is compared with the runtime vocabulary and the runtime bounds of
+ * the client, not with a copy of itself. `openapi-wire.test.ts` proves the
+ * same contract in the other direction, with the requests the client really
+ * sends and the answers it really reads.
  */
 
 const repoRoot = join(import.meta.dirname, '..', '..', '..');
@@ -33,6 +51,18 @@ function operation(path: string, method: string): Record<string, unknown> {
 function responseCodes(path: string, method: string): string[] {
   const responses = operation(path, method)['responses'] as Record<string, unknown>;
   return Object.keys(responses).sort();
+}
+
+/**
+ * The precondition the client would send for a version, or nothing when the
+ * client refuses the version itself.
+ */
+function versionTheClientWouldSend(version: number): string | undefined {
+  try {
+    return requireIfMatch(version);
+  } catch {
+    return undefined;
+  }
 }
 
 describe('the documented PTO schemas', () => {
@@ -162,5 +192,88 @@ describe('the documented PTO operations', () => {
     expect(description).toContain('PRECONDITION_REQUIRED');
     expect(description).toContain('CONFLICT');
     expect(description).toContain('VALIDATION_ERROR');
+  });
+});
+
+describe('the documented contract and the client that serves it', () => {
+  it('documents exactly the vocabulary the client accepts', () => {
+    const dayPart = schemas['DayPart'] as { enum: string[] };
+    expect([...dayPart.enum].sort()).toEqual([...PTO_DAY_PARTS].sort());
+
+    const role = schemas['Role'] as { enum: string[] };
+    expect([...role.enum].sort()).toEqual([...PTO_ROLES].sort());
+
+    const scope = schemas['PersonalTokenScope'] as { enum: string[] };
+    expect([...scope.enum].sort()).toEqual([...PTO_SCOPES].sort());
+  });
+
+  it('documents exactly the bounds the client enforces', () => {
+    const version = schemas['PTORecordVersion'] as { minimum: number; maximum: number };
+    expect(version.minimum).toBe(1);
+    expect(version.maximum).toBe(MAX_VERSION);
+
+    const create = schemas['CreatePTORequest'] as {
+      properties: { note: { maxLength: number } };
+    };
+    expect(create.properties.note.maxLength).toBe(MAX_NOTE_LENGTH);
+
+    const patch = schemas['PatchPTORequest'] as {
+      properties: { note: { maxLength: number; nullable: boolean } };
+    };
+    expect(patch.properties.note.maxLength).toBe(MAX_NOTE_LENGTH);
+    // The partial update may clear the note; the create may not.
+    expect(patch.properties.note.nullable).toBe(true);
+
+    const page = schemas['PTOCalendarPage'] as {
+      properties: { nextCursor: { minLength: number; maxLength: number } };
+    };
+    expect(page.properties.nextCursor.minLength).toBe(1);
+    expect(page.properties.nextCursor.maxLength).toBe(MAX_CURSOR_LENGTH);
+
+    const parameters = operation('/pto', 'get')['parameters'] as Array<Record<string, unknown>>;
+    const limit = parameters.find((parameter) => parameter['name'] === 'limit');
+    const limitSchema = limit?.['schema'] as { minimum: number; maximum: number };
+    expect(limitSchema.minimum).toBe(1);
+    expect(limitSchema.maximum).toBe(MAX_PAGE_LIMIT);
+
+    // The length of a calendar range is documented in prose only.
+    const responses = operation('/pto', 'get')['responses'] as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(String(responses['400']?.['description'])).toContain(String(MAX_RANGE_DAYS));
+  });
+
+  it('documents the precondition and the replay key the client sends', () => {
+    const ifMatch = document.components.parameters['IfMatchVersion'] as {
+      schema: { pattern: string };
+    };
+    const pattern = new RegExp(ifMatch.schema.pattern);
+    expect(pattern.test(requireIfMatch(1))).toBe(true);
+    expect(pattern.test(requireIfMatch(MAX_VERSION))).toBe(true);
+    // A version below the documented minimum is never sent.
+    expect(versionTheClientWouldSend(0)).toBeUndefined();
+
+    const parameters = operation('/pto', 'post')['parameters'] as Array<Record<string, unknown>>;
+    const key = parameters.find((parameter) => parameter['name'] === 'Idempotency-Key');
+    const keyPattern = new RegExp(String((key?.['schema'] as { pattern: string }).pattern));
+    expect(keyPattern.test('v1.1700000000000.9f1c2d3e-4a5b-4c6d-8e9f-0a1b2c3d4e5f')).toBe(true);
+    // The client only ever sends the canonical key of its own shape.
+    expect(isV1CreateKey('v1.1700000000000.9f1c2d3e-4a5b-4c6d-8e9f-0a1b2c3d4e5f')).toBe(true);
+    expect(keyPattern.test('v2.1700000000000.9f1c2d3e-4a5b-4c6d-8e9f-0a1b2c3d4e5f')).toBe(false);
+  });
+
+  it('documents the replay markers the client reads on a create', () => {
+    const responses = operation('/pto', 'post')['responses'] as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const headers = responses['201']?.['headers'] as Record<
+      string,
+      { schema?: { enum?: string[]; format?: string } }
+    >;
+    expect(headers['Idempotency-Replayed']?.schema?.enum).toEqual(['false', 'true']);
+    expect(headers['Idempotency-Key-Expires-At']?.schema?.format).toBe('date-time');
+    expect(headers['X-Request-Id']).toBeDefined();
   });
 });
