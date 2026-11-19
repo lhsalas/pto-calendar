@@ -151,6 +151,16 @@ jobs:
           name: api-client-coverage
           path: packages/api-client/coverage
           if-no-files-found: error
+      - run: npm run test:coverage -w packages/agent-auth
+      - name: Verify agent-auth unit reports
+        run: test -s packages/agent-auth/coverage/lcov.info && test -s packages/agent-auth/coverage/coverage-summary.json
+      - name: Upload agent-auth coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: agent-auth-coverage
+          path: packages/agent-auth/coverage
+          if-no-files-found: error
 
   build:
     name: Build
@@ -466,12 +476,19 @@ jobs:
         with:
           name: api-client-coverage
           path: packages/api-client/coverage
+      - name: Download agent-auth coverage
+        uses: actions/download-artifact@v8
+        with:
+          name: agent-auth-coverage
+          path: packages/agent-auth/coverage
       - name: Verify lcov reports exist
         run: |
           test -f backend/coverage/lcov.info
           test -f frontend/coverage/lcov.info
           test -s packages/api-client/coverage/lcov.info
           test -s packages/api-client/coverage/coverage-summary.json
+          test -s packages/agent-auth/coverage/lcov.info
+          test -s packages/agent-auth/coverage/coverage-summary.json
       - name: Post coverage summary comment
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -512,6 +529,7 @@ jobs:
           backend = parse_lcov("backend/coverage/lcov.info")
           frontend = parse_lcov("frontend/coverage/lcov.info")
           api_client = parse_lcov("packages/api-client/coverage/lcov.info")
+          agent_auth = parse_lcov("packages/agent-auth/coverage/lcov.info")
 
           lines = []
           lines.append("### Coverage summary")
@@ -522,6 +540,7 @@ jobs:
               ("backend", backend),
               ("frontend", frontend),
               ("api-client", api_client),
+              ("agent-auth", agent_auth),
           ):
               lp = (data["lines"][1] / data["lines"][0] * 100) if data["lines"][0] else 100
               bp = (data["branches"][1] / data["branches"][0] * 100) if data["branches"][0] else 100
