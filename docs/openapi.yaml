@@ -54,7 +54,11 @@ info:
     ## Operational notes
     - Every response carries an `X-Request-Id` header (UUID v4) that mirrors
       an inbound `X-Request-Id` when the client supplied one. Use this to
-      correlate with server logs.
+      correlate with server logs. A correlation ID is echoed in the response,
+      written to the request log and stored with the audit row, so a value that
+      carries credential material, a canonical `Idempotency-Key` value or the
+      submitted key itself is refused and replaced by a freshly generated
+      UUID v4.
     - Two unauthenticated probes are exposed for orchestrators: `GET /health`
       (liveness, no DB) and `GET /ready` (readiness, DB probe).
     - PTO mutations and personal-token/credential-lifecycle changes write an
@@ -1506,7 +1510,12 @@ components:
       name: X-Request-Id
       in: header
       required: false
-      description: Optional client-supplied correlation ID; echoed in the response header and used in logs.
+      description: >
+        Optional client-supplied correlation ID; echoed in the response header
+        and used in logs. A value that carries credential material, a canonical
+        `Idempotency-Key` value, or the submitted key itself is refused and
+        replaced with a generated UUID v4, so a key is never echoed, logged or
+        stored as a correlation ID.
       schema:
         type: string
         format: uuid

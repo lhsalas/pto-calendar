@@ -3,8 +3,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Options as PinoHttpOptions } from 'pino-http';
 import type { Logger as PinoLogger } from 'pino';
 import { safeErrorSerializer } from './logRedaction.js';
+import { isSafeCorrelationId } from './requestCorrelation.js';
 
-const SAFE_REQUEST_ID = /^[A-Za-z0-9._\-]{1,200}$/;
 const STATIC_URL_LABELS = new Map(
   [
     '/health',
@@ -21,25 +21,36 @@ const STATIC_URL_LABELS = new Map(
   ].map((label) => [label, label]),
 );
 
+/**
+ * The raw occurrences of the submitted `Idempotency-Key` header.
+ *
+ * The joined header value cannot tell a repeated header from a single one, so
+ * the occurrences are read from the raw header list. The values are used only
+ * to recognise a correlation ID that repeats a client key; they are never
+ * logged, echoed or stored.
+ */
+function submittedIdempotencyKeys(req: IncomingMessage): string[] {
+  const values: string[] = [];
+  const raw = req.rawHeaders ?? [];
+  for (let index = 0; index + 1 < raw.length; index += 2) {
+    if (raw[index]?.toLowerCase() === 'idempotency-key') {
+      values.push(raw[index + 1]!);
+    }
+  }
+  return values;
+}
+
 export function safeRequestId(req: IncomingMessage, res: ServerResponse): string {
+  const submittedKeys = submittedIdempotencyKeys(req);
   const headerId = req.headers['x-request-id'];
-  if (
-    typeof headerId === 'string' &&
-    headerId.length > 0 &&
-    SAFE_REQUEST_ID.test(headerId) &&
-    !/pto_pat_/i.test(headerId)
-  ) {
+  if (typeof headerId === 'string' && isSafeCorrelationId(headerId, submittedKeys)) {
     res.setHeader('X-Request-Id', headerId);
     return headerId;
   }
   // An early credential boundary may already have generated the safe ID before
   // pino/auth run. Preserve it so response, auth context and log IDs agree.
   const existing = res.getHeader('X-Request-Id');
-  if (
-    typeof existing === 'string' &&
-    SAFE_REQUEST_ID.test(existing) &&
-    !/pto_pat_/i.test(existing)
-  ) {
+  if (typeof existing === 'string' && isSafeCorrelationId(existing, submittedKeys)) {
     return existing;
   }
   const id = randomUUID();

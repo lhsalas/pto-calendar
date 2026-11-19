@@ -1,5 +1,6 @@
 import type { AuthContext } from '../auth/authContext.js';
 import type { ActorContext } from '../authorization/AuthorizationService.js';
+import { isSafeCorrelationId } from '../../lib/requestCorrelation.js';
 
 /**
  * Credential that authorized an audited operation. The vocabulary is closed and
@@ -26,14 +27,14 @@ export interface AuditActor {
 /** Authenticated caller of a protected domain operation: authorization plus attribution. */
 export type AttributedActor = ActorContext & AuditActor;
 
-const SAFE_REQUEST_ID = /^[A-Za-z0-9._-]{1,200}$/;
-
 /**
- * Mirrors the correlation-ID rule in lib/logSanitizers and the database CHECK.
- * An unsafe value is dropped to null instead of failing an otherwise valid change.
+ * Mirrors the correlation-ID rule in lib/requestCorrelation and the database
+ * CHECK. An unsafe value is dropped to null instead of failing an otherwise
+ * valid change: a personal token, a canonical create key and anything that
+ * embeds one are never stored as a correlation ID.
  */
 export function safeAuditRequestId(value: string | null): string | null {
-  return value !== null && SAFE_REQUEST_ID.test(value) && !/pto_pat_/i.test(value) ? value : null;
+  return value !== null && isSafeCorrelationId(value) ? value : null;
 }
 
 /** Maps a verified request context to the attribution every protected operation needs. */

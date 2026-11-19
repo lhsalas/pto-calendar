@@ -10,6 +10,8 @@ import {
 } from './logSanitizers.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** A canonical create key: it fits the correlation grammar and must still be refused. */
+const CREATE_KEY = 'v1.1700000000000.9f1c2d3e-4a5b-4c6d-8e9f-0a1b2c3d4e5f';
 
 function makeReqRes(headers: Record<string, string | string[] | undefined> = {}): {
   req: IncomingMessage;
@@ -17,8 +19,16 @@ function makeReqRes(headers: Record<string, string | string[] | undefined> = {})
   headerStore: Record<string, string | string[]>;
 } {
   const headerStore: Record<string, string | string[]> = {};
+  const rawHeaders: string[] = [];
+  for (const [name, value] of Object.entries(headers)) {
+    if (value === undefined) continue;
+    for (const single of Array.isArray(value) ? value : [value]) {
+      rawHeaders.push(name, single);
+    }
+  }
   const req = {
     headers: { ...headers },
+    rawHeaders,
   } as unknown as IncomingMessage;
   const res = {
     setHeader(name: string, value: string | string[]) {
@@ -86,6 +96,65 @@ describe('safeRequestId', () => {
     const id = safeRequestId(req, res);
     expect(id).toMatch(UUID_REGEX);
     expect(id).not.toBe(malicious);
+  });
+
+  it('never uses a canonical create key as the correlation ID', () => {
+    const { req, res, headerStore } = makeReqRes({ 'x-request-id': CREATE_KEY });
+    const id = safeRequestId(req, res);
+    expect(id).toMatch(UUID_REGEX);
+    expect(id).not.toBe(CREATE_KEY);
+    expect(headerStore['x-request-id']).toBe(id);
+    expect(headerStore['x-request-id']).not.toContain(CREATE_KEY);
+  });
+
+  it('refuses a correlation ID that embeds a canonical create key', () => {
+    for (const value of [`prefix-${CREATE_KEY}`, `${CREATE_KEY}-suffix`, `trace.${CREATE_KEY}`]) {
+      const { req, res, headerStore } = makeReqRes({ 'x-request-id': value });
+      expect(safeRequestId(req, res)).toMatch(UUID_REGEX);
+      expect(headerStore['x-request-id']).not.toContain(CREATE_KEY);
+    }
+  });
+
+  it('refuses a correlation ID that repeats the submitted create key', () => {
+    const { req, res, headerStore } = makeReqRes({
+      'x-request-id': CREATE_KEY,
+      'idempotency-key': CREATE_KEY,
+    });
+    expect(safeRequestId(req, res)).toMatch(UUID_REGEX);
+    expect(headerStore['x-request-id']).not.toBe(CREATE_KEY);
+  });
+
+  it('refuses a correlation ID that repeats a malformed submitted create key', () => {
+    const malformed = 'v1.1700000000000.not-a-uuid';
+    const { req, res, headerStore } = makeReqRes({
+      'x-request-id': malformed,
+      'idempotency-key': malformed,
+    });
+    expect(safeRequestId(req, res)).toMatch(UUID_REGEX);
+    expect(headerStore['x-request-id']).not.toBe(malformed);
+  });
+
+  it('keeps an ordinary correlation ID when a create key was submitted', () => {
+    const { req, res } = makeReqRes({
+      'x-request-id': 'trace-123_abc',
+      'idempotency-key': CREATE_KEY,
+    });
+    expect(safeRequestId(req, res)).toBe('trace-123_abc');
+  });
+
+  it('replaces a carried correlation ID that is a canonical create key', () => {
+    // The early credential boundary may have set the header before pino ran.
+    const { req, res, headerStore } = makeReqRes();
+    headerStore['x-request-id'] = CREATE_KEY;
+    const id = safeRequestId(req, res);
+    expect(id).toMatch(UUID_REGEX);
+    expect(headerStore['x-request-id']).toBe(id);
+  });
+
+  it('copes with a request that carries no raw header list', () => {
+    const { req, res } = makeReqRes({ 'x-request-id': 'trace-123_abc' });
+    const withoutRaw = { headers: req.headers } as unknown as IncomingMessage;
+    expect(safeRequestId(withoutRaw, res)).toBe('trace-123_abc');
   });
 });
 

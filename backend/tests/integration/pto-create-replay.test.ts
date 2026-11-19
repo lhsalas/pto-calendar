@@ -4,6 +4,30 @@ import bcrypt from 'bcryptjs';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetEnvForTests } from '../../src/config/env.js';
+import type * as LoggerModule from '../../src/lib/logger.js';
+
+const { logs } = vi.hoisted(() => ({ logs: [] as string[] }));
+
+vi.mock('../../src/lib/logger.js', async (importOriginal) => {
+  const original = await importOriginal<typeof LoggerModule>();
+  const { Writable } = await import('node:stream');
+  const { pino } = await import('pino');
+  const sink = new Writable({
+    write(chunk, _encoding, done) {
+      logs.push(chunk.toString());
+      done();
+    },
+  });
+  return {
+    ...original,
+    // The production options, captured: the same pipeline the application uses.
+    logger: pino(
+      { ...original.LOGGER_OPTIONS, base: { pid: 0, hostname: 'test' } },
+      sink as unknown as NodeJS.WritableStream,
+    ),
+  };
+});
+
 import { prisma } from '../../src/lib/prisma.js';
 import { createPrismaClient } from '../../src/lib/prismaClient.js';
 import { __resetAgentQuotaForTests } from '../../src/middleware/agentQuota.js';
@@ -452,4 +476,104 @@ describe('persistent create replay on PostgreSQL', () => {
       expect(await eligibleAudit()).toHaveLength(0);
     },
   );
+  describe('the create key never becomes a correlation identity', () => {
+    const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+    beforeEach(() => {
+      logs.length = 0;
+    });
+
+    it('keeps a browser create that reuses its key as the request ID out of the response, the log and the audit', async () => {
+      const browser = await session();
+      const key = ptoCreateKey();
+      const res = await browser
+        .post('/pto')
+        .set('Idempotency-Key', key)
+        .set('X-Request-Id', key)
+        .send(body)
+        .expect(201);
+
+      const correlationId = res.headers['x-request-id'];
+      expect(correlationId).toMatch(UUID_PATTERN);
+      expect(correlationId).not.toBe(key);
+      // The log line and the audit row carry the same generated fallback.
+      const blob = logs.join('');
+      expect(blob).toContain(`"id":"${correlationId}"`);
+      expect(blob).not.toContain(key);
+      const audits = await eligibleAudit();
+      expect(audits).toHaveLength(1);
+      expect(audits[0]!.requestId).toBe(correlationId);
+      expect(JSON.stringify(audits)).not.toContain(key);
+      expect(JSON.stringify(res.body)).not.toContain(key);
+    });
+
+    it('keeps a personal-token create that reuses its key as the request ID out of every record', async () => {
+      const token = await mint();
+      const key = ptoCreateKey();
+      const res = await post(token.rawToken, key).set('X-Request-Id', key).send(body).expect(201);
+
+      const correlationId = res.headers['x-request-id'];
+      expect(correlationId).toMatch(UUID_PATTERN);
+      expect(correlationId).not.toBe(key);
+      const blob = logs.join('');
+      expect(blob).toContain(`"id":"${correlationId}"`);
+      expect(blob).not.toContain(key);
+      const audits = await eligibleAudit();
+      expect(audits).toHaveLength(1);
+      expect(audits[0]!.requestId).toBe(correlationId);
+      expect(JSON.stringify(audits)).not.toContain(key);
+      expect(JSON.stringify(res.body)).not.toContain(key);
+    });
+
+    it.each(['cookie', 'pat'] as const)(
+      'keeps the key out of a refused %s create',
+      async (method) => {
+        const key = ptoCreateKey();
+        const attempt =
+          method === 'pat'
+            ? post((await mint()).rawToken, key)
+            : (await session()).post('/pto').set('Idempotency-Key', key);
+        const res = await attempt
+          .set('X-Request-Id', key)
+          .send({ ...body, endDate: '2026-11-19' })
+          .expect(400);
+
+        const correlationId = res.headers['x-request-id'];
+        expect(correlationId).toMatch(UUID_PATTERN);
+        expect(correlationId).not.toBe(key);
+        expect(logs.join('')).toContain(`"id":"${correlationId}"`);
+        expect(logs.join('')).not.toContain(key);
+        expect(JSON.stringify(res.body)).not.toContain(key);
+        expect(await eligibleAudit()).toHaveLength(0);
+        expect(await db.pTORequest.count({ where: { userId: owner.id } })).toBe(0);
+      },
+    );
+
+    it.each(['cookie', 'pat'] as const)(
+      'keeps the key out of a %s body-parser failure',
+      async (method) => {
+        const key = ptoCreateKey();
+        const attempt =
+          method === 'pat'
+            ? post((await mint()).rawToken, key)
+            : (await session()).post('/pto').set('Idempotency-Key', key);
+        const res = await attempt
+          .set('Content-Type', 'application/json')
+          .set('X-Request-Id', key)
+          .send('{"startDate": ')
+          // Preserve the existing legacy-cookie and PAT parser contracts.
+          .expect(method === 'pat' ? 400 : 500);
+
+        const correlationId = res.headers['x-request-id'];
+        expect(correlationId).toMatch(UUID_PATTERN);
+        expect(correlationId).not.toBe(key);
+        const blob = logs.join('');
+        expect(blob).toContain(`"${method === 'pat' ? 'id' : 'reqId'}":"${correlationId}"`);
+        expect(blob).not.toContain(key);
+        expect(res.body.error.code).toBe(method === 'pat' ? 'VALIDATION_ERROR' : 'INTERNAL_ERROR');
+        expect(JSON.stringify(res.body)).not.toContain(key);
+        expect(await eligibleAudit()).toHaveLength(0);
+      },
+    );
+  });
 });
