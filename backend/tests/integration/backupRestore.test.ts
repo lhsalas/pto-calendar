@@ -1,8 +1,18 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
+import { Client } from 'pg';
 import { createPrismaClient } from '../../src/lib/prismaClient.js';
 
 const repoRoot = join(import.meta.dirname, '..', '..', '..');
@@ -60,6 +70,195 @@ const OVERLAP_CONSTRAINT = 'pto_requests_no_owner_overlap';
 const EXTENSION_DECLARATION = /^CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public;/m;
 
 const PASSPHRASE = 'correct horse battery staple';
+
+/**
+ * A recording stand-in for the container CLI, so the exact backup script can
+ * be exercised without a database, a container or an object store. It only
+ * records what the script asks for and answers with a fixed snapshot.
+ */
+const MOCK_DOCKER = `#!/usr/bin/env bash
+set -Eeuo pipefail
+tool=""
+prev=""
+for a in "$@"; do
+  if [[ "$prev" == "db" ]]; then
+    tool="$a"
+    break
+  fi
+  prev="$a"
+done
+case "$tool" in
+  psql)
+    printf 'psql-open\\n' >> "$MOCK_LOG"
+    buffer=""
+    while IFS= read -r line; do
+      if [[ "$line" == "\\\\q" ]]; then
+        break
+      fi
+      buffer="$buffer$line
+"
+      if [[ "$buffer" == *";"* ]]; then
+        if [[ "$buffer" == *"pg_export_snapshot"* ]]; then
+          printf '%s|%s|%s|%s\\n' "$MOCK_SNAPSHOT_ID" "$MOCK_EXTENSION" "$MOCK_CONSTRAINT" "$MOCK_MIGRATION_STATE"
+        fi
+        buffer=""
+      fi
+    done
+    printf 'psql-close\\n' >> "$MOCK_LOG"
+    ;;
+  pg_dump)
+    printf 'pg_dump %s\\n' "$*" >> "$MOCK_LOG"
+    if [[ "$*" == *"--data-only"* ]]; then
+      if [[ "$MOCK_FAIL_DATA_DUMP" == "true" ]]; then
+        printf 'mock data dump failure\\n' >&2
+        exit 3
+      fi
+      printf '%s\\n' "$MOCK_DATA_DUMP"
+    else
+      printf '%s\\n' "$MOCK_SCHEMA_DUMP"
+    fi
+    ;;
+  *)
+    printf 'unexpected-tool %s\\n' "$tool" >> "$MOCK_LOG"
+    exit 4
+    ;;
+esac
+`;
+
+const MOCK_GPG = `#!/usr/bin/env bash
+set -Eeuo pipefail
+out=""
+prev=""
+for a in "$@"; do
+  if [[ "$prev" == "--output" ]]; then
+    out="$a"
+  fi
+  prev="$a"
+done
+if [[ -n "$out" ]]; then
+  printf 'mock-ciphertext\\n' > "$out"
+fi
+exit 0
+`;
+
+const MOCK_OCI = `#!/usr/bin/env bash
+set -Eeuo pipefail
+printf 'oci %s\\n' "$*" >> "$MOCK_LOG"
+exit 0
+`;
+
+const MOCK_SCHEMA_WITH_CONSTRAINT = [
+  '--',
+  '-- PostgreSQL database dump',
+  '--',
+  '',
+  'CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public;',
+  '',
+  'ALTER TABLE ONLY public.pto_requests',
+  '    ADD CONSTRAINT pto_requests_no_owner_overlap EXCLUDE USING gist (',
+  '        user_id WITH =,',
+  "        daterange(start_date, end_date, '[]'::daterange) WITH &&",
+  '    );',
+].join('\n');
+
+const MOCK_SCHEMA_WITHOUT_CONSTRAINT = [
+  '--',
+  '-- PostgreSQL database dump',
+  '--',
+  '',
+  'CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public;',
+].join('\n');
+
+const MOCK_SCHEMA_LEGACY = ['--', '-- PostgreSQL database dump', '--', ''].join('\n');
+
+const MOCK_DATA_DUMP = [
+  'COPY public.pto_requests (id, user_id) FROM stdin;',
+  '00000000-0000-4000-8000-000000000000\t00000000-0000-4000-8000-000000000000',
+  '\\.',
+].join('\n');
+
+interface BackupMockOptions {
+  snapshotId?: string;
+  extensionPresent?: boolean;
+  constraintPresent?: boolean;
+  migrationState?: 'applied' | 'absent' | 'pending';
+  schemaDump?: string;
+  failDataDump?: boolean;
+}
+
+interface BackupMockResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  log: string;
+}
+
+function writeMockExecutable(dir: string, name: string, body: string): void {
+  const path = join(dir, name);
+  writeFileSync(path, body);
+  chmodSync(path, 0o755);
+}
+
+/** Runs the real backup script against the recording stand-in. */
+function runBackupWithMock(options: BackupMockOptions = {}): BackupMockResult {
+  const root = mkdtempSync(join(tmpdir(), 'pto-backup-mock-'));
+  try {
+    const bin = join(root, 'bin');
+    mkdirSync(bin, { recursive: true });
+    const installDir = join(root, 'install');
+    mkdirSync(installDir, { recursive: true });
+    const backupDir = join(root, 'backups');
+    mkdirSync(backupDir, { recursive: true });
+    const logPath = join(root, 'calls.log');
+    writeFileSync(logPath, '');
+    writeFileSync(
+      join(installDir, '.env'),
+      [
+        'DB_USER=pto',
+        'DB_NAME=pto',
+        'BACKUP_ENCRYPTION_KEY=aB3$xY9#mQ7&vN2*pL5@rT8^wK4!zD6%jH1',
+        'OCI_BACKUP_BUCKET=disposable-bucket',
+        'OCI_OBJECT_STORAGE_NAMESPACE=disposable-namespace',
+        'OCI_REGION=us-ashburn-1',
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(join(installDir, 'docker-compose.prod.yml'), 'services: {}\n');
+    writeMockExecutable(bin, 'docker', MOCK_DOCKER);
+    writeMockExecutable(bin, 'gpg', MOCK_GPG);
+    writeMockExecutable(bin, 'oci', MOCK_OCI);
+
+    const result = spawnSync('bash', [BACKUP_SCRIPT], {
+      cwd: installDir,
+      encoding: 'utf8',
+      timeout: 10_000,
+      env: {
+        PATH: `${bin}:${process.env.PATH ?? ''}`,
+        HOME: root,
+        TMPDIR: root,
+        INSTALL_DIR: installDir,
+        BACKUP_DIR: backupDir,
+        MOCK_LOG: logPath,
+        MOCK_SNAPSHOT_ID: options.snapshotId ?? '00000003-0000001B-1',
+        MOCK_EXTENSION: options.extensionPresent === false ? 'f' : 't',
+        MOCK_CONSTRAINT: options.constraintPresent === false ? 'f' : 't',
+        MOCK_MIGRATION_STATE:
+          options.migrationState ?? (options.constraintPresent === false ? 'absent' : 'applied'),
+        MOCK_SCHEMA_DUMP: options.schemaDump ?? MOCK_SCHEMA_WITH_CONSTRAINT,
+        MOCK_DATA_DUMP: MOCK_DATA_DUMP,
+        MOCK_FAIL_DATA_DUMP: options.failDataDump === true ? 'true' : 'false',
+      },
+    });
+    return {
+      status: result.status,
+      stdout: result.stdout ?? '',
+      stderr: result.stderr ?? '',
+      log: readFileSync(logPath, 'utf8'),
+    };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
 
 type Runner = 'pg_dump' | 'podman-container' | 'none';
 
@@ -171,21 +370,67 @@ function extensionInstalled(dbName: string): boolean {
   return raw.trim() === 't';
 }
 
+interface ExportedSnapshot {
+  id: string;
+  database: string;
+  extensionPresent: boolean;
+  constraintPresent: boolean;
+  close: () => Promise<void>;
+}
+
+/**
+ * Exports a PostgreSQL snapshot from a dedicated read-only session and keeps
+ * that session open, exactly like the production backup does. Both dumps then
+ * read the same database state. The extension and the constraint state are
+ * read inside the exporting transaction, so they describe the same snapshot.
+ */
+async function exportSnapshot(dbName: string): Promise<ExportedSnapshot> {
+  expect([SOURCE_DB, PLAIN_DB]).toContain(dbName);
+  const url = new URL(SOURCE_URL);
+  url.pathname = `/${dbName}`;
+  const client = new Client({
+    connectionString: url.href,
+    connectionTimeoutMillis: 5000,
+    query_timeout: 5000,
+  });
+  try {
+    await client.connect();
+    await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const { rows } = await client.query<{
+      id: string;
+      extensionPresent: boolean;
+      constraintPresent: boolean;
+    }>(`SELECT pg_catalog.pg_export_snapshot() AS id,
+          EXISTS (SELECT 1 FROM pg_catalog.pg_extension WHERE extname = 'btree_gist') AS "extensionPresent",
+          EXISTS (SELECT 1 FROM pg_catalog.pg_constraint WHERE contype = 'x'
+                  AND conname = 'pto_requests_no_owner_overlap'
+                  AND conrelid = pg_catalog.to_regclass('public.pto_requests')) AS "constraintPresent"`);
+    const snapshot = rows[0];
+    expect(snapshot?.id).toMatch(/^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{8}-[0-9]+$/);
+    return { ...snapshot!, database: dbName, close: () => client.end() };
+  } catch (error) {
+    await client.end();
+    throw error;
+  }
+}
+
 /**
  * The schema dump with the production arguments: public schema, no owner, no
- * ACL and — only when the source database has the extension — the extension
- * declaration itself.
+ * ACL and — only when the exported snapshot has the extension — the extension
+ * declaration itself. Both dumps read the same exported snapshot, so a
+ * migration that commits between them cannot split the archive into a
+ * pre-migration schema and a post-migration data file.
  */
-function dumpSchema(dbName: string = SOURCE_DB, includeExtension = true): string {
+function dumpSchema(snapshot: ExportedSnapshot, includeExtension = true): string {
   const args = ['pg_dump', '--schema-only', '--no-owner', '--no-acl', '--schema=public'];
-  if (includeExtension && extensionInstalled(dbName)) {
+  if (includeExtension && snapshot.extensionPresent) {
     args.push(`--extension=${REQUIRED_EXTENSION}`);
   }
-  args.push('--dbname', dbName);
+  args.push('--dbname', snapshot.database, `--snapshot=${snapshot.id}`);
   return runPgSql(args);
 }
 
-function dumpData(): string {
+function dumpData(snapshot: ExportedSnapshot): string {
   return runPgSql([
     'pg_dump',
     '--data-only',
@@ -193,8 +438,20 @@ function dumpData(): string {
     '--no-acl',
     '--schema=public',
     '--dbname',
-    SOURCE_DB,
+    snapshot.database,
+    `--snapshot=${snapshot.id}`,
   ]);
+}
+
+/** The migration that installs the exclusion constraint, by its directory name. */
+function overlapMigrationName(): string {
+  const migrations = join(repoRoot, 'backend/prisma/migrations');
+  const matches = readdirSync(migrations).filter((name) => {
+    const sql = join(migrations, name, 'migration.sql');
+    return existsSync(sql) && readFileSync(sql, 'utf8').includes(OVERLAP_CONSTRAINT);
+  });
+  expect(matches).toHaveLength(1);
+  return matches[0]!;
 }
 
 function ensureTargetDatabase(): void {
@@ -406,7 +663,7 @@ describe('database backup → restore roundtrip', () => {
 
   afterAll(async () => {
     rmSync(workdir, { recursive: true, force: true });
-    await removeSourceFixture();
+    if (runner !== 'none') await removeSourceFixture();
     await sourcePrisma.$disconnect();
   });
 
@@ -422,8 +679,19 @@ describe('database backup → restore roundtrip', () => {
       const checksumPath = `${encryptedPath}.sha256`;
       const decryptedPath = join(workdir, `${archiveBase}.decrypted.tar.gz`);
 
-      writeFileSync(schemaPath, dumpSchema());
-      writeFileSync(dataPath, dumpData());
+      // One exported snapshot for both dumps, exactly like the production
+      // backup: the schema and the data must describe the same state.
+      const snapshot = await exportSnapshot(SOURCE_DB);
+      let schemaDump: string;
+      let dataDump: string;
+      try {
+        schemaDump = dumpSchema(snapshot);
+        dataDump = dumpData(snapshot);
+      } finally {
+        await snapshot.close();
+      }
+      writeFileSync(schemaPath, schemaDump);
+      writeFileSync(dataPath, dataDump);
       expect(readFileSync(schemaPath).length).toBeGreaterThan(0);
       expect(readFileSync(dataPath).length).toBeGreaterThan(0);
 
@@ -521,6 +789,12 @@ describe('database backup → restore roundtrip', () => {
         });
       }
 
+      // The schema and the data must describe the same database state: the
+      // migration marker and the constraint it installed travel together. A
+      // split pair is exactly the archive the backup must never produce.
+      const migration = overlapMigrationName();
+      expect(restoredData.includes(migration)).toBe(restoredSchema.includes(OVERLAP_CONSTRAINT));
+
       // #257: the restored database must be able to enforce the owner/date
       // exclusion, which only works when the extension travelled with the
       // archive.
@@ -561,11 +835,17 @@ describe('database backup → restore roundtrip', () => {
       // The maintenance database never carries btree_gist, so it stands in for
       // a database that predates the migration: the backup must not be
       // blocked and must not mention an extension it does not have.
-      expect(extensionInstalled(PLAIN_DB)).toBe(false);
-      const legacy = dumpSchema(PLAIN_DB);
-      expect(legacy).not.toMatch(EXTENSION_DECLARATION);
-      expect(legacy).not.toContain(OVERLAP_CONSTRAINT);
-      expect(legacy.length).toBeGreaterThan(0);
+      const snapshot = await exportSnapshot(PLAIN_DB);
+      try {
+        expect(snapshot.extensionPresent).toBe(false);
+        expect(extensionInstalled(PLAIN_DB)).toBe(false);
+        const legacy = dumpSchema(snapshot);
+        expect(legacy).not.toMatch(EXTENSION_DECLARATION);
+        expect(legacy).not.toContain(OVERLAP_CONSTRAINT);
+        expect(legacy.length).toBeGreaterThan(0);
+      } finally {
+        await snapshot.close();
+      }
     },
     60_000,
   );
@@ -575,13 +855,18 @@ describe('database backup → restore roundtrip', () => {
     async () => {
       // This is the shape the production backup must refuse: the constraint
       // needs btree_gist, and a public-only dump omits the declaration.
-      const withoutExtension = dumpSchema(SOURCE_DB, false);
-      expect(withoutExtension).toContain(OVERLAP_CONSTRAINT);
-      expect(withoutExtension).not.toMatch(EXTENSION_DECLARATION);
+      const snapshot = await exportSnapshot(SOURCE_DB);
+      try {
+        const withoutExtension = dumpSchema(snapshot, false);
+        expect(withoutExtension).toContain(OVERLAP_CONSTRAINT);
+        expect(withoutExtension).not.toMatch(EXTENSION_DECLARATION);
 
-      // The archive that is uploaded does carry the extension.
-      const withExtension = dumpSchema(SOURCE_DB);
-      expect(withExtension).toMatch(EXTENSION_DECLARATION);
+        // The archive that is uploaded does carry the extension.
+        const withExtension = dumpSchema(snapshot);
+        expect(withExtension).toMatch(EXTENSION_DECLARATION);
+      } finally {
+        await snapshot.close();
+      }
     },
     60_000,
   );
@@ -628,10 +913,16 @@ describe('database backup → restore roundtrip', () => {
 
     expect(script).toContain(`readonly REQUIRED_EXTENSION="${REQUIRED_EXTENSION}"`);
     expect(script).toContain(`readonly OVERLAP_CONSTRAINT="${OVERLAP_CONSTRAINT}"`);
-    // A fixed existence query: no table data, no secret and no log output.
+    // The exporter is a read-only, repeatable-read transaction of its own.
+    expect(script).toContain('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;');
+    expect(script).toContain('pg_export_snapshot()');
     expect(script).toContain(
-      "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'btree_gist');",
+      "EXISTS (SELECT 1 FROM pg_catalog.pg_extension WHERE extname = 'btree_gist')",
     );
+    expect(script).toContain("WHERE conname = 'pto_requests_no_owner_overlap' AND contype = 'x'");
+    expect(script).toContain("conrelid = pg_catalog.to_regclass('public.pto_requests')");
+    // Both dumps read the very same snapshot.
+    expect(script.match(/--snapshot="\$\{SNAPSHOT_ID\}"/g)).toHaveLength(2);
     expect(script).toContain('SCHEMA_DUMP_ARGS+=(--extension="${REQUIRED_EXTENSION}")');
     // The fail-closed rule looks for the one known extension, not for any
     // extension statement.
@@ -639,6 +930,7 @@ describe('database backup → restore roundtrip', () => {
       '^CREATE EXTENSION IF NOT EXISTS ${REQUIRED_EXTENSION} WITH SCHEMA public;',
     );
     expect(script).toMatch(/refusing to upload a backup that cannot be restored/);
+    expect(script).toMatch(/does not contain the constraint the snapshot had/);
 
     // The extension selection stays narrow: only the one known extension.
     expect(script).not.toMatch(/--extension="?\$\{(?!REQUIRED_EXTENSION\})/);
@@ -647,5 +939,76 @@ describe('database backup → restore roundtrip', () => {
     expect(script).toContain('--symmetric');
     expect(script).toContain('--auth instance_principal');
     expect(script).toContain('trap cleanup EXIT INT TERM');
+    // The exporter is closed on success, on failure and on every signal.
+    expect(script).toContain('close_snapshot()');
+    expect(script).toContain('exec {snapshot_input}>&-');
+  });
+
+  it('dumps the schema and the data from one exported snapshot', () => {
+    const result = runBackupWithMock();
+    expect(result.status).toBe(0);
+
+    const events = result.log.split('\n').filter((line) => line.length > 0);
+    const dumps = events.filter((line) => line.startsWith('pg_dump '));
+    expect(dumps).toHaveLength(2);
+
+    // Both dumps name the same snapshot.
+    const snapshots = dumps.map((line) => /--snapshot=([^\s]+)/.exec(line)?.[1]);
+    expect(snapshots[0]).toBeTruthy();
+    expect(snapshots[1]).toBe(snapshots[0]);
+
+    // The exporter was open for both dumps and closed afterwards.
+    const open = events.indexOf('psql-open');
+    const close = events.indexOf('psql-close');
+    expect(open).toBeGreaterThanOrEqual(0);
+    expect(close).toBeGreaterThan(open);
+    expect(events.indexOf(dumps[0]!)).toBeGreaterThan(open);
+    expect(events.indexOf(dumps[1]!)).toBeLessThan(close);
+    expect(events.findIndex((line) => line.startsWith('oci '))).toBeGreaterThan(close);
+
+    // The archive was uploaded.
+    expect(events.some((line) => line.startsWith('oci '))).toBe(true);
+    expect(result.stderr).toContain('using PostgreSQL snapshot');
+  });
+
+  it('refuses to upload an archive whose schema does not match the snapshot', () => {
+    // The rejected defect: the schema dump was taken before the migration, so
+    // it has no constraint, while the exported snapshot says it has one.
+    const result = runBackupWithMock({ schemaDump: MOCK_SCHEMA_WITHOUT_CONSTRAINT });
+    expect(result.status).toBe(2);
+    expect(result.log).not.toContain('oci ');
+    expect(result.log).toContain('psql-close');
+    expect(result.stderr).toContain('does not contain the constraint the snapshot had');
+  });
+
+  it('closes the snapshot exporter when a dump fails', () => {
+    const result = runBackupWithMock({ failDataDump: true });
+    expect(result.status).not.toBe(0);
+    expect(result.log).not.toContain('oci ');
+    expect(result.log).toContain('psql-close');
+  });
+
+  it('refuses to back up an unfinished overlap migration', () => {
+    const result = runBackupWithMock({ migrationState: 'pending' });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('the PTO overlap migration is unfinished');
+    expect(result.log).not.toMatch(/pg_dump|oci /);
+    expect(result.log).toContain('psql-close');
+  });
+
+  it('still backs up a database that predates the migration', () => {
+    const result = runBackupWithMock({
+      extensionPresent: false,
+      constraintPresent: false,
+      schemaDump: MOCK_SCHEMA_LEGACY,
+    });
+    expect(result.status).toBe(0);
+    const dumps = result.log.split('\n').filter((line) => line.startsWith('pg_dump '));
+    expect(dumps).toHaveLength(2);
+    // No extension is added to a database that has none, and both dumps still
+    // read the same snapshot.
+    expect(dumps[0]).not.toContain('--extension=');
+    expect(dumps[0]).toContain('--snapshot=');
+    expect(result.log).toContain('oci ');
   });
 });

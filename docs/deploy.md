@@ -296,21 +296,39 @@ that only covers the `public` schema omits the extension declaration: such an
 archive carries the constraint without the extension it needs and cannot be
 applied on a target.
 
+The archive also has to be **consistent**. A schema dump taken before the
+#257 migration and a data dump taken after it leave the data with a finished
+`_prisma_migrations` marker and the schema without the constraint that
+migration installed. Restoring that archive succeeds and looks healthy while
+the guard is missing — the ledger says the migration ran, the schema says
+otherwise. Such an archive must never be uploaded.
+
 `infra/deploy/backup.sh` therefore:
 
-- probes the source with one fixed `SELECT EXISTS` query (no row data, no
-  secret, nothing logged) and adds `--extension=btree_gist` to the schema dump
-  **only when the source already has the extension**. A database that
-  predates the migration is dumped exactly as before, so an older backup is
-  never blocked;
-- refuses to continue when the produced schema dump carries the constraint but
-  not the extension — the schema changed between the probe and the dump. The
-  backup fails with a clear error and **nothing is uploaded**, instead of
-  storing an archive that cannot be restored;
+- exports **one** PostgreSQL snapshot from a dedicated read-only,
+  repeatable-read session of its own and passes the same `--snapshot` to both
+  the schema dump and the data dump, so both files describe the same database
+  state. A migration that commits between the two dumps can no longer split
+  the archive;
+- reads the extension, the constraint and the Prisma migration status
+  **inside the exporting transaction**. It refuses to back up an unfinished
+  #257 migration or a schema that disagrees with its recorded migration
+  status, including the window between the DDL commit and Prisma's final
+  ledger update. No row data, connection detail or snapshot ID is logged;
+- adds `--extension=btree_gist` to the schema dump **only when the snapshot
+  has the extension**. A database that predates the migration is dumped
+  exactly as before, so an older backup is never blocked;
+- refuses to continue when the dumped state does not match the snapshot — the
+  schema dump has no constraint the snapshot had, or has one the snapshot did
+  not have — and when a dump carries the constraint without the extension.
+  The backup fails with a clear error and **nothing is uploaded**;
+- keeps the exporter alive for both dumps, then closes the connection before
+  encryption or upload. Failure or a caught interrupt closes the exporter
+  and removes incomplete local artifacts;
 - changes nothing else: the encryption, the instance-principal upload, the
   target confirmation, the secret handling and the file permissions are
-  untouched, and the extension selection stays limited to the one known
-  extension.
+  untouched, the archive still holds exactly `schema.sql` and `data.sql`, and
+  the extension selection stays limited to the one known extension.
 
 Restoring such an archive re-creates the extension before the constraint, so
 the restored database enforces the invariant exactly like the source. The
