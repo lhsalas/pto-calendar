@@ -177,6 +177,14 @@
           ]
         },
         {
+          "name": "libxml2",
+          "target": "postgres:16-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36 (alpine 3.24.3)",
+          "path": "postgres:16-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36 (alpine 3.24.3)",
+          "installedVersion": "2.13.9-r2",
+          "severity": "HIGH",
+          "advisories": ["CVE-2026-86144"]
+        },
+        {
           "name": "libxslt",
           "target": "postgres:16-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36 (alpine 3.24.3)",
           "path": "postgres:16-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36 (alpine 3.24.3)",

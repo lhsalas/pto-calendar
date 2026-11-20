@@ -116,6 +116,47 @@ const secretResult = {
   ],
 };
 const clone = (value) => structuredClone(value);
+// #294: the exact owner-authorized CVE-2026-86144 tuple, reproduced from the
+// real pinned PostgreSQL image report that Trivy 0.76.2 produced for it.
+const postgresImage =
+  'postgres:16-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36';
+const postgresTarget = `${postgresImage} (alpine 3.24.3)`;
+const gosuTarget = 'usr/local/bin/gosu';
+const libxml2Finding = {
+  VulnerabilityID: 'CVE-2026-86144',
+  PkgName: 'libxml2',
+  InstalledVersion: '2.13.9-r2',
+  FixedVersion: '2.13.9-r3',
+  Severity: 'HIGH',
+  Status: 'fixed',
+};
+const postgresReport = {
+  SchemaVersion: 2,
+  ArtifactName: postgresImage,
+  ArtifactType: 'container_image',
+  Metadata: metadata(postgresImage),
+  Results: [
+    {
+      Target: postgresTarget,
+      Class: 'os-pkgs',
+      Type: 'alpine',
+      Packages: [
+        { Name: 'krb5-libs', Version: '1.22.2-r1' },
+        { Name: 'libxml2', Version: '2.13.9-r2' },
+        { Name: 'libxslt', Version: '1.1.43-r3' },
+      ],
+      Vulnerabilities: [libxml2Finding],
+    },
+    {
+      Target: gosuTarget,
+      Class: 'lang-pkgs',
+      Type: 'gobinary',
+      Packages: [{ Name: 'stdlib', Version: 'v1.26.8' }],
+    },
+  ],
+};
+const evaluatePostgres = (raw = postgresReport) =>
+  evaluateImage(postgresImage, raw, clone(raw), committed, legacySource, '2026-11-15');
 const evaluate = (raw = report, legacy = clone(raw), acceptance = policy, reference = image) =>
   evaluateImage(reference, raw, legacy, acceptance, legacySource, '2026-11-15');
 
@@ -153,6 +194,18 @@ test('all eleven original CI jobs and mandatory security controls remain', () =>
   assert.match(security, /run: node infra\/security\/scan-production-images\.mjs/);
   assert.match(security, /if: always\(\)/);
   assert.match(security, /if-no-files-found: error/);
+  // #294: the restored job must not be gated again by a job-level condition.
+  // Step-level conditions (the artifact upload's `if: always()`) stay valid.
+  assert.doesNotMatch(
+    security,
+    /^ {4}if\s*:/m,
+    'the security job must not carry a job-level condition',
+  );
+  assert.doesNotMatch(
+    security,
+    /github\.repository\s*[!=]=/,
+    'the security job must not be gated on the repository',
+  );
 });
 
 test('exact tuple is accepted visibly without changing the raw report', () => {
@@ -188,6 +241,98 @@ test('same advisory in another target cannot inherit acceptance', () => {
   const result = evaluate(raw);
   assert.equal(result.accepted.length, 1);
   assert.equal(result.rejected.length, 1);
+});
+
+test('the committed CVE-2026-86144 tuple is accepted visibly without changing the raw report', () => {
+  const raw = clone(postgresReport);
+  const before = JSON.stringify(raw);
+  const result = evaluatePostgres(raw);
+  assert.equal(result.rawBlocking, 1);
+  assert.equal(result.accepted.length, 1);
+  assert.equal(result.rejected.length, 0);
+  assert.equal(result.legacyAccepted.length, 0);
+  assert.deepEqual(result.accepted[0], {
+    id: 'CVE-2026-86144',
+    package: 'libxml2',
+    target: postgresTarget,
+    path: postgresTarget,
+    installedVersion: '2.13.9-r2',
+    severity: 'HIGH',
+    fixedVersion: '2.13.9-r3',
+  });
+  assert.equal(JSON.stringify(raw), before);
+});
+
+for (const [label, mutate] of [
+  [
+    'advisory',
+    (raw) => {
+      raw.Results[0].Vulnerabilities[0].VulnerabilityID = 'CVE-2026-999999';
+    },
+  ],
+  [
+    'installed version',
+    (raw) => {
+      raw.Results[0].Vulnerabilities[0].InstalledVersion = '2.13.9-r3';
+    },
+  ],
+  [
+    'severity',
+    (raw) => {
+      raw.Results[0].Vulnerabilities[0].Severity = 'CRITICAL';
+    },
+  ],
+  [
+    'path',
+    (raw) => {
+      raw.Results[0].Vulnerabilities[0].PkgPath = 'usr/lib/libxml2.so';
+    },
+  ],
+]) {
+  test(`the committed CVE-2026-86144 acceptance cannot be inherited with a changed ${label}`, () => {
+    const raw = clone(postgresReport);
+    mutate(raw);
+    const result = evaluatePostgres(raw);
+    assert.equal(result.accepted.length, 0);
+    assert.equal(result.rejected.length, 1);
+  });
+}
+
+test('the committed CVE-2026-86144 acceptance cannot be inherited by another image digest', () => {
+  const otherDigest = `postgres:16-alpine@sha256:${'d'.repeat(64)}`;
+  const raw = clone(postgresReport);
+  raw.ArtifactName = otherDigest;
+  raw.Metadata = metadata(otherDigest);
+  assert.throws(
+    () => evaluateImage(otherDigest, raw, clone(raw), committed, legacySource, '2026-11-15'),
+    /no explicit review/,
+  );
+});
+
+test('the committed policy names CVE-2026-86144 exactly once, for that tuple only', () => {
+  const matches = committed.images.flatMap((entry) =>
+    entry.packages.flatMap((pkg) =>
+      pkg.advisories
+        .filter((id) => id === 'CVE-2026-86144')
+        .map(() => ({ image: entry.image, ...pkg })),
+    ),
+  );
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].image, postgresImage);
+  assert.equal(matches[0].name, 'libxml2');
+  assert.equal(matches[0].target, postgresTarget);
+  assert.equal(matches[0].path, postgresTarget);
+  assert.equal(matches[0].installedVersion, '2.13.9-r2');
+  assert.equal(matches[0].severity, 'HIGH');
+  assert.deepEqual(matches[0].advisories, ['CVE-2026-86144']);
+});
+
+test('the committed policy carries exactly the 41 accepted advisories of the current raw scan', () => {
+  const total = committed.images.reduce(
+    (sum, entry) => sum + entry.packages.reduce((count, pkg) => count + pkg.advisories.length, 0),
+    0,
+  );
+  assert.equal(total, 41);
 });
 
 test('changed digest and unknown clean image both fail closed', () => {
