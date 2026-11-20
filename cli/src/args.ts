@@ -1,5 +1,5 @@
 /**
- * The strict argument parser of the read-only PTO CLI.
+ * The strict argument parser of the PTO CLI.
  *
  * The parser is pure: it reads the argument vector and returns a typed
  * command, and it never looks at the environment, at a credential store, at
@@ -25,6 +25,7 @@
 import { parseArgs } from 'node:util';
 
 import type { ProfileStorage } from '@pto-calendar/agent-auth';
+import type { CreatePtoPayload, PatchPtoChanges, PtoDayPart } from '@pto-calendar/api-client';
 
 import {
   DEFAULT_PAGE_SIZE,
@@ -56,13 +57,41 @@ const OPTION_SPEC = {
   owner: { type: 'string', multiple: true },
   'page-size': { type: 'string', multiple: true },
   'max-pages': { type: 'string', multiple: true },
+  'day-part': { type: 'string', multiple: true },
+  note: { type: 'string', multiple: true },
+  'clear-note': { type: 'boolean', multiple: true },
+  operation: { type: 'string', multiple: true },
+  yes: { type: 'boolean', multiple: true },
+} as const;
+
+/**
+ * The option spec of the write commands.
+ *
+ * The only difference is the type of the version flag: a write names the
+ * version of the record it changes, while the meta version flag carries no
+ * value at all. The spec is chosen before the scan, from the command word,
+ * so the read and the meta commands keep exactly the behavior they had.
+ */
+const WRITE_OPTION_SPEC = {
+  ...OPTION_SPEC,
+  version: { type: 'string', multiple: true },
 } as const;
 
 /** The name of a documented flag. */
 type OptionName = keyof typeof OPTION_SPEC;
 
 /** The command the parser resolved. */
-type CommandName = 'help' | 'version' | 'auth-set' | 'auth-status' | 'auth-remove' | 'list' | 'get';
+type CommandName =
+  | 'help'
+  | 'version'
+  | 'auth-set'
+  | 'auth-status'
+  | 'auth-remove'
+  | 'list'
+  | 'get'
+  | 'create'
+  | 'update'
+  | 'delete';
 
 /** The flags each command documents. */
 const ALLOWED_OPTIONS: Readonly<Record<CommandName, readonly OptionName[]>> = {
@@ -84,6 +113,32 @@ const ALLOWED_OPTIONS: Readonly<Record<CommandName, readonly OptionName[]>> = {
     'allow-loopback-http',
   ],
   get: ['json', 'profile', 'origin', 'allow-loopback-http'],
+  create: [
+    'json',
+    'from',
+    'to',
+    'day-part',
+    'note',
+    'operation',
+    'profile',
+    'origin',
+    'allow-loopback-http',
+    'yes',
+  ],
+  update: [
+    'json',
+    'version',
+    'from',
+    'to',
+    'day-part',
+    'note',
+    'clear-note',
+    'profile',
+    'origin',
+    'allow-loopback-http',
+    'yes',
+  ],
+  delete: ['json', 'version', 'profile', 'origin', 'allow-loopback-http', 'yes'],
 };
 
 /**
@@ -108,9 +163,16 @@ const MESSAGES = {
   invalidDate: 'The date is not a real calendar date.',
   invalidRange: 'The date range must be ordered and at most 366 days long.',
   invalidUuid: 'The identifier is not a valid UUID.',
+  invalidOperation: 'The operation identifier is not a valid UUID.',
   invalidPageSize: 'The page size must be a number between 1 and 200.',
   invalidMaxPages: 'The page count must be a number between 1 and 30.',
   conflictingFilters: 'The own-records filter and the owner filter cannot be combined.',
+  weekendDate: 'A date must not fall on a weekend.',
+  invalidDayPart: 'The day part must be morning, evening or all_day.',
+  invalidVersion: 'The version must be a number between 1 and 2147483647.',
+  invalidNote: 'The note must be 500 characters or fewer.',
+  conflictingNote: 'The note and the clear-note flag cannot be combined.',
+  emptyPatch: 'A partial update must change at least one field.',
 } as const;
 
 /** The shape of a local profile name, shared with the credential package. */
@@ -119,11 +181,29 @@ const PROFILE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 /** The shape of a canonical UUID, shared with the API client. */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * The shape of a random public UUIDv4.
+ *
+ * The operation identifier is a separate public name for one approved
+ * intent. It is never the wire idempotency key, and it is never derived
+ * from the credential or from the payload.
+ */
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 /** The shape of a calendar date, shared with the API client. */
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 /** The shape of a positive decimal integer without a leading zero. */
 const INTEGER_PATTERN = /^[1-9][0-9]*$/;
+
+/** The half-day vocabulary of the current API. */
+const DAY_PARTS: readonly PtoDayPart[] = ['morning', 'evening', 'all_day'];
+
+/** The longest note the API accepts. */
+const MAX_NOTE_LENGTH = 500;
+
+/** The highest record version the API accepts, an int32. */
+const MAX_VERSION = 2_147_483_647;
 
 /**
  * The shape of an origin, shared with the API client.
@@ -140,8 +220,25 @@ const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', '[::1]', 'loca
 /** The longest origin the parser accepts. */
 const MAX_ORIGIN_LENGTH = 512;
 
-/** The longest range of days one read may cover. */
+/** The longest range of days one read or one write may cover. */
 const MAX_RANGE_DAYS = 366;
+
+/**
+ * The flags of the union spec that take a value.
+ *
+ * The list is only used to find the command word before the scan, so the
+ * word the parser dispatches on is the word the scan would have found.
+ */
+const VALUE_OPTIONS: ReadonlySet<string> = new Set([
+  'origin',
+  'profile',
+  'storage',
+  'from',
+  'to',
+  'owner',
+  'page-size',
+  'max-pages',
+]);
 
 /** The flags and the positional words of one argument vector. */
 interface Scan {
@@ -163,17 +260,54 @@ type CommandResult =
 type OptionResult<T> =
   { readonly ok: true; readonly value: T } | { readonly ok: false; readonly message: string };
 
+/** The option spec of one scan. */
+type OptionSpec = typeof OPTION_SPEC | typeof WRITE_OPTION_SPEC;
+
+/**
+ * Whether a token names an option.
+ *
+ * A negative number is a value and not an option, exactly as the runtime
+ * treats it, so a version or a date is never mistaken for a flag.
+ */
+function isOptionToken(token: string): boolean {
+  if (token.length <= 1 || !token.startsWith('-')) return false;
+  return !Number.isInteger(Number(token));
+}
+
+/**
+ * The command word of an argument vector.
+ *
+ * The word is found with the rules of the scan itself: an option is skipped,
+ * an option with a value takes the token behind it, and the first remaining
+ * token is the command. The parser needs the word before the scan, because
+ * the write commands name a record version with a value while the meta
+ * version flag carries none.
+ */
+function commandWord(args: readonly string[]): string | undefined {
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index]!;
+    if (token === '--') return undefined;
+    if (!isOptionToken(token)) return token;
+    if (token.includes('=')) continue;
+    const name = token.startsWith('--') ? token.slice(2) : '';
+    if (!VALUE_OPTIONS.has(name)) continue;
+    const next = args[index + 1];
+    if (next !== undefined && !isOptionToken(next)) index += 1;
+  }
+  return undefined;
+}
+
 /**
  * Reads the argument vector.
  *
  * The scan is strict: an unknown flag, a missing value, a value on a boolean
  * flag and a repeated flag are all refused before anything else happens.
  */
-function scan(args: readonly string[]): ScanResult {
+function scan(args: readonly string[], spec: OptionSpec): ScanResult {
   try {
     const parsed = parseArgs({
       args: [...args],
-      options: OPTION_SPEC,
+      options: spec,
       strict: true,
       allowPositionals: true,
       tokens: true,
@@ -246,6 +380,91 @@ function isReadableRange(start: string, end: string): boolean {
   const to = Date.parse(`${end}T00:00:00.000Z`);
   if (Number.isNaN(from) || Number.isNaN(to) || from > to) return false;
   return Math.round((to - from) / 86_400_000) + 1 <= MAX_RANGE_DAYS;
+}
+
+/**
+ * Whether a date falls on a weekend.
+ *
+ * The rule is the rule of the service: a Saturday or a Sunday is refused as
+ * the first or the last day of a record. A date that falls inside a range
+ * is not affected, so a range may still span a weekend.
+ */
+function isWeekendDate(value: string): boolean {
+  const [year, month, day] = value.split('-').map(Number) as [number, number, number];
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  return weekday === 0 || weekday === 6;
+}
+
+/**
+ * A date a write may carry.
+ *
+ * The date must be a real calendar date and must not fall on a weekend. The
+ * date is never moved, shifted or resolved: a natural language date is not
+ * a date at all.
+ */
+function writeDate(raw: string): OptionResult<string> {
+  if (!isCalendarDate(raw)) return { ok: false, message: MESSAGES.invalidDate };
+  if (isWeekendDate(raw)) return { ok: false, message: MESSAGES.weekendDate };
+  return { ok: true, value: raw };
+}
+
+/** The half-day value of a write. */
+function writeDayPart(raw: string): OptionResult<PtoDayPart> {
+  if (!DAY_PARTS.includes(raw as PtoDayPart)) {
+    return { ok: false, message: MESSAGES.invalidDayPart };
+  }
+  return { ok: true, value: raw as PtoDayPart };
+}
+
+/** The expected version of a write, a positive int32. */
+function writeVersion(raw: string | undefined): OptionResult<number> {
+  if (raw === undefined) return { ok: false, message: MESSAGES.missingOption };
+  if (!INTEGER_PATTERN.test(raw)) return { ok: false, message: MESSAGES.invalidVersion };
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_VERSION) {
+    return { ok: false, message: MESSAGES.invalidVersion };
+  }
+  return { ok: true, value };
+}
+
+/**
+ * The note of a create.
+ *
+ * A note that is longer than the API accepts is refused instead of being
+ * shortened, and an empty note is left out, because the service stores a
+ * note that is empty exactly like a record without a note.
+ */
+function createNote(raw: string | undefined): OptionResult<string | undefined> {
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (raw.length > MAX_NOTE_LENGTH) return { ok: false, message: MESSAGES.invalidNote };
+  if (raw.length === 0) return { ok: true, value: undefined };
+  return { ok: true, value: raw };
+}
+
+/**
+ * The note of a partial update.
+ *
+ * The note is only changed when it is named. An omitted note keeps the
+ * stored one, even a hidden one, and an explicit empty note or the clear
+ * flag empties it.
+ */
+function updateNote(
+  raw: string | undefined,
+  clear: boolean,
+): OptionResult<string | null | undefined> {
+  if (clear && raw !== undefined) return { ok: false, message: MESSAGES.conflictingNote };
+  if (clear) return { ok: true, value: null };
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (raw.length > MAX_NOTE_LENGTH) return { ok: false, message: MESSAGES.invalidNote };
+  if (raw.length === 0) return { ok: true, value: null };
+  return { ok: true, value: raw };
+}
+
+/** The operation identifier of a create, when one was named. */
+function operationId(raw: string | undefined): OptionResult<string | undefined> {
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (!UUID_V4_PATTERN.test(raw)) return { ok: false, message: MESSAGES.invalidOperation };
+  return { ok: true, value: raw };
 }
 
 /** The parsed shape of an origin. */
@@ -502,6 +721,175 @@ function getCommand(
   return { ok: true, command: { kind: 'get', auth: auth.value, id } };
 }
 
+/**
+ * The `create` command.
+ *
+ * The create always belongs to the owner of the credential, so the command
+ * carries no owner, no path and no role. The dates are literal: they are
+ * real calendar dates, they are ordered and they never fall on a weekend.
+ */
+function createCommand(
+  options: Readonly<Partial<Record<OptionName, string | boolean>>>,
+  names: readonly OptionName[],
+): CommandResult {
+  const unknown = unknownOption(names, ALLOWED_OPTIONS.create);
+  if (unknown !== undefined) return { ok: false, message: unknown };
+  const from = stringOption(options, 'from');
+  const to = stringOption(options, 'to');
+  const dayPart = stringOption(options, 'day-part');
+  if (from === undefined || to === undefined || dayPart === undefined) {
+    return { ok: false, message: MESSAGES.missingOption };
+  }
+  const start = writeDate(from);
+  if (!start.ok) return start;
+  const end = writeDate(to);
+  if (!end.ok) return end;
+  if (!isReadableRange(start.value, end.value)) {
+    return { ok: false, message: MESSAGES.invalidRange };
+  }
+  const part = writeDayPart(dayPart);
+  if (!part.ok) return part;
+  const note = createNote(stringOption(options, 'note'));
+  if (!note.ok) return note;
+  const operation = operationId(stringOption(options, 'operation'));
+  if (!operation.ok) return operation;
+  const auth = readAuthOptions(options);
+  if (!auth.ok) return auth;
+  const payload: CreatePtoPayload =
+    note.value === undefined
+      ? { startDate: start.value, endDate: end.value, dayPart: part.value }
+      : { startDate: start.value, endDate: end.value, dayPart: part.value, note: note.value };
+  return {
+    ok: true,
+    command: {
+      kind: 'create',
+      auth: auth.value,
+      yes: flagOption(options, 'yes'),
+      payload,
+      operationId: operation.value,
+    },
+  };
+}
+
+/**
+ * The changed fields of a partial update.
+ *
+ * Only the fields that are named are changed. An omitted field keeps its
+ * stored value, even a hidden note, and the update is refused when it would
+ * change nothing at all.
+ */
+function updateChanges(
+  options: Readonly<Partial<Record<OptionName, string | boolean>>>,
+): OptionResult<PatchPtoChanges> {
+  const changes: {
+    startDate?: string;
+    endDate?: string;
+    dayPart?: PtoDayPart;
+    note?: string | null;
+  } = {};
+  const from = stringOption(options, 'from');
+  if (from !== undefined) {
+    const start = writeDate(from);
+    if (!start.ok) return start;
+    changes.startDate = start.value;
+  }
+  const to = stringOption(options, 'to');
+  if (to !== undefined) {
+    const end = writeDate(to);
+    if (!end.ok) return end;
+    changes.endDate = end.value;
+  }
+  const dayPart = stringOption(options, 'day-part');
+  if (dayPart !== undefined) {
+    const part = writeDayPart(dayPart);
+    if (!part.ok) return part;
+    changes.dayPart = part.value;
+  }
+  const note = updateNote(stringOption(options, 'note'), flagOption(options, 'clear-note'));
+  if (!note.ok) return note;
+  if (note.value !== undefined) changes.note = note.value;
+  if (Object.keys(changes).length === 0) {
+    return { ok: false, message: MESSAGES.emptyPatch };
+  }
+  if (
+    changes.startDate !== undefined &&
+    changes.endDate !== undefined &&
+    !isReadableRange(changes.startDate, changes.endDate)
+  ) {
+    return { ok: false, message: MESSAGES.invalidRange };
+  }
+  return { ok: true, value: changes };
+}
+
+/**
+ * The `update` command.
+ *
+ * The target is one exact record, named by its canonical identifier, and the
+ * expected version is the version the caller read. The update is a partial
+ * write: it names only the fields that change.
+ */
+function updateCommand(
+  options: Readonly<Partial<Record<OptionName, string | boolean>>>,
+  names: readonly OptionName[],
+  positionals: readonly string[],
+): CommandResult {
+  if (positionals.length !== 2) return { ok: false, message: MESSAGES.unexpectedArgument };
+  const unknown = unknownOption(names, ALLOWED_OPTIONS.update);
+  if (unknown !== undefined) return { ok: false, message: unknown };
+  const id = positionals[1]!;
+  if (!UUID_PATTERN.test(id)) return { ok: false, message: MESSAGES.invalidUuid };
+  const version = writeVersion(stringOption(options, 'version'));
+  if (!version.ok) return version;
+  const changes = updateChanges(options);
+  if (!changes.ok) return changes;
+  const auth = readAuthOptions(options);
+  if (!auth.ok) return auth;
+  return {
+    ok: true,
+    command: {
+      kind: 'update',
+      auth: auth.value,
+      yes: flagOption(options, 'yes'),
+      id,
+      version: version.value,
+      changes: changes.value,
+    },
+  };
+}
+
+/**
+ * The `delete` command.
+ *
+ * The target is one exact record, named by its canonical identifier, and the
+ * expected version is the version the caller read. There is no fuzzy target
+ * and no wildcard.
+ */
+function deleteCommand(
+  options: Readonly<Partial<Record<OptionName, string | boolean>>>,
+  names: readonly OptionName[],
+  positionals: readonly string[],
+): CommandResult {
+  if (positionals.length !== 2) return { ok: false, message: MESSAGES.unexpectedArgument };
+  const unknown = unknownOption(names, ALLOWED_OPTIONS.delete);
+  if (unknown !== undefined) return { ok: false, message: unknown };
+  const id = positionals[1]!;
+  if (!UUID_PATTERN.test(id)) return { ok: false, message: MESSAGES.invalidUuid };
+  const version = writeVersion(stringOption(options, 'version'));
+  if (!version.ok) return version;
+  const auth = readAuthOptions(options);
+  if (!auth.ok) return auth;
+  return {
+    ok: true,
+    command: {
+      kind: 'delete',
+      auth: auth.value,
+      yes: flagOption(options, 'yes'),
+      id,
+      version: version.value,
+    },
+  };
+}
+
 /** The command of a scanned argument vector. */
 function buildCommand(scan: Scan): CommandResult {
   const { options, names, positionals } = scan;
@@ -536,6 +924,13 @@ function buildCommand(scan: Scan): CommandResult {
       return listCommand(options, names);
     case 'get':
       return getCommand(options, names, positionals);
+    case 'create':
+      if (positionals.length !== 1) return { ok: false, message: MESSAGES.unexpectedArgument };
+      return createCommand(options, names);
+    case 'update':
+      return updateCommand(options, names, positionals);
+    case 'delete':
+      return deleteCommand(options, names, positionals);
     default:
       return { ok: false, message: MESSAGES.unknownCommand };
   }
@@ -551,7 +946,12 @@ function buildCommand(scan: Scan): CommandResult {
  */
 export function parseArguments(argv: readonly string[]): ParseResult {
   const args = [...argv];
-  const scanned = scan(args);
+  const word = commandWord(args);
+  // The write commands name a record version with a value, while the meta
+  // version flag carries none, so the spec follows the command word.
+  const spec =
+    word === 'create' || word === 'update' || word === 'delete' ? WRITE_OPTION_SPEC : OPTION_SPEC;
+  const scanned = scan(args, spec);
   if (!scanned.ok) {
     // Invalid syntax has no parsed flags. A standalone format marker still
     // selects the machine error without changing validity or reflecting argv.

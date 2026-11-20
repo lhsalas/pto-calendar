@@ -31,7 +31,7 @@ This document defines the testing and automation strategy for the PTO calendar M
 | Frontend unit/component | Vitest + React Testing Library | `@testing-library/user-event` for interactions |
 | Shared API client unit | Vitest | Runtime-neutral Node suite; service-free loopback fixtures only |
 | Local agent credential unit | Vitest | Fake store/terminal ports, private Linux temporary directories; never a real user keychain |
-| Read-only CLI unit and command process | Vitest | Compiled entry point, isolated loopback service and temporary home, synthetic tokens only |
+| CLI unit and command process | Vitest | Compiled entry point, isolated loopback service and temporary home, synthetic tokens and private terminal |
 | Local MCP unit and protocol process | Vitest | Classic initialization over actual stdio, loopback-only fake API, synthetic credentials |
 | API mocking in component tests | MSW | Reuses OpenAPI schemas where possible |
 | E2E | Playwright | Strong cookie/session support, trace viewer, cross-browser |
@@ -88,17 +88,25 @@ Python 3.15.2 and a private D-Bus. It used no HTTP, desktop keychain, or real
 credentials. This tests one Linux provider combination; it does not replace
 the CI gates or certify other hosts or production.
 
-**Read-only CLI (#261):** `npm run test:coverage -w cli` first builds the
+**CLI (#261, #262):** `npm run test:coverage -w cli` first builds the
 private dependencies and executable, then runs command validation, credential
 safe execution, output, and direct child-process suites. Required coverage
-is 100% for parsing/validation, credential execution, command entry and
-output sanitization, and at least 90%
-lines, statements and functions and 80% branches overall. The existing
+is 100% for parsing/validation, credential execution, command entry,
+confirmation, create-intent storage, write execution and output sanitization,
+and at least 90% lines, statements and functions and 80% branches overall. The existing
 `Frontend tests` job produces `cli-coverage` (`cli/coverage`); the existing
 `Coverage gate` verifies and summarizes it with the earlier artifacts. Local
 verification additionally uses a disposable pseudo-terminal and a compiled
 backend with synthetic session-generated PATs: verify cookie-free CLI reads
 and 401s after revoke and expiry, with no production access.
+
+Write process tests cover default-off invocation policy, PTY confirmation and
+cancellation, exact record targeting and version headers, and preserving or
+explicitly clearing a note. Journal tests verify synchronization ordering and
+that flush errors prevent dispatch. The disposable compiled CLI/backend proof
+also checks the server write flag, lead self-scope denial, same-key create
+recovery after a lost response, stale PATCH and DELETE, and one audit per
+committed write under overlap and replay.
 
 **Local read-only MCP (#263):** `npm run test:coverage -w mcp` first builds the
 private dependencies and versioned stdio executable. It tests advertised and

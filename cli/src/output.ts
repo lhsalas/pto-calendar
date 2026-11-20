@@ -1,5 +1,5 @@
 /**
- * The renderer of the read-only PTO CLI.
+ * The renderer of the PTO CLI.
  *
  * The renderer is pure: it takes the result the executor already produced and
  * turns it into three things — the bytes of stdout, the bytes of stderr and
@@ -16,7 +16,9 @@
  *   stripped of terminal control characters and bidirectional overrides;
  * - a PTO-shaped secret and a secret digest are redacted before they are
  *   shown;
- * - partial rows are never presented as a complete result.
+ * - partial rows are never presented as a complete result;
+ * - a write projects only its safe fields, so a note, a text, a key and a
+ *   secret never reach an output.
  */
 
 import {
@@ -29,6 +31,7 @@ import {
   type ExitCode,
   type ListData,
 } from './contract.js';
+import type { WriteRecord, WriteRecovery } from './write-contract.js';
 
 /** What a caller writes to the two streams and returns to the process. */
 export interface RenderedOutput {
@@ -78,6 +81,35 @@ interface RenderedList {
   readonly complete: boolean;
   readonly reason: string;
   readonly pages: number;
+}
+
+/**
+ * One record of a write, projected onto the allowlisted fields.
+ *
+ * The projection names every field it shows and nothing else. A note, a
+ * text, a key and a secret are not part of it, so a write can never carry
+ * one into an output.
+ */
+interface RenderedWriteRecord {
+  readonly id: string;
+  readonly ownerId: string;
+  readonly version: number;
+  readonly startDate: string;
+  readonly endDate: string;
+  readonly dayPart: string;
+}
+
+/** The safe recovery facts of a write, projected one field at a time. */
+interface RenderedRecovery {
+  readonly kind: string;
+  readonly id?: string;
+  readonly ownerId?: string;
+  readonly version?: number;
+  readonly expectedVersion?: number;
+  readonly operationId?: string;
+  readonly expiresAt?: string;
+  readonly before?: RenderedWriteRecord | null;
+  readonly current?: RenderedWriteRecord | null;
 }
 
 /**
@@ -154,6 +186,51 @@ function renderList(data: ListData): RenderedList {
   };
 }
 
+/** The projection of the record of one write. */
+function renderWriteRecord(record: WriteRecord): RenderedWriteRecord {
+  return {
+    id: plain(record.id),
+    ownerId: plain(record.ownerId),
+    version: record.version,
+    startDate: plain(record.startDate),
+    endDate: plain(record.endDate),
+    dayPart: plain(record.dayPart),
+  };
+}
+
+/**
+ * The projection of the recovery facts of one write.
+ *
+ * The three recoveries are told apart by their kind. A pending create names
+ * its operation and its deadline, an unknown outcome names its target and
+ * its expected version, and a stale write names the version the caller read
+ * together with the state before and the state now.
+ */
+function renderRecovery(recovery: WriteRecovery): RenderedRecovery {
+  switch (recovery.kind) {
+    case 'create-pending':
+      return {
+        kind: 'create-pending',
+        operationId: plain(recovery.operationId),
+        expiresAt: plain(recovery.expiresAt),
+      };
+    case 'outcome-unknown':
+      return {
+        kind: 'outcome-unknown',
+        id: plain(recovery.id),
+        expectedVersion: recovery.expectedVersion,
+      };
+    case 'stale':
+      return {
+        kind: 'stale',
+        id: plain(recovery.id),
+        expectedVersion: recovery.expectedVersion,
+        before: recovery.before === null ? null : renderWriteRecord(recovery.before),
+        current: recovery.current === null ? null : renderWriteRecord(recovery.current),
+      };
+  }
+}
+
 /** The projection of the data of a successful command. */
 function renderData(result: CliSuccess): Record<string, unknown> {
   switch (result.command) {
@@ -187,6 +264,21 @@ function renderData(result: CliSuccess): Record<string, unknown> {
       return { ...renderList(result.data) };
     case 'get':
       return { ...renderRecord(result.data) };
+    case 'create':
+      return {
+        record: renderWriteRecord(result.data.record),
+        operationId: plain(result.data.operationId),
+        replayed: result.data.replayed,
+        expiresAt: plain(result.data.expiresAt),
+      };
+    case 'update':
+      return { record: renderWriteRecord(result.data.record) };
+    case 'delete':
+      return {
+        id: plain(result.data.id),
+        version: result.data.version,
+        ownerId: plain(result.data.ownerId),
+      };
   }
 }
 
@@ -227,6 +319,9 @@ function envelope(result: CliResult): Record<string, unknown> {
   };
   if (result.partial !== undefined) {
     failure['partial'] = { ...renderList(result.partial) };
+  }
+  if (result.recovery !== undefined) {
+    failure['recovery'] = { ...renderRecovery(result.recovery) };
   }
   return failure;
 }
@@ -295,6 +390,87 @@ function renderDetailLines(record: RenderedRecord): string[] {
   return lines;
 }
 
+/** The lines of one written record, without its note. */
+function renderWriteRecordLines(record: RenderedWriteRecord): string[] {
+  return [
+    field('Record', record.id),
+    field('Owner', record.ownerId),
+    field('Dates', `${record.startDate}..${record.endDate}`),
+    field('Slot', record.dayPart),
+    field('Version', String(record.version)),
+  ];
+}
+
+/**
+ * The lines that tell which fields of a record changed.
+ *
+ * Only the fields that really differ are named, so the reader sees what
+ * another writer changed and nothing else.
+ */
+function writeDiffLines(before: WriteRecord, current: WriteRecord): string[] {
+  const lines: string[] = [];
+  const fields: readonly (readonly [string, string, string])[] = [
+    ['Start date', before.startDate, current.startDate],
+    ['End date', before.endDate, current.endDate],
+    ['Slot', before.dayPart, current.dayPart],
+    ['Version', String(before.version), String(current.version)],
+  ];
+  for (const [label, from, to] of fields) {
+    if (from !== to) lines.push(field(label, `${from} -> ${to}`));
+  }
+  return lines;
+}
+
+/** The one line that names the state of a written record. */
+function writeStateLine(record: WriteRecord): string {
+  return `${record.startDate}..${record.endDate}  ${record.dayPart}  version ${record.version}`;
+}
+
+/**
+ * The human rendering of the recovery facts of one write.
+ *
+ * The three recoveries are told apart and each one names the action that
+ * follows: a pending create is reconciled, an unknown outcome is read again
+ * and a stale write is read again and confirmed.
+ */
+function renderRecoveryLines(recovery: WriteRecovery): string[] {
+  switch (recovery.kind) {
+    case 'create-pending':
+      return [
+        field('Recovery', 'create-pending'),
+        field('Operation', plain(recovery.operationId)),
+        field('Deadline', plain(recovery.expiresAt)),
+        '',
+        'The create may still be pending. Reconcile the record before another create.',
+      ];
+    case 'outcome-unknown':
+      return [
+        field('Recovery', 'outcome-unknown'),
+        field('Record', plain(recovery.id)),
+        field('Expected version', String(recovery.expectedVersion)),
+        '',
+        'The write may have been applied. Read the record again before writing.',
+      ];
+    case 'stale': {
+      const lines = [
+        field('Recovery', 'stale'),
+        field('Record', plain(recovery.id)),
+        field('Expected version', String(recovery.expectedVersion)),
+      ];
+      if (recovery.before === null || recovery.current === null) {
+        lines.push(field('Current state', 'unavailable'));
+      } else {
+        lines.push(field('Before', writeStateLine(recovery.before)));
+        lines.push(field('Current', writeStateLine(recovery.current)));
+        lines.push(...writeDiffLines(recovery.before, recovery.current));
+      }
+      lines.push('');
+      lines.push('Read the record again and confirm the change before writing.');
+      return lines;
+    }
+  }
+}
+
 /** The human rendering of a successful command. */
 function renderSuccess(result: CliSuccess): string {
   switch (result.command) {
@@ -329,6 +505,24 @@ function renderSuccess(result: CliSuccess): string {
       return join(renderListLines(renderList(result.data)));
     case 'get':
       return join(renderDetailLines(renderRecord(result.data)));
+    case 'create': {
+      const record = renderWriteRecord(result.data.record);
+      return join([
+        ...renderWriteRecordLines(record),
+        field('Operation', plain(result.data.operationId)),
+        field('Replayed', result.data.replayed ? 'yes' : 'no'),
+        field('Expires', plain(result.data.expiresAt)),
+      ]);
+    }
+    case 'update':
+      return join(renderWriteRecordLines(renderWriteRecord(result.data.record)));
+    case 'delete':
+      return join([
+        field('Record', plain(result.data.id)),
+        field('Owner', plain(result.data.ownerId)),
+        field('Version', String(result.data.version)),
+        field('Deleted', 'yes'),
+      ]);
   }
 }
 
@@ -336,16 +530,23 @@ function renderSuccess(result: CliSuccess): string {
  * The human rendering of a failure.
  *
  * The rows that were really read are shown on stdout and are labelled as
- * incomplete; the diagnostic itself goes to stderr.
+ * incomplete; the diagnostic itself goes to stderr. A write that needs a
+ * recovery shows its safe recovery facts and the action that follows, so a
+ * reader can never mistake an unknown outcome for a failed write.
  */
 function renderFailure(result: CliFailure): { readonly stdout: string; readonly stderr: string } {
-  const stderr = `${plain(result.error.message)}\n`;
-  if (result.partial === undefined) return { stdout: '', stderr };
-  const lines = ['Partial results (incomplete):', ''];
-  for (const line of renderListLines(renderList(result.partial))) {
-    lines.push(line);
+  const lines = [plain(result.error.message)];
+  if (result.recovery !== undefined) {
+    lines.push('');
+    lines.push(...renderRecoveryLines(result.recovery));
   }
-  return { stdout: join(lines), stderr };
+  const stderr = `${lines.join('\n')}\n`;
+  if (result.partial === undefined) return { stdout: '', stderr };
+  const partial = ['Partial results (incomplete):', ''];
+  for (const line of renderListLines(renderList(result.partial))) {
+    partial.push(line);
+  }
+  return { stdout: join(partial), stderr };
 }
 
 /**
