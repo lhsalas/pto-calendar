@@ -683,23 +683,73 @@ not the stale count of eight in older instructions. The OCI deployment
 workflow lists the same job names, so a release cannot be tagged around a
 failing check.
 
-**Explicit owner security waiver (PR #293, restoration #294):** for
-`lhsalas/pto-calendar`, the owner authorized disabling the entire job named
-`Security scan` repository-wide until it is restored through issue #294, because
-the unpatched `picomatch` advisory GHSA-fc5q-39xc-vjpf blocks the existing
-development dependency graph. The job condition is false only for this
-repository; this disables both npm dependency audits and the pinned-image
-vulnerability/secret scans on PR, master, tag and scheduled CI runs. Its skipped result is waived,
-not a passing security scan or remediation. All other checks remain mandatory.
-Before applying this waiver, the coordinator verified that this was the only
-failing dependency advisory and all four pinned images passed the unchanged
-image-risk policy with zero rejected findings (40 temporary and 79 legacy
-acceptances, not clean images). The underlying audit/image policies, branch
-protections, required-check settings, permissions and deployment guards are
-unchanged. No production deployment or PAT activation is authorized. Issue #294
-remains an open security item with manual review on 2026-11-24; closing the issue
-alone does not restore the control. Restoration must remove the false condition
-and prove both audit graphs, real image scans and all normal CI checks pass.
+**Security scan restored in the #294 candidate — the PR #293 owner waiver is
+withdrawn and the full job runs again.** The explicit owner waiver that
+disabled the entire job named `Security scan` repository-wide for
+`lhsalas/pto-calendar` was granted in PR #293 because the then-active
+`picomatch` advisory GHSA-fc5q-39xc-vjpf blocked the development dependency
+graph. GitHub withdrew that advisory on 2026-11-18, and the advisory that was
+live in this graph is the `effect` ReDoS GHSA-7589-6fvf-x4pw
+(CVE-2026-121707), which is fixed in `effect` 3.22.1. `@prisma/config` 7.10.1
+pins `effect` 3.20.0, and 7.10.1 is still the latest stable release of that
+package (the 8.x line is only a release candidate), so the npm half of the job
+is remediated by a narrowly scoped npm root override that replaces only that
+transitive dependency:
+
+```json
+"overrides": {
+  "@prisma/config@7.10.1": {
+    "effect": "3.22.1"
+  }
+}
+```
+
+The override is scoped to the parent version, so it applies to
+`@prisma/config@7.10.1` and to nothing else. Prisma and `@prisma/config` stay
+at 7.10.1, and the `allowScripts` entries, the engines and the schema are
+unchanged. Remove the override as soon as Prisma publishes a `@prisma/config`
+release that pins a non-vulnerable `effect` (3.22.1 or later), and update it
+whenever the pinned parent version or the patched `effect` version changes;
+never widen it into a global `effect` override, and never edit a pinned
+dependency's declared requirement in the lockfile to simulate the fix. The
+locked production graph now audits clean and the development graph keeps seven
+moderate findings in the `typescript-eslint`/`minimatch` chain, which are
+reported and do not block; neither graph has a high or critical npm finding.
+
+**Named accepted risk — CVE-2026-86144 in the pinned production PostgreSQL
+image (accepted risk, NOT a fix).** The owner explicitly authorized one exact
+exception for `lhsalas/pto-calendar`: package `libxml2`, installed version
+2.13.9-r2, severity HIGH, advisory CVE-2026-86144 only (fixed upstream in
+2.13.9-r3), at the OS target of
+`postgres:16-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36`
+(alpine 3.24.3). It is recorded as a single package tuple in
+`infra/security/image-risk-acceptances.json`, so the unchanged exact-tuple
+policy accepts that one finding and nothing else: any other advisory,
+package, version, severity, path or image digest is still rejected, and no
+global ignore, image digest, compose file or scanner setting was changed. The
+raw Trivy 0.76.2 reports keep every finding — this is an explicit, visible
+acceptance, not a filter. The stated reason is to finish #262 without
+deploying while a verified patched PostgreSQL image is awaited. It expires with
+the existing temporary acceptance on **2026-12-15 at 00:00 UTC**, and that
+deadline is not renewed. It is replaced by a verified patched image tracked in
+#247, which stays open at priority high; until that image lands this remains
+an open security item.
+
+The `Security scan` job is restored in this candidate: it runs in full for PR,
+master, tag and scheduled CI — the npm audit of both locked graphs and the
+pinned-image vulnerability and secret scans — with no repository condition and
+no skipped result. That restores the control; it does not claim that CI has
+already passed. The merge gate is unchanged — all **11** required checks, with
+`Security scan` actually passing and never skipped — and #294 stays open until
+the job has actually passed on the delivered head. The pinned production images
+are still **not** clean images: the accepted-risk inventory is **41 temporary
+accepted current matches plus 79 legacy matches** (40 temporary and 79 legacy
+before this exception), the legacy scope and expiry are unchanged in
+`.trivyignore.yaml` and `infra/security/image-risk-acceptances.json`, and
+neither the pre-existing exceptions nor this one is broadened. The underlying
+audit and image policies, branch protections, required-check settings, GitHub
+permissions and deployment guards are unchanged. No production deployment,
+tag, release or PAT activation is authorized by this change.
 
 ### 10.5 Secrets
 - `DATABASE_URL` for the Postgres service container (set per job, never from repo secrets).
