@@ -256,6 +256,10 @@ The [private CLI workspace](cli/README.md) builds the versioned `pto`
 executable. It supports local credential setup, status and removal, plus
 read-only `list` and `get` with human or versioned JSON output. It identifies
 `--mine` through the service, and marks incomplete paginated results explicitly.
+Optional `create`, `update`, and `delete` require host opt-in and explicit
+approval, plus the service's live token permissions and write flag. Updates
+and deletes name an exact record and version. A timed-out create retains one
+approved operation for explicit reconciliation rather than silently retrying.
 This is workspace source, not a distributed artifact or production activation.
 
 The [private MCP workspace](mcp/README.md) builds `pto-mcp`, a local stdio

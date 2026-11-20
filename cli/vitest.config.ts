@@ -13,7 +13,7 @@ export default defineConfig({
         statements: 90,
         functions: 90,
         branches: 80,
-        'src/{args,execute-command,main,output}.ts': {
+        'src/{args,confirmation,create-intent,execute-command,execute-write,main,output}.ts': {
           lines: 100,
           statements: 100,
           functions: 100,

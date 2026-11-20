@@ -275,11 +275,14 @@ and failed `If-Match` remains 412 regardless of the chosen version encoding.
   results are documented in [`cli/README.md`](../cli/README.md), without a
   published artifact or activation.
 
-  [#262] owns CLI writes.
-  Writes preview exact actor/owner/ID/dates/diff, require interactive confirmation
-  or explicit host-approved noninteractive `--yes`, and cancel without mutation.
-  Read exact detail before update/delete; use PATCH and expected version.
-  Persist stable create intent/replay state; no fuzzy/bulk delete or date guessing.
+  [#262] adds CLI writes behind the explicit host opt-in `PTO_CLI_WRITES=1`
+  and independently enforced server flags and scopes. An interactive write
+  previews the live actor, owner, target and proposed changes before asking;
+  noninteractive use requires explicit host-approved `--yes`. Update/delete
+  read exact detail and use the stated expected version. Before dispatch,
+  create durably records a single pending intent per bound origin and actor.
+  Only deliberate same-input replay with the operation ID can resume it.
+  Neither path activates production support.
 - [#263], [#264]: `mcp`/`pto-mcp` exposes `pto_list`, `pto_get`, then separately
   enabled `pto_create`, `pto_update`, `pto_delete`. Strict schemas and bounded,
   structured outputs include request IDs/completeness/recovery. Profile lookup is

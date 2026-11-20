@@ -1,6 +1,8 @@
 import type { CredentialSource, ProfileStorage } from '@pto-calendar/agent-auth';
 import type { ListAllReason, PtoDetail, PtoPageItem, PtoScope } from '@pto-calendar/api-client';
 
+import type { WriteCommand, WriteData, WriteRecovery } from './write-contract.js';
+
 export const CLI_SCHEMA_VERSION = 1;
 export const DEFAULT_PROFILE = 'default';
 export const MAX_PAGE_SIZE = 200;
@@ -55,7 +57,8 @@ export type CliCommand =
       readonly pageSize: number;
       readonly maxPages: number;
     }
-  | { readonly kind: 'get'; readonly auth: ReadAuthOptions; readonly id: string };
+  | { readonly kind: 'get'; readonly auth: ReadAuthOptions; readonly id: string }
+  | WriteCommand;
 
 export type MetaCommand = Extract<CliCommand, { kind: 'help' | 'version' }>;
 export type Operation = Exclude<CliCommand, MetaCommand>;
@@ -94,6 +97,9 @@ interface DataByCommand {
   };
   readonly list: ListData;
   readonly get: PtoDetail;
+  readonly create: WriteData['create'];
+  readonly update: WriteData['update'];
+  readonly delete: WriteData['delete'];
 }
 
 export type CliSuccessFor<K extends CommandKind> = {
@@ -117,6 +123,13 @@ export interface CliFailure {
     readonly retryAfterMs: number | null;
   };
   readonly partial?: ListData;
+  /**
+   * The safe recovery facts of a write that did not end in a plain failure.
+   *
+   * The member is additive: a read or a write that failed in an ordinary way
+   * carries no recovery, and a recovery never replaces the error itself.
+   */
+  readonly recovery?: WriteRecovery;
 }
 
 export type CliResult = CliSuccess | CliFailure;

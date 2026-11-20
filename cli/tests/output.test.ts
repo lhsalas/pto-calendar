@@ -11,9 +11,11 @@ import {
   type ListData,
 } from '../src/contract.js';
 import { renderResult } from '../src/output.js';
+import type { WriteRecord, WriteRecovery } from '../src/write-contract.js';
 
 const OWNER = '0864a7d8-6de5-46f1-9b5e-9e7ef2ef22fa';
 const RECORD = '11111111-2222-4333-8444-555555555555';
+const OPERATION = '9f1b0d3a-4c2e-4b8a-9f31-2c7d5e6f8a10';
 
 const ITEM: PtoPageItem = {
   id: RECORD,
@@ -28,6 +30,15 @@ const ITEM: PtoPageItem = {
 const DETAIL: PtoDetail = { ...ITEM, note: 'Sick day' };
 
 const LIST: ListData = { items: [ITEM], complete: true, reason: 'complete', pages: 1 };
+
+const WRITTEN: WriteRecord = {
+  id: RECORD,
+  ownerId: OWNER,
+  version: 3,
+  startDate: '2026-12-01',
+  endDate: '2026-12-02',
+  dayPart: 'morning',
+};
 
 function success(command: CliSuccess['command'], data: unknown): CliResult {
   return {
@@ -544,5 +555,357 @@ describe('the sanitization of displayed text', () => {
     const rendered = renderResult(success('get', { ...DETAIL, note: secret }), true);
     expect(rendered.stdout).not.toContain(secret);
     expect(rendered.stdout).toContain('[redacted]');
+  });
+});
+
+describe('the output of a write', () => {
+  it('projects only the allowlisted fields of a create', () => {
+    const rendered = renderResult(
+      success('create', {
+        record: WRITTEN,
+        operationId: OPERATION,
+        replayed: false,
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      }),
+      true,
+    );
+    expect(envelope(rendered.stdout)).toEqual({
+      schemaVersion: 1,
+      ok: true,
+      command: 'create',
+      data: {
+        record: {
+          id: RECORD,
+          ownerId: OWNER,
+          version: 3,
+          startDate: '2026-12-01',
+          endDate: '2026-12-02',
+          dayPart: 'morning',
+        },
+        operationId: OPERATION,
+        replayed: false,
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      },
+    });
+    expect(rendered.stderr).toBe('');
+    expect(rendered.exitCode).toBe(0);
+  });
+
+  it('shows a create that was not replayed in the human output', () => {
+    const rendered = renderResult(
+      success('create', {
+        record: WRITTEN,
+        operationId: OPERATION,
+        replayed: false,
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      }),
+      false,
+    );
+    expect(rendered.stdout).toContain('Replayed: no');
+  });
+
+  it('projects only the allowlisted fields of an update', () => {
+    const rendered = renderResult(success('update', { record: WRITTEN }), true);
+    expect(envelope(rendered.stdout)).toEqual({
+      schemaVersion: 1,
+      ok: true,
+      command: 'update',
+      data: {
+        record: {
+          id: RECORD,
+          ownerId: OWNER,
+          version: 3,
+          startDate: '2026-12-01',
+          endDate: '2026-12-02',
+          dayPart: 'morning',
+        },
+      },
+    });
+  });
+
+  it('projects only the allowlisted fields of a delete', () => {
+    const rendered = renderResult(
+      success('delete', { id: RECORD, version: 3, ownerId: OWNER }),
+      true,
+    );
+    expect(envelope(rendered.stdout)).toEqual({
+      schemaVersion: 1,
+      ok: true,
+      command: 'delete',
+      data: { id: RECORD, version: 3, ownerId: OWNER },
+    });
+  });
+
+  it('never carries a note, a text or a key into a write output', () => {
+    const secret = 'pto_pat_11111111-2222-4333-8444-555555555555.' + 'a'.repeat(64);
+    const rendered = renderResult(
+      success('create', {
+        record: { ...WRITTEN, id: secret } as unknown as WriteRecord,
+        operationId: OPERATION,
+        replayed: true,
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      }),
+      true,
+    );
+    expect(rendered.stdout).not.toContain(secret);
+    expect(rendered.stdout).toContain('[redacted]');
+    expect(rendered.stdout).not.toContain('note');
+    expect(rendered.stdout).not.toContain('key');
+  });
+
+  it('shows the safe fields of a create in the human output', () => {
+    const rendered = renderResult(
+      success('create', {
+        record: WRITTEN,
+        operationId: OPERATION,
+        replayed: true,
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      }),
+      false,
+    );
+    expect(rendered.stdout).toBe(
+      `Record: ${RECORD}\nOwner: ${OWNER}\nDates: 2026-12-01..2026-12-02\nSlot: morning\n` +
+        `Version: 3\nOperation: ${OPERATION}\nReplayed: yes\nExpires: 2027-01-01T00:00:00.000Z\n`,
+    );
+    expect(rendered.stderr).toBe('');
+  });
+
+  it('shows the safe fields of an update in the human output', () => {
+    const rendered = renderResult(success('update', { record: WRITTEN }), false);
+    expect(rendered.stdout).toBe(
+      `Record: ${RECORD}\nOwner: ${OWNER}\nDates: 2026-12-01..2026-12-02\nSlot: morning\nVersion: 3\n`,
+    );
+  });
+
+  it('shows the safe fields of a delete in the human output', () => {
+    const rendered = renderResult(
+      success('delete', { id: RECORD, version: 3, ownerId: OWNER }),
+      false,
+    );
+    expect(rendered.stdout).toBe(`Record: ${RECORD}\nOwner: ${OWNER}\nVersion: 3\nDeleted: yes\n`);
+  });
+
+  it('sanitizes the safe fields of a write', () => {
+    const rendered = renderResult(
+      success('update', {
+        record: { ...WRITTEN, ownerId: 'Ja\u001B[31mne\u202E Doe' },
+      }),
+      false,
+    );
+    expect(rendered.stdout).toContain('Owner: Jane Doe');
+    expect(rendered.stdout).not.toContain('\u001B');
+    expect(rendered.stdout).not.toContain('\u202E');
+  });
+});
+
+describe('the recovery of a write', () => {
+  const PENDING: WriteRecovery = {
+    kind: 'create-pending',
+    operationId: OPERATION,
+    expiresAt: '2027-01-01T00:00:00.000Z',
+  };
+
+  const UNKNOWN: WriteRecovery = {
+    kind: 'outcome-unknown',
+    id: RECORD,
+    expectedVersion: 3,
+  };
+
+  const STALE: WriteRecovery = {
+    kind: 'stale',
+    id: RECORD,
+    expectedVersion: 3,
+    before: WRITTEN,
+    current: { ...WRITTEN, version: 4, endDate: '2026-12-04', dayPart: 'evening' },
+  };
+
+  it('projects a pending create in the machine envelope', () => {
+    const rendered = renderResult(
+      failure('LOCAL', 'The create may still be pending.', {
+        command: 'create',
+        recovery: PENDING,
+      }),
+      true,
+    );
+    expect(envelope(rendered.stdout)).toEqual({
+      schemaVersion: 1,
+      ok: false,
+      command: 'create',
+      error: {
+        code: 'LOCAL',
+        message: 'The create may still be pending.',
+        status: null,
+        requestId: null,
+        retryAfterMs: null,
+      },
+      recovery: {
+        kind: 'create-pending',
+        operationId: OPERATION,
+        expiresAt: '2027-01-01T00:00:00.000Z',
+      },
+    });
+    expect(rendered.exitCode).toBe(10);
+  });
+
+  it('projects an unknown outcome in the machine envelope', () => {
+    const rendered = renderResult(
+      failure('NETWORK', 'The answer was lost.', {
+        command: 'update',
+        recovery: UNKNOWN,
+      }),
+      true,
+    );
+    expect(envelope(rendered.stdout)['recovery']).toEqual({
+      kind: 'outcome-unknown',
+      id: RECORD,
+      expectedVersion: 3,
+    });
+    expect(rendered.exitCode).toBe(8);
+  });
+
+  it('projects a stale write with the state before and the state now', () => {
+    const rendered = renderResult(
+      failure('CONFLICT', 'The record changed.', {
+        command: 'update',
+        recovery: STALE,
+      }),
+      true,
+    );
+    expect(envelope(rendered.stdout)['recovery']).toEqual({
+      kind: 'stale',
+      id: RECORD,
+      expectedVersion: 3,
+      before: {
+        id: RECORD,
+        ownerId: OWNER,
+        version: 3,
+        startDate: '2026-12-01',
+        endDate: '2026-12-02',
+        dayPart: 'morning',
+      },
+      current: {
+        id: RECORD,
+        ownerId: OWNER,
+        version: 4,
+        startDate: '2026-12-01',
+        endDate: '2026-12-04',
+        dayPart: 'evening',
+      },
+    });
+    expect(rendered.exitCode).toBe(6);
+  });
+
+  it('reports a stale write without an invented state', () => {
+    const rendered = renderResult(
+      failure('CONFLICT', 'The record changed.', {
+        command: 'update',
+        recovery: { kind: 'stale', id: RECORD, expectedVersion: 3, before: null, current: null },
+      }),
+      true,
+    );
+    expect(envelope(rendered.stdout)['recovery']).toEqual({
+      kind: 'stale',
+      id: RECORD,
+      expectedVersion: 3,
+      before: null,
+      current: null,
+    });
+  });
+
+  it('tells the three recoveries apart in the human output', () => {
+    const pending = renderResult(
+      failure('LOCAL', 'The create may still be pending.', {
+        command: 'create',
+        recovery: PENDING,
+      }),
+      false,
+    );
+    expect(pending.stderr).toBe(
+      'The create may still be pending.\n\n' +
+        `Recovery: create-pending\nOperation: ${OPERATION}\nDeadline: 2027-01-01T00:00:00.000Z\n\n` +
+        'The create may still be pending. Reconcile the record before another create.\n',
+    );
+    expect(pending.stdout).toBe('');
+
+    const unknown = renderResult(
+      failure('NETWORK', 'The answer was lost.', { command: 'update', recovery: UNKNOWN }),
+      false,
+    );
+    expect(unknown.stderr).toBe(
+      'The answer was lost.\n\n' +
+        `Recovery: outcome-unknown\nRecord: ${RECORD}\nExpected version: 3\n\n` +
+        'The write may have been applied. Read the record again before writing.\n',
+    );
+  });
+
+  it('shows the difference of a stale write in the human output', () => {
+    const rendered = renderResult(
+      failure('CONFLICT', 'The record changed.', { command: 'update', recovery: STALE }),
+      false,
+    );
+    expect(rendered.stderr).toBe(
+      'The record changed.\n\n' +
+        `Recovery: stale\nRecord: ${RECORD}\nExpected version: 3\n` +
+        'Before: 2026-12-01..2026-12-02  morning  version 3\n' +
+        'Current: 2026-12-01..2026-12-04  evening  version 4\n' +
+        'End date: 2026-12-02 -> 2026-12-04\n' +
+        'Slot: morning -> evening\n' +
+        'Version: 3 -> 4\n\n' +
+        'Read the record again and confirm the change before writing.\n',
+    );
+  });
+
+  it('shows no difference when the state of a stale write is unavailable', () => {
+    const rendered = renderResult(
+      failure('CONFLICT', 'The record changed.', {
+        command: 'update',
+        recovery: { kind: 'stale', id: RECORD, expectedVersion: 3, before: null, current: null },
+      }),
+      false,
+    );
+    expect(rendered.stderr).toBe(
+      'The record changed.\n\n' +
+        `Recovery: stale\nRecord: ${RECORD}\nExpected version: 3\nCurrent state: unavailable\n\n` +
+        'Read the record again and confirm the change before writing.\n',
+    );
+  });
+
+  it('names only the fields that really differ', () => {
+    const rendered = renderResult(
+      failure('CONFLICT', 'The record changed.', {
+        command: 'update',
+        recovery: {
+          kind: 'stale',
+          id: RECORD,
+          expectedVersion: 3,
+          before: WRITTEN,
+          current: { ...WRITTEN },
+        },
+      }),
+      false,
+    );
+    expect(rendered.stderr).toContain('Before: 2026-12-01..2026-12-02  morning  version 3');
+    expect(rendered.stderr).toContain('Current: 2026-12-01..2026-12-02  morning  version 3');
+    expect(rendered.stderr).not.toContain('Start date:');
+    expect(rendered.stderr).not.toContain('End date:');
+    expect(rendered.stderr).not.toContain('Slot:');
+    expect(rendered.stderr).not.toContain('Version: 3 ->');
+  });
+
+  it('sanitizes the recovery facts', () => {
+    const rendered = renderResult(
+      failure('LOCAL', 'The create may still be pending.', {
+        command: 'create',
+        recovery: {
+          kind: 'create-pending',
+          operationId: `op\u001B[31m\u202E`,
+          expiresAt: '2027-01-01T00:00:00.000Z',
+        },
+      }),
+      true,
+    );
+    expect(rendered.stdout).not.toContain('\u001B');
+    expect(rendered.stdout).not.toContain('\u202E');
+    expect(envelope(rendered.stdout)['recovery']).toMatchObject({ operationId: 'op' });
   });
 });

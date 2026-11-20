@@ -1235,6 +1235,18 @@ revoked or expired credential valid. Note display is opt-in for an authorized
 detail call and is always absent from list results. The server exposes no
 HTTP transport, database access or writable tool.
 
+### 14.7 CLI write safety (#262)
+`pto` keeps writes off unless the invocation's host explicitly opts in. The
+CLI preflights the live actor, exact record, scope and version before asking
+for interactive confirmation or honoring noninteractive `--yes`; the API
+still enforces its own flags, scopes, ownership and versioned writes. A
+create's pending operation is bound to one origin, actor, live credential
+and normalized payload. The journal synchronizes the parent directory entries
+and the record before dispatch. The client never automatically retries writes.
+See [CLI write and recovery policy](../cli/README.md) for version conflicts,
+lost responses and note handling. These controls do not prove consent to the
+server or enable production access.
+
 ## 15. Suggested Implementation Choices
 
 ### Confirmed MVP implementation choice
