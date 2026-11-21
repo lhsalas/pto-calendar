@@ -185,18 +185,27 @@ The OCI deployment workflow is `.github/workflows/deploy-oci.yml`. It is
 gated by `OCI_PRODUCTION_DEPLOY_ENABLED=true` and triggers from two
 sources:
 
-- `workflow_run: workflows: [CI], types: [completed]` — fires when the CI
-  workflow finishes for any push event. The job filters to tag pushes
-  (`refs/tags/v*` or bare `v*.*.*`) and `conclusion=success`; if the filter
-  fails the job exits 0 with a `::notice::` so non-tag events do not block
-  the queue.
-- `workflow_dispatch` — manual deployment. The job still polls the CI check
-  runs API for up to 5 minutes (20 × 15 s) before failing.
+**Production hold (owner-authorized 2026-11-21, #309).** #247 natively blocks
+#269. The OCI production automation switch remains `false`; #309 changes
+no deployment workflow and authorizes no release tag, dispatch, direct-host
+recovery, or production action. Tag CI uses the tagged revision's workflow.
+The #309 guard covers the configured `v*.*.*` tag trigger for a revision that
+contains the guard or an independently verified restoration of the full scan.
+It does not protect older revisions (for example `82cfc73`, which could skip
+the job) or tags outside the trigger.
 
-Because `workflow_run` runs only after CI completes, the deploy never races
-the CI gate. The CI itself triggers on the same tag push, runs all eleven
-checks, and on success hands off to the OCI deploy via the `workflow_run`
-event.
+- `workflow_run: workflows: [CI], types: [completed]` — observes completed
+  CI. The automatic route evaluates the upstream event, workflow conclusion,
+  and release tag name. It does not verify the individual security job.
+- `workflow_dispatch` — manual deployment. The job still polls the CI check
+  runs API for up to 5 minutes (20 × 15 s) before failing. Manual dispatch is
+  not authorized during the production hold above.
+
+Before any separately approved re-enable, verify actual #247 remediation and
+independently confirm every check on full CI for the exact release tag, ref,
+and commit SHA, including that both the npm audits and the image scan ran and
+passed. A skipped, failed, missing, older or non-tag scan is not release
+evidence. Upstream workflow success alone is insufficient.
 
 Configure these production repository values:
 
@@ -214,19 +223,21 @@ hostname points at the reserved IP via DNS and is reachable on ports 80 and
 443 only, while the deploy workflow SSHes directly to the IP. This keeps the
 TLS termination path simple and avoids depending on DNS for the deploy.
 
-There is no direct tag-push trigger in `deploy-oci.yml`: only successful tag
-CI or a manually requested, CI-verified ref can deploy. Ordinary master/PR
-CI completion does not deploy production.
+There is no direct tag-push trigger in `deploy-oci.yml`: ordinary `master` or
+PR CI completion is not a release, and neither deployment route is authorized
+while the production hold is in place.
 
-Deploy a release manually on the VM:
+Direct-host recovery on the VM is not an alternative to these prerequisites.
+After the hold is lifted, obtain separate authorization for recovery and use
+the verified release ref and expected commit SHA:
 
 ```bash
 ssh deploy@<reserved-public-ip>
 cd /opt/pto-calendar
-./infra/deploy/deploy.sh v1.1.0
+./infra/deploy/deploy.sh '<verified-release-ref>' '<exact-verified-commit-sha>'
 ```
 
-`deploy.sh` fetches tags, validates the ref and optional expected commit,
+`deploy.sh` fetches tags, validates the ref and supplied expected commit,
 checks for a clean tree, builds the current ARM64 images, runs migrations,
 restarts the application, and verifies health/readiness. Prefer an immutable
 release tag or commit for repeatable recovery.

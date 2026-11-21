@@ -701,6 +701,27 @@ thereafter; this dated planning snapshot intentionally claims **no feature
 completion**. Scope/contract changes update the ADR, issue bodies, assessment
 proposal addendum and affected README/API/testing/deployment docs together.
 
+**Tag-only Security-scan pause (#309, owner-authorized 2026-11-21).** While
+#247 stays open, `Security scan` may be skipped only on this repository's
+known non-tag CI (own PRs, `master` pushes, schedules) and only while
+`PTO_TAG_ONLY_SECURITY_SCAN=true`; forks, unknown contexts and every tag ref
+keep the full scan, as recorded in [the testing strategy](testing-strategy.md).
+That tag invariant covers only tagged revisions containing the #309 guard (or
+a later verified restored scan) under the configured `v*.*.*` trigger — not
+older revisions such as `82cfc73` nor arbitrary tags.
+The pause is justified only by the two named `CVE-2026-97054` `stdlib` HIGH
+findings
+([verified scan evidence](https://github.com/lhsalas/pto-calendar/issues/247#issuecomment-7065745045));
+there is no finding exclusion and no clean claim. The owner clears the
+variable (reading it back unset) at run end, #247 remediation, or 2026-12-15
+00:00 UTC, whichever is first; queued runs confer no new approval, and the
+verified #247 remediation removes the dormant conditional. #247 natively
+blocks #269, the OCI automation switch stays `false` including for older
+workflow revisions, and manual dispatch/direct-host recovery are not
+sanctioned during the hold: re-enabling needs the true fix, exact full
+tag-SHA CI with a genuinely successful scan, and separate owner approval. No
+#308 code is reused and no GitHub result is asserted here.
+
 [#227]: https://github.com/lhsalas/pto-calendar/issues/227
 [#228]: https://github.com/lhsalas/pto-calendar/issues/228
 [#229]: https://github.com/lhsalas/pto-calendar/issues/229
@@ -738,3 +759,4 @@ proposal addendum and affected README/API/testing/deployment docs together.
 [#269]: https://github.com/lhsalas/pto-calendar/issues/269
 [#270]: https://github.com/lhsalas/pto-calendar/issues/270
 [#273]: https://github.com/lhsalas/pto-calendar/issues/273
+[#309]: https://github.com/lhsalas/pto-calendar/issues/309

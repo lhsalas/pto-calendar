@@ -21,9 +21,57 @@ import { evaluateImage, validatePolicy } from '../security/image-risk-policy.mjs
 import { productionImages } from '../security/production-images.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const ciWorkflow = resolve(root, '.github/workflows/ci.yml');
+const normalizeExpression = (value) => value.replace(/\s+/g, ' ').trim();
+// #309: the reviewed fail-safe invariant. The whole Security scan runs unless
+// the named opt-in is exactly true AND GitHub's server context proves the
+// canonical repository and a known non-tag route with a recognized branch ref
+// type for PR/branch routes. Both tag indicators are conjuncts, so any tag
+// (including a malformed event with only one indicator) always runs the entire
+// scan. Keep this byte-for-byte reviewable.
+const TAG_ONLY_GUARD = `
+  !(
+  vars.PTO_TAG_ONLY_SECURITY_SCAN == 'true' &&
+  github.repository == 'lhsalas/pto-calendar' &&
+  github.ref_type != 'tag' &&
+  !startsWith(github.ref, 'refs/tags/') &&
+  (
+  (
+  github.event_name == 'pull_request' &&
+  github.ref_type == 'branch' &&
+  github.event.pull_request.base.repo.full_name == 'lhsalas/pto-calendar' &&
+  github.event.pull_request.head.repo.full_name == 'lhsalas/pto-calendar' &&
+  github.event.pull_request.base.repo.id > 0 &&
+  github.event.pull_request.head.repo.id == github.event.pull_request.base.repo.id &&
+  github.event.pull_request.base.ref == github.base_ref &&
+  github.event.pull_request.head.ref == github.head_ref &&
+  github.base_ref != '' &&
+  github.base_ref != null &&
+  github.head_ref != '' &&
+  github.head_ref != null &&
+  github.event.pull_request.number > 0 &&
+  github.ref == format('refs/pull/{0}/merge', github.event.pull_request.number)
+  ) ||
+  (
+  (github.event_name == 'push' || github.event_name == 'schedule') &&
+  github.ref_type == 'branch' &&
+  github.ref == 'refs/heads/master'
+  )
+  )
+  )
+`;
 const committed = JSON.parse(
   readFileSync(resolve(root, 'infra/security/image-risk-acceptances.json'), 'utf8'),
 );
+
+function tagOnlyGuard(ci = readFileSync(ciWorkflow, 'utf8')) {
+  const security = ci.split('\n  security:\n')[1].split('\n  e2e:\n')[0];
+  const jobLevelGuards = security.match(/^ {4}if\s*:/gm) ?? [];
+  assert.equal(jobLevelGuards.length, 1, 'the security job may carry only the #309 job guard');
+  const block = /^ {4}if:\s*>-\n((?: {6,}.*\n)+)/m.exec(security)?.[1];
+  assert.ok(block, 'the security job must carry the exact #309 job guard');
+  return { security, guard: normalizeExpression(block) };
+}
 const image = `fixture:1@sha256:${'a'.repeat(64)}`;
 const otherImage = `other:1@sha256:${'b'.repeat(64)}`;
 const legacySource = '/fixture/.trivyignore.yaml';
@@ -194,18 +242,132 @@ test('all eleven original CI jobs and mandatory security controls remain', () =>
   assert.match(security, /run: node infra\/security\/scan-production-images\.mjs/);
   assert.match(security, /if: always\(\)/);
   assert.match(security, /if-no-files-found: error/);
-  // #294: the restored job must not be gated again by a job-level condition.
-  // Step-level conditions (the artifact upload's `if: always()`) stay valid.
-  assert.doesNotMatch(
-    security,
-    /^ {4}if\s*:/m,
-    'the security job must not carry a job-level condition',
+  assert.match(security, /retention-days: 30/);
+  assert.match(security, /^ {4}permissions:\n {6}contents: read$/m);
+  assert.equal(
+    (security.match(/^ {6}- /gm) ?? []).length,
+    6,
+    'the unchanged scanner steps must remain the only Security scan steps',
   );
-  assert.doesNotMatch(
-    security,
-    /github\.repository\s*[!=]=/,
-    'the security job must not be gated on the repository',
+  assert.doesNotMatch(security, /^ {4}(?:needs|outputs|env|continue-on-error)\s*:/m);
+  assert.doesNotMatch(security, /waive_security_scan|PTO_SOURCE_DELIVERY|source-scan-waiver/i);
+  assert.match(ci, /^  push:\n    branches: \[master\]\n    tags: \['v\*\.\*\.\*'\]$/m);
+  assert.match(ci, /^  schedule:\n    - cron: '30 6 \* \* 1'$/m);
+  // #309: the old #294 "never job-level guard" assertion is replaced by the
+  // exact fail-safe tag-only invariant. The whole scan runs unless the named
+  // opt-in is exactly true AND GitHub's server context proves a known non-tag
+  // route; both tag indicators and the canonical repo/PR/fork checks are
+  // conjuncts. No checkout, step output, needs, env or secret is consulted.
+  const { guard } = tagOnlyGuard(ci);
+  assert.equal(guard, normalizeExpression(TAG_ONLY_GUARD));
+  assert.doesNotMatch(guard, /needs\.|steps\.|outputs\.|secrets\./);
+});
+
+test('tag refs always run the whole Security scan, including malformed tag metadata', () => {
+  const { guard } = tagOnlyGuard();
+  assert.equal(guard, normalizeExpression(TAG_ONLY_GUARD));
+  assert.ok(guard.includes("github.ref_type != 'tag'"));
+  assert.ok(guard.includes("!startsWith(github.ref, 'refs/tags/')"));
+  // Both tag checks are conjuncts before the non-tag alternatives. Either
+  // indicator alone therefore forces the full scan; the guard never contains
+  // a positive ref-type tag route.
+  const tagType = guard.indexOf("github.ref_type != 'tag'");
+  const tagPrefix = guard.indexOf("!startsWith(github.ref, 'refs/tags/')");
+  const firstEvent = guard.indexOf('github.event_name');
+  assert.ok(tagType > 0 && tagPrefix > tagType && firstEvent > tagPrefix);
+  assert.doesNotMatch(guard, /github\.ref_type == 'tag'/);
+  assert.equal((guard.match(/refs\/tags\//g) ?? []).length, 1);
+});
+
+test('only a branch push or scheduled run on current master is a skippable branch route', () => {
+  const { guard } = tagOnlyGuard();
+  assert.equal(guard, normalizeExpression(TAG_ONLY_GUARD));
+  assert.ok(
+    guard.includes(
+      "(github.event_name == 'push' || github.event_name == 'schedule') && github.ref_type == 'branch' && github.ref == 'refs/heads/master'",
+    ),
   );
+  assert.deepEqual(
+    [...new Set([...(guard.match(/refs\/heads\/[^' ]+/g) ?? [])])],
+    ['refs/heads/master'],
+  );
+});
+
+test('a pull-request skip requires canonical same-repo base/head and the exact merge ref', () => {
+  const { guard } = tagOnlyGuard();
+  assert.equal(guard, normalizeExpression(TAG_ONLY_GUARD));
+  assert.ok(guard.includes("github.event_name == 'pull_request' && github.ref_type == 'branch'"));
+  assert.ok(
+    guard.includes(
+      "github.event_name == 'pull_request' && github.ref_type == 'branch' && github.event.pull_request.base.repo.full_name == 'lhsalas/pto-calendar'",
+    ),
+  );
+  assert.ok(
+    guard.includes("github.event.pull_request.head.repo.full_name == 'lhsalas/pto-calendar'"),
+  );
+  assert.ok(guard.includes('github.event.pull_request.base.repo.id > 0'));
+  assert.ok(
+    guard.includes(
+      'github.event.pull_request.head.repo.id == github.event.pull_request.base.repo.id',
+    ),
+  );
+  assert.ok(guard.includes('github.event.pull_request.base.ref == github.base_ref'));
+  assert.ok(guard.includes('github.event.pull_request.head.ref == github.head_ref'));
+  assert.ok(guard.includes("github.base_ref != ''"));
+  assert.ok(guard.includes('github.base_ref != null'));
+  assert.ok(guard.includes("github.head_ref != ''"));
+  assert.ok(guard.includes('github.head_ref != null'));
+  assert.ok(guard.includes('github.event.pull_request.number > 0'));
+  assert.ok(
+    guard.includes("github.ref == format('refs/pull/{0}/merge', github.event.pull_request.number)"),
+  );
+});
+
+test('a pull-request skip requires a recognized branch ref type; missing/unknown values scan', () => {
+  const { guard } = tagOnlyGuard();
+  assert.equal(guard, normalizeExpression(TAG_ONLY_GUARD));
+  // GitHub documents github.ref_type as "The type of ref that triggered the
+  // workflow run. Valid values are branch or tag." A pull_request merge ref is
+  // the non-tag PR merge branch (refs/pull/<n>/merge), so the PR skip requires
+  // the recognized branch value. The outer `!= 'tag'` is not sufficient:
+  // missing, null or unknown types must fail the PR clause and run the scan.
+  const prStart = guard.indexOf("github.event_name == 'pull_request'");
+  const prEnd = guard.indexOf(') ||');
+  const prClause = guard.slice(prStart, prEnd);
+  assert.ok(prStart > 0 && prEnd > prStart);
+  assert.ok(prClause.includes("github.ref_type == 'branch'"));
+  assert.ok(
+    prClause.includes(
+      "github.ref == format('refs/pull/{0}/merge', github.event.pull_request.number)",
+    ),
+  );
+  assert.equal((guard.match(/github\.ref_type == 'branch'/g) ?? []).length, 2);
+  assert.ok(guard.includes("github.ref_type != 'tag'"));
+});
+
+test('fork, unknown, invalid and absent/false opt-in contexts fail safe to the scan', () => {
+  const { guard } = tagOnlyGuard();
+  assert.equal(guard, normalizeExpression(TAG_ONLY_GUARD));
+  // The guard is a single negation of a conjunction. The opt-in is the first
+  // conjunct, so an absent, false or otherwise unequal value runs the whole
+  // scan (GitHub string equality is case-insensitive, so a case variant is not
+  // a second switch); every other requirement must also hold to skip.
+  assert.ok(guard.startsWith('!('));
+  assert.ok(
+    guard.startsWith(
+      "!( vars.PTO_TAG_ONLY_SECURITY_SCAN == 'true' && github.repository == 'lhsalas/pto-calendar'",
+    ),
+  );
+  const eventNames = [
+    ...new Set([...guard.matchAll(/github\.event_name == '([a-z_]+)'/g)].map((match) => match[1])),
+  ].sort();
+  assert.deepEqual(eventNames, ['pull_request', 'push', 'schedule']);
+  assert.equal((guard.match(/vars\./g) ?? []).length, 1, 'the named opt-in is the only variable');
+  assert.equal((guard.match(/github\.repository == 'lhsalas\/pto-calendar'/g) ?? []).length, 1);
+  assert.equal((guard.match(/base\.repo\.full_name == 'lhsalas\/pto-calendar'/g) ?? []).length, 1);
+  assert.equal((guard.match(/head\.repo\.full_name == 'lhsalas\/pto-calendar'/g) ?? []).length, 1);
+  assert.match(guard, /github\.ref == format\('refs\/pull\/\{0\}\/merge'/);
+  assert.doesNotMatch(guard, /needs\.|steps\.|outputs\.|secrets\./);
 });
 
 test('exact tuple is accepted visibly without changing the raw report', () => {
