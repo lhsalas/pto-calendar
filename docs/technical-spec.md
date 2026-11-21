@@ -1247,6 +1247,59 @@ See [CLI write and recovery policy](../cli/README.md) for version conflicts,
 lost responses and note handling. These controls do not prove consent to the
 server or enable production access.
 
+### 14.8 Scoped consent-aware MCP writes (#264)
+
+`pto-mcp` exposes `pto_create`, `pto_update` and `pto_delete` only behind
+the exact own `PTO_MCP_WRITES=1` host opt-in, which is default-off with no
+ambient `.env` fallback. The API `PAT_AUTH_ENABLED` /
+`PAT_WRITES_ENABLED` flags default off; this does not enable them in
+production. Matching scopes and
+live role, ownership and record checks remain authoritative at the API.
+Preview does not attest that the API write flag is on.
+Create ownership is derived from the live credential; tools accept no
+`actAs`, owner, role, credential, URL, header, path or shell argument, and
+no `confirmed`/acting-user field.
+
+Each tool uses strict discriminated `mode = preview | apply` on the
+canonical arguments: create takes dates/day-part/optional note plus a
+canonical `v1.<ms>.<uuid>` idempotency key; update/delete take an exact ID
+plus an exact positive-int32 expected version, with update carrying a
+closed nonempty `changes` object. `previewId` is admitted only on `apply`
+and is required there. `apply` carries the same target and exact business
+payload as its `preview`.
+
+`preview` is read-only and returns the phase, the opaque preview ID, the
+actor/owner IDs, the record ID/version for update/delete, the canonical
+before/after dates and day part, the changed fields and the note
+preserve/replace/clear intent — never a raw note, token, token ID, key or
+reflected caller value. A preview ID is process-scoped, expiring and bound
+to the canonical input, operation, actor, origin, credential, live role and
+target/version. Apply rechecks authorization and the same preview's expiry
+before dispatch. It does not pass the preview ID to REST or treat it as
+proof of human consent. A separate bounded in-process binding prevents a
+fresh preview from rebinding an observed create key to another credential
+or intent. Its 256-entry limit refuses new keys rather than evicting known
+bindings; this is not a durable journal. `apply` returns the phase and the safe
+affected record/owner/version or deleted target, with validated
+replay/expiry on create only. Mutation results carry no note text.
+
+Definitions mark mutations `readOnlyHint: false`, create additive and
+update/delete destructive, with create idempotent only under its replay
+contract. Writes use one conditional `PATCH`/`DELETE` with a canonical
+quoted `If-Match` version or POST with a stable create key. PATCH and DELETE
+share a single in-flight guard per origin, target ID and expected version.
+PATCH sends only effective changed fields and any explicit note. An omitted PATCH note
+preserves the stored note while explicit `null`/`""` clears it. Concurrent,
+expired, revoked or unknown outcomes are reconciled with a fresh read and a
+fresh preview — never a blind `PATCH`/`DELETE` retry or a fresh-key
+create. Only the explicit exact same credential/payload/key within the
+proven window may resume a lost create. Annotations, IDs and booleans are
+hints only; the host must show the exact proposed change and obtain actual
+per-call approval, omitting denied calls and never recommending
+auto-approve-all. Actual host approval evidence belongs to #266–#268. This
+contract enables no hosted distribution, production access or deployment, and
+keeps the pinned private stdio SDK 1.32.2 through 2025-11-25.
+
 ## 15. Suggested Implementation Choices
 
 ### Confirmed MVP implementation choice

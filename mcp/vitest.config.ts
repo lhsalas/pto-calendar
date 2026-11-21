@@ -19,6 +19,12 @@ export default defineConfig({
           functions: 100,
           branches: 100,
         },
+        'src/write-*.ts': {
+          lines: 100,
+          statements: 100,
+          functions: 100,
+          branches: 100,
+        },
       },
     },
   },

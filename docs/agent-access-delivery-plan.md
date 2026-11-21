@@ -293,6 +293,22 @@ and failed `If-Match` remains 412 regardless of the chosen version encoding.
   evidence and an artifact-path placeholder, not client certification.
   Read-only annotations are hints, not access control; mark create idempotent only
   once the backend replay guarantee is tested, not general update/delete replay.
+  [#264] keeps the same SDK/protocol and adds a `preview | apply` mode on
+  each mutation with a `previewId` only on `apply`: create carries canonical
+  dates/day-part/optional note plus a `v1.<ms>.<uuid>` key, update/delete carry
+  an exact ID plus an exact expected version with a closed nonempty `changes`
+  object on update. Create ownership comes from the live credential. The
+  local `PTO_MCP_WRITES=1` opt-in cannot bypass the separately default-off
+  API flags or the API's scope and live role and ownership checks. `preview`
+  never mutates and reports actor, target owner, dates, day part, diff and note
+  intent without raw notes/tokens/keys; a preview ID is an expiring
+  process-scoped binding, never consent evidence and never a REST argument. The
+  host must show the exact proposed change and obtain actual per-call approval,
+  omitting denied calls and never recommending allow-all, and must reconcile
+  concurrency/expiry/unknown results with a fresh read and fresh preview — only
+  the same credential/payload/key inside the proven window may resume a lost
+  create, with preserved versus explicit `null`/`""`-cleared notes. Actual host
+  approval evidence belongs to [#266]–[#268].
 - [#265]: use pinned, versioned repository-release artifacts/npm-pack tarballs
   with checksums, content review and clean-install/bin/runtime smoke outside the
   monorepo. Discover every new workspace in lint/typecheck/test/build/coverage

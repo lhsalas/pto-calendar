@@ -229,8 +229,11 @@ function managedEnvironment(env: NodeJS.ProcessEnv): AgentAuthEnvironment | unde
  * that combination, so an explicit profile is never silently ignored in
  * favour of the environment. The signal of the call is passed on, so a
  * cancelled call stops the credential lookup instead of waiting for it.
+ *
+ * The write tools use the same projection, so both surfaces can never disagree
+ * about which environment fields are trusted.
  */
-function resolveInputFor(
+export function resolveInputFor(
   launch: LaunchOptions,
   env: NodeJS.ProcessEnv,
   signal: AbortSignal,
