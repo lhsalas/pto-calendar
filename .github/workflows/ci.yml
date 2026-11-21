@@ -7,6 +7,9 @@ on:
     tags: ['v*.*.*']
   # Weekly re-scan of the unchanged lockfile and the pinned production images,
   # so a newly disclosed advisory is noticed even when nothing is committed.
+  # #309: this scheduled run is a non-tag route, so the temporary tag-only
+  # pause may skip its scan while PTO_TAG_ONLY_SECURITY_SCAN=true. Release tag
+  # pushes always execute the entire Security scan.
   schedule:
     - cron: '30 6 * * 1'
 
@@ -295,6 +298,47 @@ jobs:
   security:
     name: Security scan
     runs-on: ubuntu-latest
+    # #309: temporary owner-authorized tag-only source-CI pause. This is not a
+    # finding exclusion and never release evidence. The whole unchanged scan
+    # below runs for every tag ref, every unknown or malformed context, every
+    # fork and every other repository. A skip requires the named opt-in to be
+    # exactly true and GitHub's server context to prove a known non-tag route:
+    # a same-repo PR with a recognized branch ref type on its exact
+    # refs/pull/<n>/merge ref, or a branch push or scheduled run on current
+    # master. Missing/unknown ref types and every tag indicator scan.
+    # No checkout or step output is consulted.
+    # Already-queued runs may retain an earlier variable snapshot; no tag run
+    # can ever skip, so the tag invariant does not depend on live revocation.
+    if: >-
+      !(
+      vars.PTO_TAG_ONLY_SECURITY_SCAN == 'true' &&
+      github.repository == 'lhsalas/pto-calendar' &&
+      github.ref_type != 'tag' &&
+      !startsWith(github.ref, 'refs/tags/') &&
+      (
+      (
+      github.event_name == 'pull_request' &&
+      github.ref_type == 'branch' &&
+      github.event.pull_request.base.repo.full_name == 'lhsalas/pto-calendar' &&
+      github.event.pull_request.head.repo.full_name == 'lhsalas/pto-calendar' &&
+      github.event.pull_request.base.repo.id > 0 &&
+      github.event.pull_request.head.repo.id == github.event.pull_request.base.repo.id &&
+      github.event.pull_request.base.ref == github.base_ref &&
+      github.event.pull_request.head.ref == github.head_ref &&
+      github.base_ref != '' &&
+      github.base_ref != null &&
+      github.head_ref != '' &&
+      github.head_ref != null &&
+      github.event.pull_request.number > 0 &&
+      github.ref == format('refs/pull/{0}/merge', github.event.pull_request.number)
+      ) ||
+      (
+      (github.event_name == 'push' || github.event_name == 'schedule') &&
+      github.ref_type == 'branch' &&
+      github.ref == 'refs/heads/master'
+      )
+      )
+      )
     permissions:
       contents: read
     steps:

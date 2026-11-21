@@ -749,7 +749,9 @@ pinned-image vulnerability and secret scans — with no repository condition and
 no skipped result. That restores the control; it does not claim that CI has
 already passed. The merge gate is unchanged — all **11** required checks, with
 `Security scan` actually passing and never skipped — and #294 stays open until
-the job has actually passed on the delivered head. The pinned production images
+the job has actually passed on the delivered head. (Historical for #294/#262 at
+its head: the #309 tag-only pause below supersedes the no-skip statement for
+non-tag CI, while tag CI keeps the full scan.) The pinned production images
 are still **not** clean images: the accepted-risk inventory is **41 temporary
 accepted current matches plus 79 legacy matches** (40 temporary and 79 legacy
 before this exception), the legacy scope and expiry are unchanged in
@@ -758,6 +760,60 @@ neither the pre-existing exceptions nor this one is broadened. The underlying
 audit and image policies, branch protections, required-check settings, GitHub
 permissions and deployment guards are unchanged. No production deployment,
 tag, release or PAT activation is authorized by this change.
+
+**Temporary tag-only `Security scan` pause (#309, owner-authorized 2026-11-21
+— NOT remediation, NOT a fix).** The owner requested a non-tag CI pause to
+continue source delivery while waiting for verified fixes in #247. A skipped
+non-tag scan is not release evidence. The pause does not enforce the
+production release gate.
+The mode is default-off: only when the repository variable
+`PTO_TAG_ONLY_SECURITY_SCAN=true` does CI skip solely `jobs.security`
+(`Security scan` in `.github/workflows/ci.yml`, repository
+`lhsalas/pto-calendar`) on this repository's known non-tag CI routes (its own
+PRs, `master` pushes, scheduled runs). Forks and unknown contexts keep the
+full scan, and every tag ref runs the entire unchanged scanner job — both npm
+audits and all four image scans — whether or not the mode is on. That tag
+invariant is scoped, not retroactive: it applies only to tagged revisions
+that contain the #309 tag-always-scan guard (or a later independently
+verified restored scan) under the existing configured `v*.*.*` tag trigger —
+not to older revisions (for example ancestor `82cfc73`, whose candidate
+skipped the whole job) nor to arbitrary tags. All other
+jobs, checks, triggers, permissions and policies are unchanged, and no #308
+code or claim is reused: the rejected exact-head proposal stays unmerged. The
+prior #294/#262 `libxml2` exception and its expiry are historical background
+only, not extended or renewed here.
+
+The pause is justified by two independently verified findings, both HIGH
+`CVE-2026-97054` in Go `stdlib`: `usr/bin/caddy` at installed `v1.26.8` in
+`caddy:2-alpine@sha256:eb4d35b7452d1ab617fbdbe8d9275b2301dad6dad92115d91fb9b24d510f`,
+and `usr/local/bin/gosu` at installed `v1.24.6` in
+`postgres:16-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36`
+([verified scan evidence](https://github.com/lhsalas/pto-calendar/issues/247#issuecomment-7065745045)).
+The waiver skips the entire job on eligible non-tag runs. Those runs produce
+no npm audit or image-scan results and cannot detect new findings from those
+scanners. Nothing is excluded from either scanner, and the image scan still
+fails locally. Before publishing each candidate under the waiver, run both
+unchanged npm audits and the full image scan against the exact source. Stop
+publication if anything other than the two known findings fails. Report a
+skipped job as `skipped`, never as a passing scan.
+
+Dated restoration: clear `PTO_TAG_ONLY_SECURITY_SCAN` and read it back unset
+at the end of this run, at actual #247 remediation, or at **2026-12-15 00:00
+UTC**, whichever comes first, without renewal or reuse in a later run absent
+explicit approval. Already-queued runs may retain captured configuration, but
+no skip from those runs counts as new approval. In the verified #247
+remediation, remove the dormant conditional and restore normal scan
+assertions.
+
+Production stays closed: #247 natively blocks #269, and the approved OCI
+automation switch remains `false` (including for older workflow revisions).
+The unchanged automatic deploy workflow checks the upstream CI conclusion,
+not the individual security job. Before any re-enable, verify the #247 fix
+and independently confirm all checks on the exact release tag, ref and SHA,
+including successful execution of both audits and the image scan. Old,
+absent, skipped, failed or non-tag results do not count. Re-enabling also
+requires separate explicit owner approval. No release tag, manual dispatch,
+direct-host recovery or production action is authorized during this hold.
 
 ### 10.5 Secrets
 - `DATABASE_URL` for the Postgres service container (set per job, never from repo secrets).
