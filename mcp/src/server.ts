@@ -32,7 +32,6 @@ import {
   type Runtime,
   type ToolErrorCode,
   type ToolName,
-  type ToolResult,
 } from './contract.js';
 import {
   FrameGuard,
@@ -41,22 +40,31 @@ import {
   writeFrame,
   type ErrorReply,
 } from './framing.js';
-import { executeReadTool, TOOL_DEFINITIONS, toolFailure } from './tools.js';
+import { TOOL_DEFINITIONS } from './tools.js';
+import {
+  isWriteToolName,
+  writesEnabled,
+  type AnyToolName,
+  type AnyToolResult,
+} from './write-contract.js';
+import { WRITE_TOOL_DEFINITIONS, anyToolFailure, executeTool } from './write-tools.js';
 
 /** The tool surface the protocol serves. */
 export interface ToolSeam {
-  /** The tools that `tools/list` advertises. */
+  /** The tools that `tools/list` advertises when no per-environment list exists. */
   readonly definitions: readonly Tool[];
+  /** The tools `tools/list` advertises for this exact host environment. */
+  readonly definitionsFor?: (env: NodeJS.ProcessEnv) => readonly Tool[];
   /** Runs one call. The signal aborts when the client cancels or the server stops. */
   execute(
-    name: ToolName,
+    name: AnyToolName,
     input: unknown,
     launch: LaunchOptions,
     env: NodeJS.ProcessEnv,
     signal: AbortSignal,
-  ): Promise<ToolResult>;
+  ): Promise<AnyToolResult>;
   /** A fixed failure of one category for one tool. */
-  failure(tool: ToolName, code: ToolErrorCode): ToolResult;
+  failure(tool: AnyToolName, code: ToolErrorCode): AnyToolResult;
 }
 
 export interface RunOptions {
@@ -89,8 +97,10 @@ const TRANSPORT_DIAGNOSTIC = 'pto-mcp: the protocol transport stopped unexpected
 
 const PRODUCTION_TOOLS: ToolSeam = {
   definitions: TOOL_DEFINITIONS,
-  execute: executeReadTool,
-  failure: toolFailure,
+  definitionsFor: (env) =>
+    writesEnabled(env) ? [...TOOL_DEFINITIONS, ...WRITE_TOOL_DEFINITIONS] : TOOL_DEFINITIONS,
+  execute: executeTool,
+  failure: anyToolFailure,
 };
 
 /** Serves the protocol on the process stdio until the client leaves, and returns the exit code. */
@@ -112,7 +122,7 @@ export async function runServer(
   const inFlight = new Set<Promise<unknown>>();
 
   const execute = async (
-    name: ToolName,
+    name: AnyToolName,
     input: unknown,
     signal: AbortSignal,
   ): Promise<CallToolResult> => {
@@ -127,6 +137,15 @@ export async function runServer(
     return toCallResult(isEnvelope(result, name) ? result : tools.failure(name, 'LOCAL'));
   };
 
+  // The advertisement is derived from the exact host environment on every listing. A
+  // definition whose name is a mutation is filtered out while the switch is closed, even
+  // when a custom seam still returns it.
+  const advertised = (env: NodeJS.ProcessEnv): readonly Tool[] => {
+    const listed = tools.definitionsFor?.(env) ?? tools.definitions;
+    if (writesEnabled(env)) return listed;
+    return listed.filter((definition) => !isWriteToolName(definition.name));
+  };
+
   const server = new Server(
     { name: MCP_BUILD_NAME, version: runtime.version },
     { capabilities: { tools: {} } },
@@ -139,8 +158,9 @@ export async function runServer(
   server.fallbackRequestHandler = async (request, extra) => {
     try {
       // The framing guard has already checked that params are an object or absent, so the
-      // listing takes no argument and ignores any cursor.
-      if (request.method === 'tools/list') return { tools: [...tools.definitions] };
+      // listing takes no argument and ignores any cursor. The write definitions are never
+      // advertised while the exact local switch is closed, even if a seam forgot to filter.
+      if (request.method === 'tools/list') return { tools: [...advertised(runtime.env)] };
       if (request.method === 'tools/call') return await callTool(request.params, extra.signal);
       throw new McpError(ErrorCode.MethodNotFound, METHOD_NOT_FOUND);
     } catch (error) {
@@ -153,7 +173,12 @@ export async function runServer(
     if (!isRecord(params)) throw new McpError(ErrorCode.InvalidParams, INVALID_PARAMS_TEXT);
     const name = params['name'];
     if (typeof name !== 'string') throw new McpError(ErrorCode.InvalidParams, INVALID_PARAMS_TEXT);
-    if (!isToolName(name)) throw new McpError(ErrorCode.InvalidParams, UNKNOWN_TOOL);
+    if (!isAnyToolName(name)) throw new McpError(ErrorCode.InvalidParams, UNKNOWN_TOOL);
+    // A write that was not advertised is not dispatchable. It is refused as an unknown tool
+    // before any credential, store, preview or request, even if the args are well formed.
+    if (isWriteToolName(name) && !writesEnabled(runtime.env)) {
+      throw new McpError(ErrorCode.InvalidParams, UNKNOWN_TOOL);
+    }
     const args = params['arguments'];
     if (args !== undefined && !isRecord(args)) {
       throw new McpError(ErrorCode.InvalidParams, INVALID_PARAMS_TEXT);
@@ -238,9 +263,14 @@ export async function runServer(
   return finished;
 }
 
-/** Whether the value names one of the documented tools. */
+/** Whether the value names one of the documented read tools. */
 function isToolName(value: string): value is ToolName {
   return (TOOL_NAMES as readonly string[]).includes(value);
+}
+
+/** Whether the value names a tool of either surface. */
+function isAnyToolName(value: string): value is AnyToolName {
+  return isToolName(value) || isWriteToolName(value);
 }
 
 /** Whether the value is a JSON object, and not an array. */
@@ -249,7 +279,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Whether the value is a complete envelope of the named tool. */
-function isEnvelope(value: unknown, tool: ToolName): value is ToolResult {
+function isEnvelope(value: unknown, tool: AnyToolName): value is AnyToolResult {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Record<string, unknown>;
   return (
@@ -266,7 +296,7 @@ function isEnvelope(value: unknown, tool: ToolName): value is ToolResult {
  * The text fallback and the structured content are the same serialized
  * envelope, so a client that reads either one sees the same answer.
  */
-function toCallResult(result: ToolResult): CallToolResult {
+function toCallResult(result: AnyToolResult): CallToolResult {
   const text = JSON.stringify(result);
   return {
     content: [{ type: 'text', text }],

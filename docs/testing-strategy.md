@@ -121,6 +121,38 @@ session-issued PATs to test owner filtering, authorized note access and
 rejection after revocation or expiry without a reconnect. Actual user-client
 installation and approval certification remain separate work.
 
+**Local writable MCP (#264):**
+`npm run test:coverage -w mcp` covers the three mutation tools on the same
+private stdio executable and SDK. Validation/authorization paths require 100%
+unit coverage across metrics; package totals keep at least 90% lines,
+statements and functions and 80% branches. The contract under test is
+exact `PTO_MCP_WRITES=1` default-off enablement, strict `preview | apply`
+schemas with a `previewId` only on `apply`, canonical dates/day-part/version
+arguments and a closed nonempty `changes` object, preview-only no-mutation
+proof, scope/live-role denial, flag-off refusal, idempotent create replay,
+version-conflict refusal, note preserve versus explicit `null`/`""` clear
+without raw-note output, expired/unknown-result reconciliation with only the
+same credential/payload/key inside the proven window, and no blind
+`PATCH`/`DELETE` retries. Separate compiled-process suites use a fresh
+private `HOME`, a loopback-only mock and synthetic credentials to check tool
+advertisement, metadata/text parity, strict extra-key rejection, accurate
+not-read-only/additive/destructive hints, per-call authorization and
+revocation, `Retry-After` guidance, redaction and one request per `apply`.
+Cancelled stdio calls are tested before dispatch and after a committed
+fixture write; the latter does not imply rollback. A restarted server with
+a lost create response and no usable preview ID must refuse without any
+API traffic and require reconciliation. Independent unit cases
+test expiry at dispatch, cross-operation target exclusion, create-key binding
+across previews, and exact effective PATCH changes.
+Injection payloads in notes/names and protocol/log secret checks are
+covered. The owning lanes run the real compiled MCP/backend/PostgreSQL proof
+against an identity-validated disposable lease with both API rollout modes
+and the existing reset procedure, checking exact row/version/audit effects,
+rollback or no-op on denial, update/delete concurrency and one committed
+create/audit under a lost response and replay; the baseline read probe stays
+intact. These tests do not certify a host permission flow. Actual per-call
+host approve/reject evidence belongs to #266–#268, and production stays closed.
+
 **Known baseline diagnostic (2026-11-15):** the coordinator reproduced
 `npm run test:coverage -w backend` failure on unchanged master `156cc6f` and the
 documentation-only #246 candidate, with no backend/frontend/package/CI source
