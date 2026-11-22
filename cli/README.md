@@ -31,8 +31,14 @@ npm run build -w cli
 ```
 
 Run the local executable as `node cli/bin/pto.mjs <command>`. The examples
-below use `pto` for brevity. Do not install, publish or redistribute this
-workspace as an npm package.
+below use `pto` for brevity. Do not publish or redistribute this workspace
+as an npm package.
+
+For versioned use outside this checkout, install only a verified private
+bundle into a fresh per-version slot; see the install guide at
+<https://github.com/lhsalas/pto-calendar/blob/master/docs/agent-artifacts.md>.
+The guide lives in the source repository and is not bundled in the install
+artifacts. Never use `npx <package>@latest` as the setup.
 
 ## Commands
 

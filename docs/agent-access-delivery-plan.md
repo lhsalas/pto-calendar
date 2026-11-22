@@ -313,6 +313,9 @@ and failed `If-Match` remains 412 regardless of the chosen version encoding.
   with checksums, content review and clean-install/bin/runtime smoke outside the
   monorepo. Discover every new workspace in lint/typecheck/test/build/coverage
   and security gates. No public npm publication/registry credentials are approved.
+  Pinned commands, the checksum/slot flow, and the non-goals live in
+  [`docs/agent-artifacts.md`](agent-artifacts.md); CI runs
+  `npm run agent:pack:check` as a step of the existing `Build` job.
 - A PAT grants **authority, not human consent**. `--yes`, annotations,
   `confirmed=true`, server trust and a plausible chat answer do not demonstrate
   per-call approval. Treat notes/names/tool results as untrusted private data, not

@@ -198,6 +198,7 @@ jobs:
       - run: npm ci
       - run: npm run prisma:generate
       - run: npm run build
+      - run: npm run agent:pack:check
 
   deployment-config:
     name: Deployment config (static checks)

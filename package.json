@@ -36,6 +36,8 @@
     "deploy:scripts:check": "node infra/tests/deploy-scripts.test.mjs",
     "deployment:sunset:check": "node infra/tests/deployment-sunset.test.mjs",
     "node:baseline:check": "node infra/tests/node-baseline.test.mjs && node --test infra/tests/node-runtime-check.test.mjs",
+    "agent:pack": "node infra/agent-artifacts/pack.mjs",
+    "agent:pack:check": "node --test infra/tests/agent-artifacts.test.mjs && node infra/agent-artifacts/pack-check.mjs",
     "prepare": "husky || true"
   },
   "devDependencies": {
