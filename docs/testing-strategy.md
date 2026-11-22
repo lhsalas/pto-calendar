@@ -606,6 +606,14 @@ Jobs (run in order, with `needs:` dependencies):
 | 10 | `docker-smoke` | ubuntu-latest | build | start the all-in-one compose stack, poll `/health`, assert the images run the supported Node.js baseline, login + validate auto-seeded holidays + validate the seed endpoint, tear down with `-v` |
 | 11 | `coverage-gate` | ubuntu-latest | 3, 4, 5 | check integration/frontend/api-client/agent-auth/CLI/MCP reports; post coverage summary as PR comment |
 
+The `build` job runs `npm run agent:pack:check` after `npm run build`. The
+check runs archive contract tests, verifies checksums, and uses the
+root install's cache to install the packed tools offline in an isolated
+prefix. It verifies both installed bins and performs classic MCP stdio
+and `list`/`get` checks against a synthetic loopback fixture. It is
+fail-closed and adds no job, artifact upload, release, or threshold
+change. See [the install and rollback guide](agent-artifacts.md).
+
 The API client (#259), agent credentials (#260) and CLI (#261) are
 verified inside the existing `Frontend tests` job rather than in new jobs,
 preserving all existing job names, artifacts and status checks. The API client

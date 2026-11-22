@@ -26,6 +26,12 @@ or invalid pair does not fall back to a profile. The server does not load
 dotenv or prompt for secrets. `--allow-loopback-http` is only for explicit
 loopback testing; HTTPS is required for remote origins.
 
+Use only a verified private bundle for the executable — checksum, fresh
+per-version slot, explicit full paths — as described in the install guide at
+<https://github.com/lhsalas/pto-calendar/blob/master/docs/agent-artifacts.md>.
+The guide lives in the source repository and is not bundled in the install
+artifacts.
+
 ## Tools
 
 - `pto_list`: required `from` and `to` are exact inclusive ISO dates, at
