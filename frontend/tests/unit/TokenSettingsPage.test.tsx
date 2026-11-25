@@ -10,12 +10,65 @@ import type { AuthContextValue } from '../../src/context/authContextValue';
 import { ThemeProvider } from '../../src/context/ThemeContext';
 import { ToastProvider } from '../../src/context/ToastProvider';
 import { useTokenIssuanceGuard } from '../../src/hooks/useTokenIssuanceGuard';
+import type { TokenIssuanceGuard } from '../../src/hooks/useTokenIssuanceGuard';
 import { ToastViewport } from '../../src/components/common/ToastViewport';
 import { TokenSettingsPage } from '../../src/pages/settings/TokenSettingsPage';
 import { AppRoutes } from '../../src/routes/AppRoutes';
 import { server } from '../mocks/server';
 import { STUB_RAW_TOKEN, STUB_TOKEN, tokensListEmpty } from '../mocks/handlers';
+import type * as TokenApi from '../../src/api/tokens';
 import type { Role, TokenMetadata, TokenScope, User } from '../../src/types/api';
+
+type TokenCall = {
+  name: 'listTokens' | 'revokeToken';
+  signal?: AbortSignal;
+  settled: Promise<{ status: 'fulfilled' } | { status: 'rejected'; error: unknown }>;
+};
+
+/**
+ * The client-side completion of the token calls used in the race tests.
+ *
+ * The page and the hook await these calls, so a test can wait for the answer
+ * the client actually processed instead of guessing how long the transport
+ * needs. The real implementations still do the work: the wrapper only reports
+ * when the promise the page is waiting for has resolved or rejected.
+ */
+const { tokenApiCalls } = vi.hoisted(() => ({
+  tokenApiCalls: [] as TokenCall[],
+}));
+
+vi.mock('../../src/api/tokens', async (importOriginal) => {
+  const actual = await importOriginal<typeof TokenApi>();
+  function track<TResult>(
+    name: TokenCall['name'],
+    result: Promise<TResult>,
+    signal?: AbortSignal,
+  ): Promise<TResult> {
+    tokenApiCalls.push({
+      name,
+      signal,
+      settled: result.then(
+        () => ({ status: 'fulfilled' as const }),
+        (error: unknown) => ({ status: 'rejected' as const, error }),
+      ),
+    });
+    return result;
+  }
+  return {
+    ...actual,
+    listTokens: (signal?: AbortSignal) => track('listTokens', actual.listTokens(signal), signal),
+    revokeToken: (id: string) => track('revokeToken', actual.revokeToken(id)),
+  };
+});
+
+/**
+ * The client-side answer of one API call, by name and by order of arrival.
+ */
+function clientCall(name: TokenCall['name'], index = 0): TokenCall {
+  const call = tokenApiCalls.filter((entry) => entry.name === name)[index];
+  if (!call) throw new Error(`The client never made the call "${name}" (index ${index}).`);
+  return call;
+}
 
 const MEMBER: User = {
   id: '22222222-2222-2222-2222-222222222222',
@@ -71,6 +124,43 @@ function renderPage(): ReturnType<typeof render> {
         <AuthProvider>
           <ToastProvider>
             <TokenSettingsRoutes />
+            <ToastViewport />
+          </ToastProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </MemoryRouter>,
+  );
+}
+
+/**
+ * The same page with a guard that records every settlement, so a test can see
+ * whether an attempt was confirmed or is still pending.
+ */
+function TokenSettingsRoutesWithRecorder({ settled }: { settled: number[] }): JSX.Element {
+  const inner = useTokenIssuanceGuard();
+  const guard: TokenIssuanceGuard = {
+    begin: (accountId) => inner.begin(accountId),
+    pendingAttempt: (accountId) => inner.pendingAttempt(accountId),
+    settle: (accountId, attempt) => {
+      settled.push(attempt);
+      inner.settle(accountId, attempt);
+    },
+  };
+  return (
+    <Routes>
+      <Route path="/settings/tokens" element={<TokenSettingsPage guard={guard} />} />
+      <Route path="/calendar" element={<CalendarStub />} />
+    </Routes>
+  );
+}
+
+function renderPageWithRecorder(settled: number[]): ReturnType<typeof render> {
+  return render(
+    <MemoryRouter initialEntries={['/settings/tokens']}>
+      <ThemeProvider>
+        <AuthProvider>
+          <ToastProvider>
+            <TokenSettingsRoutesWithRecorder settled={settled} />
             <ToastViewport />
           </ToastProvider>
         </AuthProvider>
@@ -158,6 +248,7 @@ async function issueToken(
 }
 
 beforeEach(() => {
+  tokenApiCalls.length = 0;
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-06-15T12:00:00.000Z'));
 });
@@ -1498,5 +1589,214 @@ describe('TokenSettingsPage', () => {
     expect(screen.getByRole('button', { name: 'Create token' })).toBeDisabled();
     expect(issue).toHaveBeenCalledTimes(1);
     expect(screen.queryByDisplayValue(STUB_RAW_TOKEN)).not.toBeInTheDocument();
+  });
+
+  it('refuses a second issuance while the first one is still running', async () => {
+    const issue = vi.fn(() =>
+      HttpResponse.json({ rawToken: STUB_RAW_TOKEN, token: STUB_TOKEN }, { status: 201 }),
+    );
+    server.use(authFor('member'), tokensListEmpty, http.post('/auth/tokens', issue));
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId('tokens-empty');
+    await openCreateDialog(user);
+    await user.type(screen.getByLabelText(/token name/i), 'Laptop');
+    await user.type(screen.getByLabelText(/current password/i), 'correct horse');
+    const dialog = screen.getByRole('dialog', { name: /new personal access token/i });
+    const form = dialog.querySelector('form');
+    expect(form).not.toBeNull();
+    // Two submits in the same turn: the second one is refused before the
+    // first request has even answered.
+    await act(async () => {
+      form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    expect(await screen.findByRole('dialog', { name: /copy your token/i })).toBeInTheDocument();
+    expect(issue).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a second confirmation while the revocation is still running', async () => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const revoke = vi.fn(async () => {
+      await released;
+      return new HttpResponse(null, { status: 204 });
+    });
+    let listCalls = 0;
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () => {
+        listCalls += 1;
+        return HttpResponse.json({ tokens: listCalls === 1 ? [STUB_TOKEN] : [] });
+      }),
+      http.delete('/auth/tokens/:id', revoke),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId(`token-card-${STUB_TOKEN.id}`);
+    await user.click(screen.getByRole('button', { name: 'Revoke Laptop' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Revoke token' });
+    const confirm = within(dialog).getByRole('button', { name: 'Confirm revocation' });
+    // Two confirmations in the same turn: the second one is refused.
+    await act(async () => {
+      confirm.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      confirm.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => {
+      expect(revoke).toHaveBeenCalledTimes(1);
+    });
+    release();
+    expect(await screen.findByTestId('tokens-empty')).toBeInTheDocument();
+    expect(revoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the issuance attempt pending when leaving aborts the list refresh', async () => {
+    const settled: number[] = [];
+    const refreshStarted = deferred();
+    const releaseResponse = deferred();
+    let listCalls = 0;
+    const issue = vi.fn(() =>
+      HttpResponse.json({ error: { code: 'INTERNAL_ERROR', message: 'boom' } }, { status: 500 }),
+    );
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', async () => {
+        listCalls += 1;
+        if (listCalls === 1) return HttpResponse.json({ tokens: [] });
+        if (listCalls === 2) {
+          // Hold the response until the client has cancelled its refresh.
+          refreshStarted.resolve();
+          await releaseResponse.promise;
+        }
+        return HttpResponse.json({ tokens: [] });
+      }),
+      http.post('/auth/tokens', issue),
+    );
+    const user = userEvent.setup();
+    renderPageWithRecorder(settled);
+    await screen.findByTestId('tokens-empty');
+    await issueToken(user);
+    expect(await screen.findByTestId('issuance-unknown')).toBeInTheDocument();
+
+    // The refresh starts and the account is left before it answers.
+    try {
+      await user.click(screen.getByTestId('refresh-token-list-button'));
+      await refreshStarted.promise;
+      const refresh = clientCall('listTokens', 1);
+      expect(refresh.signal?.aborted).toBe(false);
+      await user.click(screen.getByTestId('back-to-calendar-link'));
+      await screen.findByRole('heading', { name: 'Calendar Page' });
+      await act(async () => {
+        expect(await refresh.settled).toMatchObject({ status: 'rejected' });
+      });
+      expect(refresh.signal?.aborted).toBe(true);
+    } finally {
+      releaseResponse.resolve();
+    }
+
+    // The cancelled refresh did not settle the attempt or retry issuance.
+    expect(settled).toEqual([]);
+    expect(listCalls).toBe(2);
+    expect(issue).toHaveBeenCalledTimes(1);
+
+    // The same account comes back: the attempt is still pending.
+    await user.click(screen.getByRole('link', { name: 'API access' }));
+    await screen.findByTestId('tokens-empty');
+    expect(await screen.findByTestId('issuance-unknown')).toBeInTheDocument();
+
+    // A confirmed refresh does settle the attempt, so the empty settlement
+    // above was a real answer and not a missing one.
+    await user.click(screen.getByTestId('refresh-token-list-button'));
+    await act(async () => {
+      expect(await clientCall('listTokens', 3).settled).toEqual({ status: 'fulfilled' });
+    });
+    expect(settled).toHaveLength(1);
+    await waitFor(() => {
+      expect(screen.queryByTestId('issuance-unknown')).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not move the focus back to a control that is not an HTML element', async () => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('tabindex', '-1');
+    document.body.appendChild(svg);
+    svg.focus();
+    expect(document.activeElement).toBe(svg);
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () => HttpResponse.json({ tokens: [STUB_TOKEN] })),
+      http.delete('/auth/tokens/:id', () => new HttpResponse(null, { status: 204 })),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId(`token-card-${STUB_TOKEN.id}`);
+    const revoke = screen.getByRole('button', { name: 'Revoke Laptop' });
+    // The control that asks for the revocation holds the focus, but it is not
+    // an HTML element, so it cannot take the focus back.
+    fireEvent.click(revoke);
+    await screen.findByRole('dialog', { name: 'Revoke token' });
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Revoke token' })).not.toBeInTheDocument();
+    });
+    expect(document.activeElement).not.toBe(revoke);
+
+    // A real control does get the focus back.
+    await user.click(revoke);
+    await screen.findByRole('dialog', { name: 'Revoke token' });
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Revoke token' })).not.toBeInTheDocument();
+    });
+    expect(revoke).toHaveFocus();
+    svg.remove();
+  });
+
+  it('does not report a failed revocation that lands after the page was left', async () => {
+    const release = deferred();
+    const revoke = vi.fn(async () => {
+      await release.promise;
+      return HttpResponse.json(
+        { error: { code: 'FORBIDDEN', message: 'not allowed' } },
+        { status: 403 },
+      );
+    });
+    server.use(
+      authFor('member'),
+      http.get('/auth/tokens', () => HttpResponse.json({ tokens: [STUB_TOKEN] })),
+      http.delete('/auth/tokens/:id', revoke),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId(`token-card-${STUB_TOKEN.id}`);
+    await user.click(screen.getByRole('button', { name: 'Revoke Laptop' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Revoke token' });
+    await user.click(within(dialog).getByRole('button', { name: 'Confirm revocation' }));
+    await waitFor(() => {
+      expect(revoke).toHaveBeenCalledTimes(1);
+    });
+
+    // The account page is left while the revocation is still running.
+    await user.click(screen.getByTestId('back-to-calendar-link'));
+    await screen.findByRole('heading', { name: 'Calendar Page' });
+
+    // The server answers after the page is gone, and the client rejects the
+    // refusal. The client-side boundary is awaited inside act, so the page
+    // has processed the late answer by now.
+    release.resolve();
+    await act(async () => {
+      expect(await clientCall('revokeToken', 0).settled).toMatchObject({
+        status: 'rejected',
+        error: { status: 403, body: { code: 'FORBIDDEN' } },
+      });
+    });
+
+    // The page that would show the failure is gone, so nothing is reported,
+    // and the late failure writes nothing either.
+    expect(revoke).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('toast-error')).not.toBeInTheDocument();
   });
 });

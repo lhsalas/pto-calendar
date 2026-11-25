@@ -2,6 +2,11 @@ node_modules/
 dist/
 build/
 coverage/
+# infra/coverage/ holds the #313 CI coverage-gate source (a parser and its
+# tests), not generated coverage output, so it stays tracked.
+!/infra/coverage/
+# Python bytecode from the coverage-gate parser tests.
+/infra/coverage/__pycache__/
 .nyc_output/
 
 .env

@@ -381,9 +381,10 @@ correlation IDs, the 366-day bound, and note redaction across credential types.
 The existing Chromium tests still exercise the unchanged browser response.
 
 A coverage run fails if a **blocking** path falls below its configured threshold.
-The local integration requirement remains All files lines ≥90%; the CI coverage
-summary job currently checks report existence and publishes totals, not that
-aggregate floor. Integration route thresholds remain enforced by its Vitest run.
+The local integration requirement remains All files lines ≥90%; since #313 the CI
+`Coverage gate` job also enforces a **workspace floor** of 95% lines, branches
+and functions on the six published artifact pairs (see §10.1b). Integration
+route thresholds remain enforced by its Vitest run.
 
 ## 6. Backend Test Conventions
 
@@ -604,7 +605,7 @@ Jobs (run in order, with `needs:` dependencies):
 | 8 | `security` | ubuntu-latest | — | audit the locked npm graphs, scan the pinned production base images for OS and runtime vulnerabilities |
 | 9 | `e2e` | ubuntu-latest + postgres service | build | playwright install, playwright test, upload trace/video on failure |
 | 10 | `docker-smoke` | ubuntu-latest | build | start the all-in-one compose stack, poll `/health`, assert the images run the supported Node.js baseline, login + validate auto-seeded holidays + validate the seed endpoint, tear down with `-v` |
-| 11 | `coverage-gate` | ubuntu-latest | 3, 4, 5 | check integration/frontend/api-client/agent-auth/CLI/MCP reports; post coverage summary as PR comment |
+| 11 | `coverage-gate` | ubuntu-latest | 3, 4, 5 | check the integration/frontend/api-client/agent-auth/CLI/MCP reports; test the coverage-gate parser; enforce the 95% workspace floor; publish the coverage table in the job summary and post the same text as a PR comment |
 
 The `build` job runs `npm run agent:pack:check` after `npm run build`. The
 check runs archive contract tests, verifies checksums, and uses the
@@ -655,6 +656,135 @@ Bump `.nvmrc`, the `MINIMUM_SUPPORTED_VERSION` constant in
 `infra/tests/node-version.mjs`, root engine/lock metadata and the container
 digests together whenever a newer 24.x security release ships. Preserve exact
 alignment; a newer or other-major container runtime must not silently pass.
+
+### 10.1b Workspace coverage floor (#313)
+
+The `Coverage gate` job enforces a **workspace floor** on the six artifact
+pairs it already downloads. Every workspace must independently reach **95%
+lines, 95% branches and 95% functions**; a strong result in one workspace never
+offsets a miss in another, and no metric is averaged with another.
+
+Report sources — the exact paths the job downloads. Both files of a row must
+come from the *same* workspace coverage artifact; each is required and they
+are cross-checked against each other:
+
+| Workspace | LCOV report | JSON summary | Produced by |
+|---|---|---|---|
+| `backend` | `backend/coverage/lcov.info` | `backend/coverage/coverage-summary.json` | the backend **integration** run (`npm run test:integration:coverage -w backend`) |
+| `frontend` | `frontend/coverage/lcov.info` | `frontend/coverage/coverage-summary.json` | the frontend unit/component run |
+| `api-client` | `packages/api-client/coverage/lcov.info` | `packages/api-client/coverage/coverage-summary.json` | the API-client coverage run |
+| `agent-auth` | `packages/agent-auth/coverage/lcov.info` | `packages/agent-auth/coverage/coverage-summary.json` | the agent-credential coverage run |
+| `cli` | `cli/coverage/lcov.info` | `cli/coverage/coverage-summary.json` | the CLI coverage run |
+| `mcp` | `mcp/coverage/lcov.info` | `mcp/coverage/coverage-summary.json` | the MCP coverage run |
+
+The backend row is the integration report only. The backend **unit** report
+(`backend/coverage-unit`) keeps its own separate gate and is not part of this
+floor. The coverage provider, the instrumented file scopes and every existing
+per-path threshold are unchanged; this floor is additive.
+
+The gate is implemented by `infra/coverage/check_lcov.py`, a standard-library
+Python script that the CI job runs against the checkout root:
+
+```
+python3 infra/coverage/check_lcov.py . --report "$RUNNER_TEMP/pto-coverage-summary.md"
+```
+
+It is independent of the pull request comment: the enforcing step carries no
+condition, so the floor applies to pull requests, `master` pushes, release tags
+and the scheduled run alike, and the comment only publishes the summary of the
+same measurement. The summary is written to
+`$RUNNER_TEMP/pto-coverage-summary.md`, outside the checkout, so a stale file
+in the working tree can never be published.
+
+**Summary calculation.** Every `SF:` source record of a report contributes its
+six summary counters to the workspace total, so a workspace line count is the
+sum of `LF` over its records and the covered count is the sum of `LH`. The
+published percentage is `covered / total` for display only; the floor is
+decided by the integer test `covered * 100 >= 95 * total`.
+
+**Paired-artifact validation.** The provider writes `lcov.info` and
+`coverage-summary.json` from the same run, and either one alone can be stale
+or truncated. The gate therefore requires both files and validates them
+together before measuring the floor:
+
+- The recognized source sets must be exactly equal after path normalization.
+  A complete LCOV record that is missing while the JSON summary still lists it
+  (or the reverse) rejects the workspace; so do a substituted, extra or
+  per-source counter mismatch.
+- Every per-source `lines`, `branches` and `functions` `covered`/`total` pair
+  in the JSON must equal the matching LCOV record, and the JSON aggregate
+  `total` entry must equal both the sum of its own per-source entries and the
+  LCOV aggregate.
+- Vitest writes absolute JSON keys under the workspace
+  (`<checkout>/<workspace>/src/...`), while LCOV writes `src/...`. The
+  checkout prefix is not assumed and no source file is opened: each JSON key
+  is matched against the exact recognized LCOV inventory using the workspace
+  directory as the anchor. The raw validated LCOV path is the identity, so a
+  local snapshot and a hosted-run artifact are both recognized and two
+  genuinely distinct long paths cannot collide. A path that is not absolute,
+  uses `.`/`..` or empty segments, is outside the workspace, or matches more
+  than one known source is rejected; the last case is an ambiguous
+  normalization collision.
+- A JSON file with a repeated key at any nesting level is rejected. The
+  standard JSON decoder would otherwise silently keep the last value.
+
+This cross-check is deliberately corroborative, not tamper-proof: if both
+files are coordinated or replaced together, their counters can still agree.
+It detects a truncated, stale or malformed single artifact when its source
+inventory or counters no longer corroborate the other file, which is the
+realistic failure mode for separately uploaded coverage files. The coverage
+provider, test scopes and per-path thresholds are unchanged.
+
+**Decision rules**
+
+- The comparison uses the raw LCOV counters with integer arithmetic
+  (`covered * 100 >= 95 * total`). A value such as 94.995% is rejected; a miss
+  is never rounded up into a pass.
+- A report or summary that is missing, empty, malformed or incomplete is
+  rejected. A malformed artifact is never reported as covered and never claims
+  100%.
+- A workspace whose metric denominator is zero is rejected instead of being
+  counted as 100%. A zero metric **inside one file** is normal and allowed: a
+  file with no instrumented item simply carries no `DA`, `FN` or `BRDA` record.
+- A report that repeats a source or a total, or that reports more hits than
+  totals, is rejected as malformed. Two `DA` records with the same line, or
+  two `BRDA` records with the same `(line, block, branch)` identity, are
+  rejected even when the duplicated rows have success-shaped summary counters.
+- A counter or a `DA`/`FN`/`FNDA`/`BRDA` detail entry outside an active source
+  record is rejected, as is a source record without a source name.
+- The detail entries of a record must agree with its summary counters: the
+  `DA` entries must match `LF`/`LH`, the `BRDA` entries must match `BRF`/`BRH`,
+  and the `FN` declarations and `FNDA` executions must match `FNF`/`FNH`. The
+  `FN` and `FNDA` name multisets must also match, so an unmatched execution
+  name is rejected while legitimately repeated function names stay legal.
+- A counter value that is not an unsigned integer, or that carries more digits
+  than a real counter, is rejected, and a report that is not valid UTF-8 is
+  rejected with a sanitized workspace diagnostic. An unknown record type is
+  never echoed back into the published summary.
+- Report-provided paths are sanitized and truncated only when they are placed
+  in a diagnostic or the published summary. Identity and counter comparisons
+  always use the raw validated path.
+- Every rejection names the workspace, the metric and the raw counters, for
+  example `` `frontend` branches: 1034/1196 covered (86.45%) is below the 95%
+  floor ``.
+
+**Published output.** The script writes a six-row Markdown table — one row per
+workspace, with the lines, branches and functions counters — plus the
+diagnostics. The job appends that text to the GitHub Actions job summary, and
+the pull request comment is the same generated text. No actor, title, branch
+name or other untrusted value is interpolated into the comment.
+
+**Local verification.** The focused tests and the gate itself need no
+database, no network and no credential:
+
+```
+python3 -B -m unittest discover -s infra/coverage -p 'test_check_lcov.py'
+python3 infra/coverage/check_lcov.py <checkout-root>
+```
+
+The `Coverage gate` job runs the first command before it enforces the floor.
+The gate script reads only the six artifact pairs above, so it can also be
+pointed at a saved coverage snapshot.
 
 ### 10.2 Triggers
 - `pull_request`: full pipeline.
@@ -986,10 +1116,13 @@ per-workspace form is `npm run <script> -w <workspace>`.
   `backend-coverage` (`backend/coverage`), `frontend-coverage`
   (`frontend/coverage`), `api-client-coverage`
   (`packages/api-client/coverage`), `agent-auth-coverage`
-  (`packages/agent-auth/coverage`), and `cli-coverage` (`cli/coverage`).
+  (`packages/agent-auth/coverage`), `cli-coverage` (`cli/coverage`) and
+  `mcp-coverage` (`mcp/coverage`).
 - The `Coverage gate` job requires the integration, frontend, API client,
-  agent-auth and CLI reports and summarizes their totals in the PR comment. The
-  backend unit job separately requires its own report.
+  agent-auth, CLI and MCP `lcov.info` plus `coverage-summary.json` artifact
+  pairs, cross-checks each pair, enforces the 95% workspace floor on them and
+  summarizes their totals in the job summary and in the PR comment. The backend
+  unit job separately requires its own report. See §10.1b.
 - Playwright `trace.zip`, `video.webm`, and `junit.xml` uploaded on failure.
 - JUnit reports surfaced in the GitHub Actions UI summary.
 - Nightly coverage trend stored as artifact (post-MVP).

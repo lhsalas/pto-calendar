@@ -727,3 +727,107 @@ describe('PTOViewModal', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('PTOViewModal abandoned session', () => {
+  it('refuses to load the note after the modal was dismissed', async () => {
+    const user = userEvent.setup();
+    const requestDetail = vi.spyOn(api, 'apiRequest');
+    // The parent keeps the modal mounted, so the dismissal only ends the session.
+    renderModal({ onClose: vi.fn() });
+    await user.click(screen.getByRole('button', { name: /dismiss/i }));
+    await user.click(screen.getByRole('button', { name: /load note/i }));
+    expect(requestDetail).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('keeps a note that was already supplied when a later detail load fails', async () => {
+    const user = userEvent.setup();
+    const onEdit = vi.fn();
+    vi.spyOn(api, 'apiRequest').mockRejectedValueOnce(new Error('Cannot load the private note'));
+    renderModal({ pto: { ...STUB_PTO, note: 'Doctor' }, onEdit });
+    expect(screen.getByText('Doctor')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^edit$/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Cannot load the private note');
+    // The known note is not thrown away by the failed refresh.
+    expect(screen.getByText('Doctor')).toBeInTheDocument();
+    expect(onEdit).not.toHaveBeenCalled();
+  });
+
+  it('does not prepare a delete after the modal was dismissed', async () => {
+    const user = userEvent.setup();
+    const requestDetail = vi.spyOn(api, 'apiRequest');
+    renderModal({ onClose: vi.fn() });
+    await user.click(screen.getByRole('button', { name: /dismiss/i }));
+    await user.click(screen.getByRole('button', { name: /^delete$/i }));
+    expect(requestDetail).not.toHaveBeenCalled();
+    expect(screen.queryByText(/cannot be undone/i)).not.toBeInTheDocument();
+  });
+
+  it('does not offer the delete confirmation when the modal is dismissed while the details load', async () => {
+    const user = userEvent.setup();
+    const response = deferred<PTO>();
+    vi.spyOn(api, 'apiRequest').mockReturnValue(response.promise);
+    renderModal({ onClose: vi.fn() });
+    await user.click(screen.getByRole('button', { name: /^delete$/i }));
+    await user.click(screen.getByRole('button', { name: /dismiss/i }));
+    await act(async () => response.resolve({ ...PTO_DETAIL, note: 'Late private note' }));
+    expect(screen.queryByText(/cannot be undone/i)).not.toBeInTheDocument();
+  });
+
+  it('refuses a delete that is confirmed after the modal was dismissed', async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn(async () => {});
+    vi.spyOn(api, 'apiRequest').mockResolvedValue(PTO_DETAIL);
+    renderModal({ onClose: vi.fn(), onDelete });
+    await user.click(screen.getByRole('button', { name: /^delete$/i }));
+    await screen.findByRole('button', { name: /yes, delete/i });
+    // The session is over, so the pending confirmation no longer deletes anything.
+    await user.click(screen.getByRole('button', { name: /dismiss/i }));
+    await user.click(screen.getByRole('button', { name: /yes, delete/i }));
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+
+  it('does not report a delete failure after the modal was dismissed', async () => {
+    const user = userEvent.setup();
+    const failure = deferred<void>();
+    const onDelete = vi.fn(() => failure.promise);
+    vi.spyOn(api, 'apiRequest').mockResolvedValue(PTO_DETAIL);
+    renderModal({ onClose: vi.fn(), onDelete });
+    await user.click(screen.getByRole('button', { name: /^delete$/i }));
+    await user.click(await screen.findByRole('button', { name: /yes, delete/i }));
+    await user.click(screen.getByRole('button', { name: /dismiss/i }));
+    await act(async () => {
+      failure.reject(new Error('Cannot delete'));
+      await failure.promise.catch(() => undefined);
+    });
+    expect(onDelete).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('shows a fallback message when the delete fails without an Error', async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn(async () => {
+      throw 'server exploded';
+    });
+    vi.spyOn(api, 'apiRequest').mockResolvedValue(PTO_DETAIL);
+    renderModal({ onDelete });
+    await user.click(screen.getByRole('button', { name: /^delete$/i }));
+    await user.click(await screen.findByRole('button', { name: /yes, delete/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not delete PTO.');
+  });
+
+  it('cancels the delete confirmation without deleting anything', async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn(async () => {});
+    vi.spyOn(api, 'apiRequest').mockResolvedValue(PTO_DETAIL);
+    renderModal({ onDelete });
+    await user.click(screen.getByRole('button', { name: /^delete$/i }));
+    expect(await screen.findByText(/cannot be undone/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^cancel$/i }));
+    expect(screen.queryByText(/cannot be undone/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^delete$/i })).toBeInTheDocument();
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+});
