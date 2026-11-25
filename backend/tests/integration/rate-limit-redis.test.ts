@@ -14,13 +14,41 @@ const fake = vi.hoisted(() => ({
   onDecrement: undefined as (() => void) | undefined,
   loadGate: undefined as Promise<void> | undefined,
   onLoad: undefined as (() => void) | undefined,
+  // The connection state the store sees. A store can be ready, still
+  // connecting, or already gone; the cleanup can also be missing entirely.
+  status: 'ready',
+  hasGracefulClose: false,
+  quitFails: false,
+  quitCalls: 0,
+  disconnectCalls: 0,
+  clients: 0,
 }));
 
 vi.mock('ioredis', () => ({
   Redis: class {
     // The limiter waits for a usable socket before its first command; this
-    // synthetic connection is usable from the start.
-    status = 'ready';
+    // synthetic connection is usable from the start unless a test says so.
+    status = fake.status;
+    quit?: () => Promise<string>;
+    disconnect?: () => void;
+
+    constructor(_url?: string, _options?: unknown) {
+      fake.clients += 1;
+      // A real connection always has a graceful close. The fixture only
+      // grows one when a test asks for it, so the defensive checks in the
+      // cleanup path are exercised as well.
+      if (fake.hasGracefulClose) {
+        this.quit = async () => {
+          fake.quitCalls += 1;
+          if (fake.quitFails) throw new Error('quit failed');
+          return 'OK';
+        };
+        this.disconnect = () => {
+          fake.disconnectCalls += 1;
+        };
+      }
+    }
+
     async call(...args: string[]) {
       fake.commands.push(args);
       const [command, a, , key] = args;
@@ -55,6 +83,18 @@ vi.mock('ioredis', () => ({
       }
       throw new Error(`Unexpected command ${command}`);
     }
+
+    async connect(): Promise<void> {
+      // The fixture never reaches a usable state on its own.
+    }
+
+    once(): this {
+      return this;
+    }
+
+    off(): this {
+      return this;
+    }
   },
 }));
 
@@ -67,12 +107,21 @@ vi.mock('../../src/config/env.js', () => ({
   }),
 }));
 
-import { clientIpKey, createGlobalLimiter, createLoginLimiter } from '../../src/lib/rateLimit.js';
+import {
+  awaitRedisReady,
+  clientIpKey,
+  closeRateLimitResources,
+  createGlobalLimiter,
+  createLoginLimiter,
+} from '../../src/lib/rateLimit.js';
 
 describe('real limiter and Redis store with synthetic Redis commands', () => {
   let errors: ReturnType<typeof vi.spyOn>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Each test starts from a released shared store, so the connection
+    // fixtures below describe the connection this test actually uses.
+    await closeRateLimitResources();
     fake.counts.clear();
     fake.commands.length = 0;
     fake.failIncrement = false;
@@ -82,6 +131,11 @@ describe('real limiter and Redis store with synthetic Redis commands', () => {
     fake.onDecrement = undefined;
     fake.loadGate = undefined;
     fake.onLoad = undefined;
+    fake.status = 'ready';
+    fake.hasGracefulClose = false;
+    fake.quitFails = false;
+    fake.quitCalls = 0;
+    fake.disconnectCalls = 0;
     errors = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
@@ -251,5 +305,48 @@ describe('real limiter and Redis store with synthetic Redis commands', () => {
     expect((await store.get('192.0.2.6'))?.totalHits).toBe(2);
     await store.resetKey('192.0.2.6');
     expect((await store.increment('192.0.2.6')).totalHits).toBe(1);
+  });
+
+  it('refuses a store whose connection has already ended', async () => {
+    fake.status = 'end';
+    const client = new Redis();
+
+    await expect(awaitRedisReady(client)).rejects.toThrow('Rate limit store is unavailable');
+  });
+
+  it('gives up on a store that never becomes ready', async () => {
+    fake.status = 'connecting';
+    const client = new Redis();
+
+    await expect(awaitRedisReady(client)).rejects.toThrow('Rate limit store is unavailable');
+  });
+
+  it('releases the shared store even when the socket has no graceful close', async () => {
+    const app = appFor('192.0.2.7');
+    expect((await request(app).get('/resource')).status).toBe(200);
+    const clientsBefore = fake.clients;
+
+    await closeRateLimitResources();
+
+    // Nothing to close gracefully, so no close command is invented.
+    expect(fake.quitCalls).toBe(0);
+    expect(fake.disconnectCalls).toBe(0);
+    // The shared connection was released, so the next request opens a new one.
+    expect((await request(app).get('/resource')).status).toBe(200);
+    expect(fake.clients).toBe(clientsBefore + 1);
+  });
+
+  it('still hard closes the store when the graceful close fails', async () => {
+    fake.hasGracefulClose = true;
+    fake.quitFails = true;
+    const app = appFor('192.0.2.8');
+    expect((await request(app).get('/resource')).status).toBe(200);
+
+    await closeRateLimitResources();
+
+    expect(fake.quitCalls).toBe(1);
+    // The hard close is unconditional: a failed graceful close must not leave
+    // a reconnect loop behind.
+    expect(fake.disconnectCalls).toBe(1);
   });
 });

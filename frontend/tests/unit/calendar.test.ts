@@ -5,6 +5,7 @@ import {
   compareYearMonth,
   currentYearMonth,
   dayCovers,
+  dayPartLabel,
   firstOfMonthIso,
   formatLongDate,
   formatMonthDay,
@@ -20,6 +21,7 @@ import {
   todayIso,
   visibleGridRange,
 } from '../../src/lib/calendar';
+import type { DayPart } from '../../src/types/api';
 
 describe('calendar utilities', () => {
   describe('grid', () => {
@@ -43,6 +45,41 @@ describe('calendar utilities', () => {
     it('starts before the 1st when the month does not begin on Monday', () => {
       const { weeks } = grid({ year: 2026, month: 6 });
       expect(weeks[0]![0]!.iso).toBe('2026-06-29');
+    });
+
+    it('starts on the 1st when the month begins on a Monday', () => {
+      const { weeks, start } = grid({ year: 2026, month: 5 });
+      expect(start).toBe('2026-06-01');
+      expect(weeks[0]![0]!.iso).toBe('2026-06-01');
+      expect(new Date(`${start}T00:00:00Z`).getUTCDay()).toBe(1);
+    });
+
+    it('starts on the previous Monday when the month begins on a Sunday', () => {
+      const { weeks, start } = grid({ year: 2026, month: 10 });
+      expect(start).toBe('2026-10-26');
+      expect(weeks[0]![0]!.iso).toBe('2026-10-26');
+      expect(new Date(`${start}T00:00:00Z`).getUTCDay()).toBe(1);
+    });
+
+    it('always renders 42 Monday-first cells ending on a Sunday', () => {
+      for (const month of [0, 1, 5, 9, 11]) {
+        const { weeks } = grid({ year: 2026, month });
+        expect(weeks).toHaveLength(6);
+        weeks.forEach((week) => expect(week).toHaveLength(7));
+        const first = weeks[0]![0]!.iso;
+        const last = weeks[5]![6]!.iso;
+        expect(new Date(`${first}T00:00:00Z`).getUTCDay()).toBe(1);
+        expect(new Date(`${last}T00:00:00Z`).getUTCDay()).toBe(0);
+      }
+    });
+
+    it('covers every day of a leap-year February exactly once, in order', () => {
+      const { weeks } = grid({ year: 2028, month: 1 });
+      const inMonth = weeks.flat().filter((d) => d.isInMonth);
+      expect(inMonth.map((d) => d.dayOfMonth)).toEqual(
+        Array.from({ length: 29 }, (_, index) => index + 1),
+      );
+      expect(inMonth.at(-1)!.iso).toBe('2028-02-29');
     });
 
     it('marks exactly one cell as today when the input matches the current month', () => {
@@ -72,6 +109,20 @@ describe('calendar utilities', () => {
       expect(range.start).toBe('2026-06-01');
       expect(range.end).toBe('2026-07-12');
     });
+
+    it('matches the grid bounds for a month that starts on a Sunday', () => {
+      const range = visibleGridRange({ year: 2026, month: 10 });
+      expect(range.start).toBe('2026-10-26');
+      expect(range.end).toBe('2026-12-06');
+    });
+
+    it('spans exactly 42 inclusive days', () => {
+      const range = visibleGridRange({ year: 2026, month: 10 });
+      const start = new Date(`${range.start}T00:00:00Z`);
+      const end = new Date(`${range.end}T00:00:00Z`);
+      const days = (end.getTime() - start.getTime()) / 86_400_000 + 1;
+      expect(days).toBe(42);
+    });
   });
 
   describe('addMonths', () => {
@@ -83,6 +134,12 @@ describe('calendar utilities', () => {
     });
     it('returns the same year-month for zero delta', () => {
       expect(addMonths({ year: 2026, month: 5 }, 0)).toEqual({ year: 2026, month: 5 });
+    });
+    it('moves more than a year forward', () => {
+      expect(addMonths({ year: 2026, month: 0 }, 13)).toEqual({ year: 2027, month: 1 });
+    });
+    it('moves more than a year backward', () => {
+      expect(addMonths({ year: 2026, month: 0 }, -13)).toEqual({ year: 2024, month: 11 });
     });
   });
 
@@ -140,6 +197,9 @@ describe('calendar utilities', () => {
     it('handles a December input', () => {
       expect(firstOfMonthIso({ year: 2026, month: 11 })).toBe('2026-12-01');
     });
+    it('handles February in a leap year', () => {
+      expect(firstOfMonthIso({ year: 2028, month: 1 })).toBe('2028-02-01');
+    });
   });
 
   describe('isWeekend', () => {
@@ -161,6 +221,11 @@ describe('calendar utilities', () => {
     it('returns false for malformed input', () => {
       expect(isWeekend('not-a-date')).toBe(false);
     });
+    it('returns false for a value that is not a three-part date', () => {
+      expect(isWeekend('2026-06')).toBe(false);
+      expect(isWeekend('2026-06-15-16')).toBe(false);
+      expect(isWeekend('')).toBe(false);
+    });
   });
 
   describe('formatLongDate', () => {
@@ -173,6 +238,14 @@ describe('calendar utilities', () => {
     it('returns the input unchanged for malformed ISO', () => {
       expect(formatLongDate('not-a-date')).toBe('not-a-date');
     });
+    it('returns the input unchanged for a value that is not a three-part date', () => {
+      expect(formatLongDate('2026-06')).toBe('2026-06');
+      expect(formatLongDate('2026-06-15-16')).toBe('2026-06-15-16');
+    });
+    it('returns the input unchanged for a day that does not exist', () => {
+      expect(formatLongDate('2026-02-30')).toBe('2026-02-30');
+      expect(formatLongDate('2026-13-01')).toBe('2026-13-01');
+    });
   });
 
   describe('formatMonthDay', () => {
@@ -181,6 +254,14 @@ describe('calendar utilities', () => {
     });
     it('returns the input unchanged for malformed ISO', () => {
       expect(formatMonthDay('not-a-date')).toBe('not-a-date');
+    });
+    it('returns the input unchanged for a value that is not a three-part date', () => {
+      expect(formatMonthDay('2026-06')).toBe('2026-06');
+      expect(formatMonthDay('2026-06-15-16')).toBe('2026-06-15-16');
+    });
+    it('returns the input unchanged for a day that does not exist', () => {
+      expect(formatMonthDay('2026-02-30')).toBe('2026-02-30');
+      expect(formatMonthDay('2026-13-01')).toBe('2026-13-01');
     });
   });
 
@@ -196,6 +277,12 @@ describe('calendar utilities', () => {
     });
     it('formats a cross-year range with both years', () => {
       expect(formatRangeLabel('2026-12-30', '2027-01-04')).toBe('Dec 30, 2026 → Jan 4, 2027');
+    });
+    it('falls back to the raw values when the start is not a three-part date', () => {
+      expect(formatRangeLabel('2026-06', '2026-06-19')).toBe('2026-06 → 2026-06-19');
+    });
+    it('falls back to the raw values when the end is not a three-part date', () => {
+      expect(formatRangeLabel('2026-06-15', '2026-07')).toBe('2026-06-15 → 2026-07');
     });
   });
 
@@ -218,6 +305,16 @@ describe('calendar utilities', () => {
     it('returns ink for malformed hex', () => {
       expect(readableTextOn('not-a-color')).toBe('#1F1B16');
     });
+    it('returns ink for a six-character value that is not hex', () => {
+      expect(readableTextOn('#ZZZZZZ')).toBe('#1F1B16');
+    });
+    it('uses the linear segment for channels at or below the dark threshold', () => {
+      expect(readableTextOn('#000000')).toBe('#F5EFE4');
+      expect(readableTextOn('#0A0A0A')).toBe('#F5EFE4');
+    });
+    it('uses the power segment for channels just above the dark threshold', () => {
+      expect(readableTextOn('#0B0B0B')).toBe('#F5EFE4');
+    });
   });
 
   describe('addDays', () => {
@@ -239,6 +336,16 @@ describe('calendar utilities', () => {
     });
     it('returns the input for malformed ISO', () => {
       expect(addDays('not-a-date', 5)).toBe('not-a-date');
+    });
+    it('returns the input for a non-padded ISO date', () => {
+      expect(addDays('2026-6-15', 5)).toBe('2026-6-15');
+    });
+    it('returns the input for a full ISO timestamp', () => {
+      expect(addDays('2026-06-15T00:00:00Z', 5)).toBe('2026-06-15T00:00:00Z');
+    });
+    it('adds a day to a leap day', () => {
+      expect(addDays('2028-02-28', 1)).toBe('2028-02-29');
+      expect(addDays('2028-02-28', 2)).toBe('2028-03-01');
     });
   });
 
@@ -263,11 +370,21 @@ describe('calendar utilities', () => {
       const w = listWindow('2026-06-27', 90);
       expect(w.label).toBe('Jun 27 – Sep 25, 2026');
     });
+    it('labels a window that crosses a year boundary', () => {
+      const w = listWindow('2026-12-01', 90);
+      expect(w.start).toBe('2026-12-01');
+      expect(w.end).toBe('2027-03-01');
+      expect(w.label).toBe('Dec 1 – Mar 1, 2027');
+    });
   });
 
   describe('formatYearMonth', () => {
     it('formats a known month', () => {
       expect(formatYearMonth({ year: 2026, month: 5 })).toBe('June 2026');
+    });
+    it('formats the first and last months of a year', () => {
+      expect(formatYearMonth({ year: 2026, month: 0 })).toBe('January 2026');
+      expect(formatYearMonth({ year: 2026, month: 11 })).toBe('December 2026');
     });
   });
 
@@ -286,10 +403,32 @@ describe('calendar utilities', () => {
     it('handles malformed inputs', () => {
       expect(dayCovers('nope', '2026-05-11', '2026-05-15')).toBe(false);
     });
+    it('returns false when the start or end of the range is malformed', () => {
+      expect(dayCovers('2026-05-12', 'nope', '2026-05-15')).toBe(false);
+      expect(dayCovers('2026-05-12', '2026-05-11', 'nope')).toBe(false);
+    });
+    it('returns false when the range is reversed', () => {
+      expect(dayCovers('2026-05-12', '2026-05-15', '2026-05-11')).toBe(false);
+    });
     it('delegates correctly through ptoCoversDay', () => {
       expect(ptoCoversDay({ startDate: '2026-05-11', endDate: '2026-05-15' }, '2026-05-12')).toBe(
         true,
       );
+    });
+    it('returns false through ptoCoversDay when the PTO range is malformed', () => {
+      expect(ptoCoversDay({ startDate: '2026-05-11', endDate: 'nope' }, '2026-05-12')).toBe(false);
+    });
+  });
+
+  describe('dayPartLabel', () => {
+    const expected: Array<[DayPart, string]> = [
+      ['morning', 'AM'],
+      ['evening', 'PM'],
+      ['all_day', 'Full'],
+    ];
+
+    it.each(expected)('labels %s as %s', (dp, label) => {
+      expect(dayPartLabel(dp)).toBe(label);
     });
   });
 
@@ -305,6 +444,15 @@ describe('calendar utilities', () => {
     });
     it('returns ? for an empty name', () => {
       expect(initials('')).toBe('?');
+    });
+    it('returns ? for a whitespace-only name', () => {
+      expect(initials('   ')).toBe('?');
+    });
+    it('uppercases a lowercase name', () => {
+      expect(initials('alice johnson')).toBe('AJ');
+    });
+    it('returns a single letter for a one-character name', () => {
+      expect(initials('A')).toBe('A');
     });
   });
 });

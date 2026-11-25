@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -918,5 +918,61 @@ describe('CalendarPage', () => {
 
     unmount();
     releaseMe();
+  });
+
+  it('shifts the 3-month list window back when Previous is clicked', async () => {
+    server.use(http.get('/pto', () => HttpResponse.json([])));
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('view-option-list'));
+    const initialLabel = screen.getByTestId('header-label').textContent ?? '';
+    await user.click(screen.getByRole('button', { name: /^previous$/i }));
+    const shiftedLabel = screen.getByTestId('header-label').textContent ?? '';
+    expect(shiftedLabel).not.toBe(initialLabel);
+  });
+
+  it('creates a PTO from the calendar and confirms it with a toast', async () => {
+    const created = vi.fn(() =>
+      HttpResponse.json(
+        {
+          id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+          userId: STUB_USER.id,
+          startDate: '2026-05-11',
+          endDate: '2026-05-11',
+          dayPart: 'all_day',
+          note: null,
+          createdAt: '2026-05-01T10:00:00.000Z',
+          updatedAt: '2026-05-01T10:00:00.000Z',
+          version: 1,
+        },
+        { status: 201 },
+      ),
+    );
+    server.use(
+      http.get('/pto', () => HttpResponse.json([])),
+      http.post('/pto', created),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/team lead/i)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /^add pto$/i }));
+    const startInput = await screen.findByLabelText(/start date/i);
+    // A fixed weekday keeps the submit independent of the day the test runs on.
+    fireEvent.change(startInput, { target: { value: '2026-05-11' } });
+    await user.click(screen.getByRole('button', { name: /save pto/i }));
+
+    await waitFor(() => {
+      expect(created).toHaveBeenCalledTimes(1);
+    });
+    expect(await screen.findByText(/pto saved/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /add pto/i })).not.toBeInTheDocument();
+    });
   });
 });

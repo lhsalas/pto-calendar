@@ -16,6 +16,49 @@ function mockFetchOnce(response: Partial<Response> & { ok?: boolean; status?: nu
   globalThis.fetch = vi.fn(async () => response) as unknown as typeof fetch;
 }
 
+/**
+ * Runs `body` with browser-like timer handles.
+ *
+ * Browsers return a numeric id from `setTimeout` and have no `unref` method,
+ * while Node returns a `Timeout` object that does. The client guards the
+ * `unref` call for both, so this helper exercises the browser shape.
+ */
+async function withBrowserTimerHandles<T>(body: () => Promise<T>): Promise<T> {
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  const handles = new Map<number, ReturnType<typeof realSetTimeout>>();
+  let nextId = 0;
+  globalThis.setTimeout = ((
+    handler: TimerHandler,
+    timeout?: number,
+    ...args: unknown[]
+  ): number => {
+    const id = ++nextId;
+    handles.set(
+      id,
+      realSetTimeout(handler as () => void, timeout, ...args) as unknown as ReturnType<
+        typeof realSetTimeout
+      >,
+    );
+    return id;
+  }) as typeof globalThis.setTimeout;
+  globalThis.clearTimeout = ((id?: number): void => {
+    if (id === undefined) return;
+    const handle = handles.get(id);
+    if (handle === undefined) return;
+    realClearTimeout(handle);
+    handles.delete(id);
+  }) as typeof globalThis.clearTimeout;
+  try {
+    return await body();
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    globalThis.clearTimeout = realClearTimeout;
+    for (const handle of handles.values()) realClearTimeout(handle);
+    handles.clear();
+  }
+}
+
 describe('apiRequest hardening', () => {
   it('throws a typed ApiError with BAD_RESPONSE on malformed JSON body', async () => {
     mockFetchOnce({
@@ -199,5 +242,114 @@ describe('apiRequest deadline mode', () => {
       status: 0,
       body: { code: 'TIMEOUT' },
     });
+  });
+});
+
+describe('apiRequest timeout and cleanup boundaries', () => {
+  it('runs without any timeout race when the caller disables the timeout', async () => {
+    let observed: AbortSignal | undefined;
+    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      observed = init?.signal ?? undefined;
+      return new Response('{"ok":true}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(apiRequest('/no-timeout', { timeoutMs: 0 })).resolves.toEqual({ ok: true });
+    // Without a timeout and without a caller signal there is nothing to abort.
+    expect(observed).toBeUndefined();
+  });
+
+  it('runs a deadline request without a deadline timer when the timeout is disabled', async () => {
+    let observed: AbortSignal | undefined;
+    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      observed = init?.signal ?? undefined;
+      return new Response('{"ok":true}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      apiRequest('/deadline-no-timeout', { deadline: true, timeoutMs: 0 }),
+    ).resolves.toEqual({ ok: true });
+    // The deadline still forwards an abort signal, but nothing arms it.
+    expect(observed?.aborted).toBe(false);
+  });
+
+  it('completes a request when the timer handle has no unref method', async () => {
+    globalThis.fetch = vi.fn(
+      async () => new Response('{"ok":true}', { status: 200 }),
+    ) as unknown as typeof fetch;
+
+    await withBrowserTimerHandles(async () => {
+      await expect(
+        apiRequest('/browser-timers', { deadline: true, timeoutMs: 1000 }),
+      ).resolves.toEqual({ ok: true });
+    });
+  });
+
+  it('returns undefined for a successful response with an empty body', async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      status: 200,
+      ok: true,
+      statusText: 'OK',
+      text: async () => '',
+    })) as unknown as typeof fetch;
+
+    await expect(apiRequest('/empty-body')).resolves.toBeUndefined();
+  });
+
+  it('refuses a deadline request whose caller signal was already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let observed: AbortSignal | undefined;
+    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      observed = init?.signal ?? undefined;
+      return new Response('{"ok":true}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      apiRequest('/already-aborted', {
+        deadline: true,
+        signal: controller.signal,
+        timeoutMs: 1000,
+      }),
+    ).rejects.toMatchObject({
+      status: 0,
+      body: { code: 'ABORTED', message: 'Request was aborted.' },
+    });
+    // The aborted caller signal is forwarded to the request.
+    expect(observed?.aborted).toBe(true);
+  });
+
+  it('surfaces a response body read failure unchanged', async () => {
+    const failure = new TypeError('stream closed');
+    globalThis.fetch = vi.fn(async () => ({
+      status: 200,
+      ok: true,
+      statusText: 'OK',
+      text: async () => {
+        throw failure;
+      },
+    })) as unknown as typeof fetch;
+
+    const error = await apiRequest('/read-error').catch((err: unknown) => err);
+    expect(error).toBe(failure);
+    expect(error).not.toBeInstanceOf(ApiError);
+  });
+
+  it('keeps a failed deadline body read from surfacing as an unhandled rejection', async () => {
+    const failure = new TypeError('stream closed');
+    globalThis.fetch = vi.fn(async () => ({
+      status: 200,
+      ok: true,
+      statusText: 'OK',
+      text: async () => {
+        throw failure;
+      },
+    })) as unknown as typeof fetch;
+
+    const error = await apiRequest('/deadline-read-error', {
+      deadline: true,
+      timeoutMs: 1000,
+    }).catch((err: unknown) => err);
+    expect(error).toBe(failure);
+    expect(error).not.toBeInstanceOf(ApiError);
   });
 });

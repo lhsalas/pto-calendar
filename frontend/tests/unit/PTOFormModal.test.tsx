@@ -5,6 +5,7 @@ import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { PTOFormModal } from '../../src/components/pto/PTOFormModal';
 import { STUB_PTO } from '../mocks/handlers';
+import { StalePtoWriteError } from '../../src/lib/ptoEdit';
 import type { CreatePTORequest } from '../../src/types/api';
 
 type SubmitSpy = (payload: CreatePTORequest) => Promise<void> | void;
@@ -411,5 +412,65 @@ describe('PTOFormModal', () => {
     const endInput = screen.getByLabelText(/end date/i) as HTMLInputElement;
     expect(startInput.value).toBe('2026-12-15');
     expect(endInput.value).toBe('2026-12-15');
+  });
+
+  it('closes the modal when the backdrop is clicked', () => {
+    const onClose = vi.fn();
+    renderModal({ onClose });
+    fireEvent.click(screen.getByRole('dialog'));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('refuses to submit when the end date is before the start date', async () => {
+    const onSubmit = vi.fn();
+    renderModal({ onSubmit });
+    fireEvent.change(screen.getByLabelText(/start date/i), { target: { value: '2026-05-11' } });
+    fireEvent.change(screen.getByLabelText(/end date/i), { target: { value: '2026-05-08' } });
+    // The end date is below the input's `min`, so the form is submitted
+    // programmatically: the browser blocks the click before validation runs.
+    fireEvent.submit(screen.getByRole('button', { name: /save pto/i }).closest('form')!);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /end date cannot be before start date/i,
+    );
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('refuses a second submit after the server rejected the write as stale', async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new StalePtoWriteError('stale'));
+    renderModal({ onSubmit });
+    const form = screen.getByRole('button', { name: /save pto/i }).closest('form')!;
+    fireEvent.submit(form);
+    expect(await screen.findByTestId('pto-write-conflict')).toHaveTextContent(/changed since/i);
+    // The editor is invalidated: the stale version is never submitted again.
+    fireEvent.submit(form);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('pto-write-conflict')).toBeInTheDocument();
+  });
+
+  it('shows a generic message when the save fails without an Error', async () => {
+    const onSubmit = vi.fn().mockRejectedValue('server exploded');
+    renderModal({ onSubmit });
+    fireEvent.submit(screen.getByRole('button', { name: /save pto/i }).closest('form')!);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not save pto/i);
+  });
+
+  it('resets to today when it is reopened without a PTO or a default date', () => {
+    // A controlled clock keeps the expected day exact: the modal derives
+    // "today" from the current date, so an uncontrolled run would drift with
+    // the local time zone and across midnight.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-05-11T12:00:00.000Z'));
+      const { rerender } = render(
+        <PTOFormModal open={false} onSubmit={vi.fn()} onClose={vi.fn()} />,
+      );
+      rerender(<PTOFormModal open onSubmit={vi.fn()} onClose={vi.fn()} />);
+      const startInput = screen.getByLabelText(/start date/i) as HTMLInputElement;
+      const endInput = screen.getByLabelText(/end date/i) as HTMLInputElement;
+      expect(startInput.value).toBe('2026-05-11');
+      expect(endInput.value).toBe('2026-05-11');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
