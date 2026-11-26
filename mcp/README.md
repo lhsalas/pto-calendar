@@ -176,4 +176,8 @@ test transcripts and per-client limitations belong to issues #266–#268
 after artifacts exist. The read-only OpenCode V2 setup, credential flow,
 and verified TUI behavior are described in the
 [read-only OpenCode V2 guide](https://github.com/lhsalas/pto-calendar/blob/master/docs/agent-opencode-v2.md)
-(#266 read-only slice; write validation deferred).
+(#266 read-only slice; write validation deferred). The read-only Claude Code
+setup, disposable LM Studio launch, and verified ask-mode behavior are
+described in the
+[read-only Claude Code guide](https://github.com/lhsalas/pto-calendar/blob/master/docs/agent-claude-code.md)
+(#267 read-only slice; write validation deferred).
