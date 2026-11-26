@@ -173,4 +173,7 @@ configuration or approval behavior.
 
 These are protocol checks, not release certification. Actual host setup,
 test transcripts and per-client limitations belong to issues #266–#268
-after artifacts exist.
+after artifacts exist. The read-only OpenCode V2 setup, credential flow,
+and verified TUI behavior are described in the
+[read-only OpenCode V2 guide](https://github.com/lhsalas/pto-calendar/blob/master/docs/agent-opencode-v2.md)
+(#266 read-only slice; write validation deferred).
