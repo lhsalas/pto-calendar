@@ -1,6 +1,5 @@
 import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useAuth } from '../context/useAuth';
 import { usePtoList } from '../hooks/usePtoList';
 import { useHolidays } from '../hooks/useHolidays';
@@ -11,7 +10,7 @@ import { PTOEditModal } from '../components/pto/PTOEditModal';
 import { UpcomingPtoList } from '../components/pto/UpcomingPtoList';
 import { CalendarHeader } from '../components/calendar/CalendarHeader';
 import { MonthGrid } from '../components/calendar/MonthGrid';
-import { ThemeToggle } from '../components/ThemeToggle';
+import { SignedInHeader } from '../components/layout/SignedInHeader';
 import {
   addDays,
   addMonths,
@@ -27,12 +26,11 @@ import {
 } from '../lib/calendar';
 import type { ViewMode } from '../components/calendar/ViewToggle';
 import type { CreatePTORequest, PTOWithUser } from '../types/api';
-import { canManageUsers } from '../lib/permissions';
 
 const LIST_WINDOW_DAYS = 90;
 
 export function CalendarPage(): JSX.Element {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const [view, setView] = useState<ViewMode>('grid');
   const [yearMonth, setYearMonth] = useState<YearMonth>(() => currentYearMonth());
   const [listStart, setListStart] = useState<string>(() => todayIso());
@@ -152,48 +150,7 @@ export function CalendarPage(): JSX.Element {
 
   return (
     <div className="min-h-full bg-surface p-4 text-ink sm:p-6 lg:p-8 dark:bg-surface-dark dark:text-ink-dark">
-      <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-display text-xl font-semibold tracking-tight">Calendar</h1>
-        <div className="flex flex-wrap items-center gap-3 text-sm text-ink-muted dark:text-ink-muted-dark">
-          <ThemeToggle />
-          <Link
-            to="/settings/tokens"
-            data-testid="api-access-link"
-            className="min-h-11 rounded border border-border px-3 py-2 text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
-          >
-            API access
-          </Link>
-          {canManageUsers(user) ? (
-            <>
-              <Link
-                to="/admin/holidays"
-                data-testid="manage-holidays-link"
-                className="min-h-11 rounded border border-border px-3 py-2 text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
-              >
-                Holidays
-              </Link>
-              <Link
-                to="/admin/users"
-                data-testid="manage-users-link"
-                className="min-h-11 rounded border border-border px-3 py-2 text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
-              >
-                Manage users
-              </Link>
-            </>
-          ) : null}
-          <span>
-            {user.name}{' '}
-            <span className="text-ink-muted/70 dark:text-ink-muted-dark/70">({user.role})</span>
-          </span>
-          <button
-            type="button"
-            onClick={() => void logout()}
-            className="min-h-11 rounded border border-border px-3 py-2 transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
-          >
-            Sign out
-          </button>
-        </div>
-      </header>
+      <SignedInHeader title="Calendar" className="mb-6" />
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <p

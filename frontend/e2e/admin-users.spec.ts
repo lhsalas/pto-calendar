@@ -42,7 +42,9 @@ test.describe('Admin users surface', () => {
 
     await page.getByTestId('manage-users-link').click();
     await expect(page.getByRole('heading', { name: /manage users/i })).toBeVisible();
-    await expect(page.getByText(/Team Lead/)).toBeVisible();
+    // The signed-in identity is in the header too, so the row is scoped to
+    // the user list.
+    await expect(page.getByRole('listitem').filter({ hasText: 'Team Lead' })).toBeVisible();
 
     const email = `${E2E_EMAIL_PREFIX}${Date.now()}@example.com`;
     await page.getByLabel(/name/i).fill('E2E New Member');

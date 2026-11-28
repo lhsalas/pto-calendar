@@ -173,6 +173,20 @@ describe('CalendarPage', () => {
     expect(link).toHaveAttribute('href', '/admin/users');
   });
 
+  it('renders the shared header with every destination and no back link', async () => {
+    server.use(http.get('/pto', () => HttpResponse.json([])));
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 1, name: /calendar/i })).toBeInTheDocument();
+    });
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeInTheDocument();
+    expect(screen.getByTestId('api-access-link')).toHaveAttribute('href', '/settings/tokens');
+    expect(screen.getByTestId('manage-holidays-link')).toHaveAttribute('href', '/admin/holidays');
+    expect(screen.getByTestId('manage-users-link')).toHaveAttribute('href', '/admin/users');
+    // The calendar is the home route: it needs no way back to itself.
+    expect(screen.queryByTestId('back-to-calendar-link')).not.toBeInTheDocument();
+  });
+
   it('hides the Manage users link for member', async () => {
     const member: User = { ...STUB_USER, role: 'member' };
     server.use(http.get('/auth/me', () => HttpResponse.json(member)));

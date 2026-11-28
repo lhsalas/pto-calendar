@@ -67,7 +67,7 @@ test.describe('Public holiday overlay', () => {
 
     await expect(page.getByTestId(`holiday-row-${E2E_HOLIDAY_DATE}-US`)).toBeVisible();
 
-    await page.getByTestId('back-link').click();
+    await page.getByTestId('back-to-calendar-link').click();
     await expect(page.getByRole('heading', { name: /^calendar$/i })).toBeVisible();
 
     await expect(page.getByTestId(`holiday-badge-${E2E_HOLIDAY_DATE}-US`)).toBeVisible();

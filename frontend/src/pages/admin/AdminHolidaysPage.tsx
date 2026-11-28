@@ -1,12 +1,10 @@
 import type { JSX } from 'react';
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { apiRequest, ApiError } from '../../api/client';
 import type { Holiday, SeedHolidayRequest } from '../../types/api';
 import { useAuth } from '../../context/useAuth';
 import { useToast } from '../../hooks/useToast';
-import { ThemeToggle } from '../../components/ThemeToggle';
-import { ChevronLeft } from '../../components/icons';
+import { SignedInHeader } from '../../components/layout/SignedInHeader';
 
 const SUPPORTED_COUNTRY_CODES: SeedHolidayRequest['countryCode'][] = ['US', 'MX', 'CO', 'CL'];
 const COUNTRY_LABELS: Record<SeedHolidayRequest['countryCode'], string> = {
@@ -29,7 +27,7 @@ function emptyForm(): FormState {
 }
 
 export function AdminHolidaysPage(): JSX.Element {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -135,39 +133,7 @@ export function AdminHolidaysPage(): JSX.Element {
 
   return (
     <div className="min-h-full bg-surface p-4 text-ink sm:p-6 lg:p-8 dark:bg-surface-dark dark:text-ink-dark">
-      <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Link
-            to="/calendar"
-            data-testid="back-link"
-            className="inline-flex min-h-11 items-center gap-1 rounded border border-border px-3 py-2 text-sm text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
-          >
-            <ChevronLeft /> Back
-          </Link>
-          <h1 className="font-display text-xl font-semibold tracking-tight">Holidays</h1>
-        </div>
-        <div className="flex flex-wrap items-center gap-3 text-sm text-ink-muted dark:text-ink-muted-dark">
-          <ThemeToggle />
-          <Link
-            to="/admin/users"
-            data-testid="manage-users-link"
-            className="min-h-11 rounded border border-border px-3 py-2 text-ink transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
-          >
-            Manage users
-          </Link>
-          <span>
-            {user.name}{' '}
-            <span className="text-ink-muted/70 dark:text-ink-muted-dark/70">({user.role})</span>
-          </span>
-          <button
-            type="button"
-            onClick={() => void logout()}
-            className="min-h-11 rounded border border-border px-3 py-2 transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
-          >
-            Sign out
-          </button>
-        </div>
-      </header>
+      <SignedInHeader title="Holidays" showBackToCalendar className="mb-6" />
 
       <section className="mb-6 rounded-lg border border-border bg-surface-3 p-4 shadow-sm dark:border-border-dark dark:bg-surface-dark-3">
         <h2 className="mb-3 font-display text-base font-semibold">Seed defaults</h2>
