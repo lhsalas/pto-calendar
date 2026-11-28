@@ -437,7 +437,7 @@ describe('PTOFormModal', () => {
 
   it('refuses a second submit after the server rejected the write as stale', async () => {
     const onSubmit = vi.fn().mockRejectedValue(new StalePtoWriteError('stale'));
-    renderModal({ onSubmit });
+    renderModal({ onSubmit, defaultStartDate: '2026-05-11' });
     const form = screen.getByRole('button', { name: /save pto/i }).closest('form')!;
     fireEvent.submit(form);
     expect(await screen.findByTestId('pto-write-conflict')).toHaveTextContent(/changed since/i);
@@ -449,7 +449,7 @@ describe('PTOFormModal', () => {
 
   it('shows a generic message when the save fails without an Error', async () => {
     const onSubmit = vi.fn().mockRejectedValue('server exploded');
-    renderModal({ onSubmit });
+    renderModal({ onSubmit, defaultStartDate: '2026-05-11' });
     fireEvent.submit(screen.getByRole('button', { name: /save pto/i }).closest('form')!);
     expect(await screen.findByRole('alert')).toHaveTextContent(/could not save pto/i);
   });

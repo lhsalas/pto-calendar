@@ -51,6 +51,7 @@ function renderWithProviders(initialPath: string = '/'): ReturnType<typeof rende
           <ToastProvider>
             <Routes>
               <Route path="/" element={<AdminHolidaysPage />} />
+              <Route path="/admin/holidays" element={<AdminHolidaysPage />} />
               <Route path="/calendar" element={<h1>Calendar Page</h1>} />
               <Route path="/admin/users" element={<h1>Users Page</h1>} />
             </Routes>
@@ -72,7 +73,17 @@ describe('AdminHolidaysPage', () => {
     server.use(authenticated, holidaysListAll);
     renderWithProviders();
     expect(await screen.findByRole('heading', { level: 1, name: /holidays/i })).toBeInTheDocument();
-    expect(screen.getByTestId('back-link')).toHaveAttribute('href', '/calendar');
+    expect(screen.getByTestId('back-to-calendar-link')).toHaveAttribute('href', '/calendar');
+  });
+
+  it('shows the shared navigation and marks the current destination', async () => {
+    server.use(authenticated, holidaysListAll);
+    renderWithProviders('/admin/holidays');
+    await screen.findByTestId('signed-in-user');
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeInTheDocument();
+    expect(screen.getByTestId('api-access-link')).toHaveAttribute('href', '/settings/tokens');
+    expect(screen.getByTestId('manage-holidays-link')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('manage-users-link')).toHaveAttribute('href', '/admin/users');
   });
 
   it('lists existing holidays returned by the API', async () => {

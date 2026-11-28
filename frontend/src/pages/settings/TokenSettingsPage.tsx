@@ -1,13 +1,12 @@
 import type { JSX } from 'react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/useAuth';
 import type { TokenIssuanceGuard } from '../../hooks/useTokenIssuanceGuard';
 import { useToast } from '../../hooks/useToast';
 import { useTokens } from '../../hooks/useTokens';
 import { issueToken } from '../../api/tokens';
-import { ThemeToggle } from '../../components/ThemeToggle';
+import { SignedInHeader } from '../../components/layout/SignedInHeader';
 import { TokenCard } from '../../components/tokens/TokenCard';
 import { TokenConfirmDialog } from '../../components/tokens/TokenConfirmDialog';
 import { TokenCreateDialog } from '../../components/tokens/TokenCreateDialog';
@@ -57,7 +56,6 @@ interface TokenSettingsPaneProps {
 }
 
 function TokenSettingsPane({ user, guard }: TokenSettingsPaneProps): JSX.Element {
-  const { logout } = useAuth();
   const { push: pushToast } = useToast();
   const { tokens, loading, error, refetch, revoke, revokeAll } = useTokens(user.id);
 
@@ -247,47 +245,18 @@ function TokenSettingsPane({ user, guard }: TokenSettingsPaneProps): JSX.Element
   return (
     <div className="min-h-full bg-surface p-4 text-ink sm:p-6 lg:p-8 dark:bg-surface-dark dark:text-ink-dark">
       <div className="mx-auto max-w-4xl">
-        <header className="mb-8 border-b border-border pb-6 dark:border-border-dark">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="min-w-0">
-              <Link
-                to="/calendar"
-                data-testid="back-to-calendar-link"
-                className="inline-flex min-h-11 items-center text-sm text-ink-muted underline decoration-dotted underline-offset-4 transition-colors duration-150 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:text-ink-muted-dark dark:hover:text-ink-dark dark:focus-visible:ring-offset-surface-dark"
-              >
-                Back to calendar
-              </Link>
-              <h1 className="mt-1 font-display text-2xl font-semibold tracking-tight sm:text-3xl">
-                Personal access tokens
-              </h1>
-              <p className="mt-2 max-w-2xl text-sm text-ink-muted dark:text-ink-muted-dark">
-                A personal access token is a separate credential, not your session: this page is
-                reached with your signed-in session, and a tool uses the token instead. You manage
-                only your own tokens here, and every secret is shown once.{' '}
-                <a
-                  href="#cli-setup"
-                  className="underline decoration-dotted underline-offset-4 transition-colors duration-150 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:hover:text-ink-dark dark:focus-visible:ring-offset-surface-dark"
-                >
-                  CLI and local MCP setup
-                </a>
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-3 text-sm text-ink-muted dark:text-ink-muted-dark">
-              <ThemeToggle />
-              <span>
-                {user.name}{' '}
-                <span className="text-ink-muted/70 dark:text-ink-muted-dark/70">({user.role})</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => void logout()}
-                className="min-h-11 rounded border border-border px-3 py-2 transition-colors duration-150 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:border-border-dark dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-offset-surface-dark"
-              >
-                Sign out
-              </button>
-            </div>
-          </div>
-        </header>
+        <SignedInHeader title="Personal access tokens" showBackToCalendar className="mb-4" />
+        <p className="mb-6 max-w-2xl text-sm text-ink-muted dark:text-ink-muted-dark">
+          A personal access token is a separate credential, not your session: this page is reached
+          with your signed-in session, and a tool uses the token instead. You manage only your own
+          tokens here, and every secret is shown once.{' '}
+          <a
+            href="#cli-setup"
+            className="underline decoration-dotted underline-offset-4 transition-colors duration-150 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:hover:text-ink-dark dark:focus-visible:ring-offset-surface-dark"
+          >
+            CLI and local MCP setup
+          </a>
+        </p>
 
         <section aria-labelledby="issue-token-heading" className="mb-8">
           <h2

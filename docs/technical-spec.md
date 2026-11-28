@@ -1044,6 +1044,15 @@ export function shutdown(signal: NodeJS.Signals, server: Server, prisma: PrismaC
 - `PTOFormModal` (under `components/pto/`)
 - `PTOViewModal` (under `components/pto/`)
 
+### 11.2a Signed-in header (#318)
+
+- Every signed-in route (`/calendar`, `/admin/holidays`, `/admin/users`, `/settings/tokens`) renders the same header component, `SignedInHeader` (`frontend/src/components/layout/SignedInHeader.tsx`). The Calendar/Holidays pattern is the baseline: the title on the left, the account controls on the right.
+- The header carries exactly one heading per route: **Calendar**, **Holidays**, **Manage users** and **Personal access tokens**. The Calendar's month/list toolbar (`CalendarHeader`) is a separate component and is not part of this menu.
+- The three secondary routes carry a **Back to calendar** link next to the title (`data-testid="back-to-calendar-link"`). It is a plain `Link` to `/calendar`, so it also works after a direct visit to the route. The Calendar has no such link.
+- The control order is the same on every route: the theme switcher (Light / Dark / System), the page navigation, the signed-in name and role, and the **Sign out** button. The navigation is a labelled landmark (`<nav aria-label="Main">`) and keeps the Calendar order: **API access** (`/settings/tokens`, for every signed-in role), then **Holidays** (`/admin/holidays`) and **Manage users** (`/admin/users`) for the roles that pass `canManageUsers` (team lead, admin). The route guards in `frontend/src/routes/AppRoutes.tsx` are unchanged; the header only mirrors them.
+- The current destination is a `NavLink` and carries `aria-current="page"` plus a visible emphasis (accent border, stronger surface, stronger weight). Navigation is done with links and sign-out with a button; every control keeps the 44 px touch target (`min-h-11`) and the shared focus ring, and the header wraps without clipping or horizontal overflow at 360 px, including for a long signed-in name.
+- The page introductions stay below the header: the Manage users intro, and the API access intro with its **CLI and local MCP setup** jump link (`#cli-setup`).
+
 ### 11.3 State requirements
 Frontend state should track:
 - current authenticated user
@@ -1078,7 +1087,7 @@ For each day in the visible calendar grid:
 ### 11.7 Personal access token settings page (#254)
 
 - Route `/settings/tokens` renders `TokenSettingsPage` (`frontend/src/pages/settings/TokenSettingsPage.tsx`) behind the ordinary `RequireAuth` guard. Every role (`member`, `team_lead`, `admin`) reaches it; it is not under `/admin` and carries no team-lead guard. An unauthenticated visit is redirected to `/login`.
-- The calendar header carries the entry point: a `Link` to `/settings/tokens` labelled **API access** (`data-testid="api-access-link"`), rendered for every signed-in user.
+- The signed-in header carries the entry point on every signed-in route (§11.2a): a `Link` to `/settings/tokens` labelled **API access** (`data-testid="api-access-link"`), rendered for every signed-in user.
 - The page heading is **Personal access tokens**. It has three sections: *Issue a token* (`Generate token`, `data-testid="generate-token-button"`), *Your tokens* (one card per owned token) and *Revoke every token* (`Revoke all tokens`, `data-testid="revoke-all-button"`).
 - Issuance dialog (`TokenCreateDialog`): `Token name`, `Current password`, `Expires after` (30/90/180/365 days) and the scope picker (`TokenScopePicker`). The defaults are read-only (`pto:read`) and 90 days. The picker applies the server's scope dependencies: note reading needs read access, and the team scopes are only offered to a live team lead or administrator.
 - The password lives in component state only, is cleared when the form is submitted or closed, and is never stored, logged, put in the URL or echoed back. Credential requests are sent with `cache: 'no-store'` and `redirect: 'error'` so a raw token cannot enter the HTTP cache and a redirect is never re-requested with the session cookie.
@@ -1211,6 +1220,7 @@ function expandPTOToDates(pto) {
 - mobile-chrome project (Pixel 5) verifies the responsive layout, ≥44px tap targets, modal scroll-lock on small viewports
 - keyboard focus indicators on inputs, buttons, chips, calendar cells, and the modal close button
 - own-token settings (#254, `frontend/e2e/token-settings.spec.ts`, chromium-only): the member journey from the calendar **API access** entry to a read-only 90-day token, the copy-once reveal, the clear-on-close/navigation rule, revoke-one and revoke-all without a password, and the cookie-free bearer proof on `GET /auth/me` (200 before revocation, 401 after)
+- signed-in header (#318, `frontend/e2e/signed-in-header.spec.ts`, chromium-only): the destinations a member and a team lead see, the current destination marked with `aria-current="page"`, the **Back to calendar** link after a direct visit to a secondary route, sign-out from every signed-in route, the theme surviving the navigation, the header's control order and 44 px touch targets, the keyboard order, and a long signed-in name wrapping at 360 px without horizontal overflow in light and dark mode
 
 ### 14.4 Automation, tooling, CI/CD, and coverage policy
 See `testing-strategy.md` for the full automation plan: tooling matrix (Vitest, Supertest, React Testing Library, MSW, Playwright, GitHub Actions), coverage targets with strict gates on authorization and PTO validation, ephemeral Postgres for integration tests, pre-commit hooks, and merge policy.

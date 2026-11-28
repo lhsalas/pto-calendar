@@ -276,6 +276,15 @@ describe('TokenSettingsPage', () => {
     expect(screen.getByText(/rolled out/i)).toBeInTheDocument();
   });
 
+  it('marks the API access destination as current and offers no admin destination', async () => {
+    server.use(authFor('member'), tokensListEmpty);
+    renderPage();
+    await screen.findByRole('heading', { name: 'Personal access tokens' });
+    expect(screen.getByTestId('api-access-link')).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByTestId('manage-holidays-link')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('manage-users-link')).not.toBeInTheDocument();
+  });
+
   it('does not mount any credential dialog before one is asked for', async () => {
     server.use(authFor('member'), tokensListEmpty);
     renderPage();

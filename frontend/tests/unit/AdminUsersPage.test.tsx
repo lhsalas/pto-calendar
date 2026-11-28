@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
@@ -61,6 +61,7 @@ function renderWithProviders(initialPath: string = '/'): ReturnType<typeof rende
         <AuthProvider>
           <Routes>
             <Route path="/" element={<AdminUsersPage />} />
+            <Route path="/admin/users" element={<AdminUsersPage />} />
             <Route path="/calendar" element={<h1>Calendar Page</h1>} />
             <Route path="/login" element={<h1>Login Page</h1>} />
           </Routes>
@@ -68,6 +69,15 @@ function renderWithProviders(initialPath: string = '/'): ReturnType<typeof rende
       </ThemeProvider>
     </MemoryRouter>,
   );
+}
+
+/**
+ * The signed-in identity is in the page header, so a listed user is looked up
+ * inside the user list instead of anywhere on the page.
+ */
+async function findListedUser(name: RegExp): Promise<HTMLElement> {
+  const list = await screen.findByRole('list');
+  return within(list).findByText(name);
 }
 
 function stubClipboard(writeText: (text: string) => Promise<void>): {
@@ -100,7 +110,7 @@ describe('AdminUsersPage', () => {
   it('lists the existing users', async () => {
     server.use(authenticated, usersList);
     renderWithProviders();
-    expect(await screen.findByText(/Team Lead/)).toBeInTheDocument();
+    expect(await findListedUser(/Team Lead/)).toBeInTheDocument();
     expect(screen.getByText(/Developer One/)).toBeInTheDocument();
   });
 
@@ -108,7 +118,7 @@ describe('AdminUsersPage', () => {
     server.use(authenticated, usersList, createUserOk);
     const user = userEvent.setup();
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     await user.type(screen.getByLabelText(/name/i), 'New Member');
     await user.type(screen.getByLabelText(/email/i), 'newmember@example.com');
     await user.click(screen.getByRole('button', { name: /create user/i }));
@@ -118,16 +128,26 @@ describe('AdminUsersPage', () => {
   it('renders a Back to calendar link that points to /calendar', async () => {
     server.use(authenticated, usersList);
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     const link = screen.getByTestId('back-to-calendar-link');
     expect(link).toHaveAttribute('href', '/calendar');
+  });
+
+  it('shows the shared navigation and marks the current destination', async () => {
+    server.use(authenticated, usersList);
+    renderWithProviders('/admin/users');
+    await screen.findByTestId('signed-in-user');
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeInTheDocument();
+    expect(screen.getByTestId('api-access-link')).toHaveAttribute('href', '/settings/tokens');
+    expect(screen.getByTestId('manage-holidays-link')).toHaveAttribute('href', '/admin/holidays');
+    expect(screen.getByTestId('manage-users-link')).toHaveAttribute('aria-current', 'page');
   });
 
   it('navigates to /calendar when the Back to calendar link is clicked', async () => {
     server.use(authenticated, usersList);
     const user = userEvent.setup();
     renderWithProviders('/');
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     await user.click(screen.getByTestId('back-to-calendar-link'));
     expect(await screen.findByRole('heading', { name: /calendar page/i })).toBeInTheDocument();
   });
@@ -139,7 +159,7 @@ describe('AdminUsersPage', () => {
       http.post('/auth/logout', () => new HttpResponse(null, { status: 204 })),
     );
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument();
   });
 
@@ -155,7 +175,7 @@ describe('AdminUsersPage', () => {
     );
     const user = userEvent.setup();
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     await user.click(screen.getByRole('button', { name: /sign out/i }));
     await waitFor(() => {
       expect(loggedOut).toBe(1);
@@ -167,7 +187,7 @@ describe('AdminUsersPage', () => {
     const user = userEvent.setup({ writeToClipboard: false });
     const { writeText } = stubClipboard(async () => undefined);
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     await user.type(screen.getByLabelText(/name/i), 'New Member');
     await user.type(screen.getByLabelText(/email/i), 'newmember@example.com');
     await user.click(screen.getByRole('button', { name: /create user/i }));
@@ -189,7 +209,7 @@ describe('AdminUsersPage', () => {
     const user = userEvent.setup({ writeToClipboard: false });
     stubClipboard(async () => undefined);
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     await user.type(screen.getByLabelText(/name/i), 'New Member');
     await user.type(screen.getByLabelText(/email/i), 'newmember@example.com');
     await user.click(screen.getByRole('button', { name: /create user/i }));
@@ -213,7 +233,7 @@ describe('AdminUsersPage', () => {
       throw new Error('not allowed');
     });
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     await user.type(screen.getByLabelText(/name/i), 'New Member');
     await user.type(screen.getByLabelText(/email/i), 'newmember@example.com');
     await user.click(screen.getByRole('button', { name: /create user/i }));
@@ -232,7 +252,7 @@ describe('AdminUsersPage', () => {
     // No clipboard API at all: the copy has to fall back to a manual copy.
     unstubClipboard();
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     await user.type(screen.getByLabelText(/name/i), 'New Member');
     await user.type(screen.getByLabelText(/email/i), 'newmember@example.com');
     await user.click(screen.getByRole('button', { name: /create user/i }));
@@ -252,7 +272,7 @@ describe('AdminUsersPage', () => {
       throw new Error('not allowed');
     });
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     await user.type(screen.getByLabelText(/name/i), 'New Member');
     await user.type(screen.getByLabelText(/email/i), 'newmember@example.com');
     await user.click(screen.getByRole('button', { name: /create user/i }));
@@ -274,7 +294,7 @@ describe('AdminUsersPage', () => {
     const user = userEvent.setup({ writeToClipboard: false });
     stubClipboard(async () => undefined);
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     await user.type(screen.getByLabelText(/name/i), 'New Member');
     await user.type(screen.getByLabelText(/email/i), 'newmember@example.com');
     await user.click(screen.getByRole('button', { name: /create user/i }));
@@ -305,7 +325,7 @@ describe('AdminUsersPage', () => {
     stubClipboard(async () => undefined);
     const user = userEvent.setup({ writeToClipboard: false });
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     await user.type(screen.getByLabelText(/name/i), 'New Member');
     await user.type(screen.getByLabelText(/email/i), 'newmember@example.com');
     await user.click(screen.getByRole('button', { name: /create user/i }));
@@ -318,7 +338,7 @@ describe('AdminUsersPage', () => {
     server.use(authenticated, usersList, createUserOk);
     const user = userEvent.setup();
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     await user.type(screen.getByLabelText(/name/i), 'New Member');
     await user.type(screen.getByLabelText(/email/i), 'newmember@example.com');
     await user.click(screen.getByRole('button', { name: /create user/i }));
@@ -334,7 +354,7 @@ describe('AdminUsersPage', () => {
     server.use(authenticated, usersList, resetPasswordOk);
     const user = userEvent.setup();
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     const resetButtons = await screen.findAllByRole('button', { name: /reset password/i });
     await user.click(resetButtons[0]!);
     expect(await screen.findByText(/New password setup link/i)).toBeInTheDocument();
@@ -349,7 +369,7 @@ describe('AdminUsersPage', () => {
     server.use(authenticated, usersList, resetPasswordOk);
     const user = userEvent.setup({ writeToClipboard: false });
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     const resetButtons = await screen.findAllByRole('button', { name: /reset password/i });
     await user.click(resetButtons[0]!);
     const input = (await screen.findByTestId('setup-url-input')) as HTMLInputElement;
@@ -366,7 +386,7 @@ describe('AdminUsersPage', () => {
     const user = userEvent.setup({ writeToClipboard: false });
     const { writeText } = stubClipboard(async () => undefined);
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     await screen.findByText(/Developer One/);
 
     const resetButtons = screen.getAllByRole('button', { name: /reset password/i });
@@ -389,7 +409,7 @@ describe('AdminUsersPage', () => {
     stubClipboard(async () => undefined);
     const user = userEvent.setup({ writeToClipboard: false });
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
 
     await user.type(screen.getByLabelText(/name/i), 'New Member');
     await user.type(screen.getByLabelText(/email/i), 'newmember@example.com');
@@ -430,7 +450,7 @@ describe('AdminUsersPage', () => {
     server.use(authenticated, usersList, createUserConflict);
     const user = userEvent.setup();
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     await user.type(screen.getByLabelText(/name/i), 'New Member');
     await user.type(screen.getByLabelText(/email/i), 'newmember@example.com');
     await user.click(screen.getByRole('button', { name: /create user/i }));
@@ -447,7 +467,7 @@ describe('AdminUsersPage', () => {
     requestOverrides.set('POST /users', () => Promise.reject(new Error('boom')));
     const user = userEvent.setup();
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     await user.type(screen.getByLabelText(/name/i), 'New Member');
     await user.type(screen.getByLabelText(/email/i), 'newmember@example.com');
     await user.click(screen.getByRole('button', { name: /create user/i }));
@@ -459,7 +479,7 @@ describe('AdminUsersPage', () => {
     server.use(authenticated, usersList, resetPasswordSelf);
     const user = userEvent.setup();
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     const resetButtons = await screen.findAllByRole('button', { name: /reset password/i });
     await user.click(resetButtons[0]!);
 
@@ -475,7 +495,7 @@ describe('AdminUsersPage', () => {
     );
     const user = userEvent.setup();
     renderWithProviders();
-    await screen.findByText(/Team Lead/);
+    await findListedUser(/Team Lead/);
     const resetButtons = await screen.findAllByRole('button', { name: /reset password/i });
     await user.click(resetButtons[0]!);
 
