@@ -90,6 +90,38 @@ async function focusedName(page: Page): Promise<string> {
   });
 }
 
+/**
+ * The focus indicator of a control, with the accent tokens it may use.
+ *
+ * The colors are read from the theme tokens, so the check follows the tokens
+ * instead of a fixed color value.
+ */
+async function focusIndicator(
+  page: Page,
+  testId: string,
+): Promise<{ boxShadow: string; tokens: Record<string, string> }> {
+  return page.evaluate((id) => {
+    const el = document.querySelector(`[data-testid="${id}"]`);
+    if (!el) throw new Error(`no element with the test id ${id}`);
+    const root = getComputedStyle(document.documentElement);
+    const toRgb = (hex: string): string => {
+      const value = hex.trim().replace('#', '');
+      if (value.length !== 6) return hex.trim();
+      const r = parseInt(value.slice(0, 2), 16);
+      const g = parseInt(value.slice(2, 4), 16);
+      const b = parseInt(value.slice(4, 6), 16);
+      return `rgb(${r}, ${g}, ${b})`;
+    };
+    return {
+      boxShadow: getComputedStyle(el).boxShadow,
+      tokens: {
+        'accent-500': toRgb(root.getPropertyValue('--color-accent-500')),
+        'accent-100': toRgb(root.getPropertyValue('--color-accent-100')),
+      },
+    };
+  }, testId);
+}
+
 interface HeaderMetrics {
   /** The viewport width the header has to fit into. */
   viewportWidth: number;
@@ -194,6 +226,70 @@ test.describe('Signed-in header', () => {
     }
   });
 
+  test('route aliases still mark the current destination', async ({ page }) => {
+    await login(page, SEED.lead);
+    const aliases = [
+      { path: '/admin/holidays/', testId: 'manage-holidays-link', heading: /^holidays$/i },
+      { path: '/admin/users/', testId: 'manage-users-link', heading: /^manage users$/i },
+      { path: '/ADMIN/USERS/', testId: 'manage-users-link', heading: /^manage users$/i },
+      {
+        path: '/settings/tokens/',
+        testId: 'api-access-link',
+        heading: /^personal access tokens$/i,
+      },
+    ];
+    for (const alias of aliases) {
+      await page.goto(alias.path);
+      await expect(page.getByRole('heading', { level: 1, name: alias.heading })).toBeVisible();
+      await expect(page.getByTestId(alias.testId)).toHaveAttribute('aria-current', 'page');
+    }
+  });
+
+  test('the header title and the controls share one row on every route', async ({ page }) => {
+    await login(page, SEED.lead);
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    for (const route of SIGNED_IN_ROUTES) {
+      await page.goto(route.path);
+      await expect(page.getByRole('heading', { level: 1, name: route.heading })).toBeVisible();
+
+      const row = await page.evaluate(() => {
+        const header = document.querySelector('header');
+        const title = header?.querySelector('h1');
+        const switcher = header?.querySelector('[data-testid="theme-toggle"]');
+        if (!header || !title || !switcher) return null;
+        const headerBox = header.getBoundingClientRect();
+        const titleBox = title.getBoundingClientRect();
+        const switcherBox = switcher.getBoundingClientRect();
+        return {
+          headerWidth: headerBox.width,
+          headerRight: headerBox.right,
+          headerHeight: headerBox.height,
+          titleTop: titleBox.top,
+          titleBottom: titleBox.bottom,
+          switcherTop: switcherBox.top,
+          switcherBottom: switcherBox.bottom,
+        };
+      });
+      expect(row, `no header on ${route.path}`).not.toBeNull();
+
+      // The title and the controls share one row.
+      expect(row!.titleTop, `the title starts below the controls on ${route.path}`).toBeLessThan(
+        row!.switcherBottom,
+      );
+      expect(
+        row!.titleBottom,
+        `the title ends above the controls on ${route.path}`,
+      ).toBeGreaterThan(row!.switcherTop);
+
+      // The header is fluid: it uses the page width, not a narrow column.
+      expect(row!.headerWidth, `the header is capped on ${route.path}`).toBeGreaterThan(1300);
+      expect(row!.headerRight, `the header ends early on ${route.path}`).toBeGreaterThan(1440 - 64);
+      // One row, not a stacked header.
+      expect(row!.headerHeight, `the header wraps on ${route.path}`).toBeLessThan(100);
+    }
+  });
+
   test('the calendar itself has no way back to itself', async ({ page }) => {
     await login(page, SEED.lead);
     await expect(page.getByTestId('back-to-calendar-link')).toHaveCount(0);
@@ -263,6 +359,39 @@ test.describe('Signed-in header', () => {
       expect(control.height, `${control.name} height`).toBeGreaterThanOrEqual(44);
       expect(control.width, `${control.name} width`).toBeGreaterThanOrEqual(44);
       expect(control.className, `${control.name} focus ring`).toMatch(/focus-visible:ring-2/);
+    }
+  });
+
+  test('every theme option paints its focus indicator inside the segment', async ({ page }) => {
+    await login(page, SEED.lead);
+    const options = ['light', 'dark', 'system'] as const;
+
+    for (const mode of ['light', 'dark'] as const) {
+      await page.getByTestId(`theme-option-${mode}`).click();
+      // A fresh load puts the keyboard at the start of the page, and the
+      // switcher is the first control of the header.
+      await page.reload();
+      const heading = page.getByRole('heading', { level: 1, name: /^calendar$/i });
+      await expect(heading).toBeVisible();
+      // A click on the title clears any restored focus, so the keyboard
+      // starts at the first control of the page.
+      await heading.click();
+
+      for (const option of options) {
+        await page.keyboard.press('Tab');
+        expect(await focusedName(page)).toBe(`Use ${option} theme`);
+
+        const indicator = await focusIndicator(page, `theme-option-${option}`);
+        // The switcher clips its overflow, so the indicator has to paint
+        // inside the segment.
+        expect(indicator.boxShadow, `${option} focus indicator is not inset`).toContain('inset');
+        // The unselected dark segment uses the lighter accent, because the
+        // terracotta accent is too close to the dark surface.
+        const token = mode === 'dark' && option !== mode ? 'accent-100' : 'accent-500';
+        expect(indicator.boxShadow, `${option} focus indicator does not use ${token}`).toContain(
+          indicator.tokens[token],
+        );
+      }
     }
   });
 

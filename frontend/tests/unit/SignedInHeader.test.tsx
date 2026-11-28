@@ -132,6 +132,27 @@ describe('SignedInHeader', () => {
     expect(screen.getByTestId('api-access-link')).toHaveAttribute('aria-current', 'page');
   });
 
+  it('marks the current destination on a route with a trailing slash', async () => {
+    server.use(authFor('team_lead'));
+    renderHeader('/admin/users/');
+    await screen.findByTestId('signed-in-user');
+    expect(screen.getByTestId('manage-users-link')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('api-access-link')).not.toHaveAttribute('aria-current');
+    expect(screen.getByTestId('manage-holidays-link')).not.toHaveAttribute('aria-current');
+  });
+
+  it('keeps the focus indicator of the theme options inside the switcher', async () => {
+    server.use(authenticated);
+    renderHeader('/calendar');
+    await screen.findByTestId('theme-toggle');
+    for (const mode of ['light', 'dark', 'system']) {
+      const option = screen.getByTestId(`theme-option-${mode}`);
+      // The switcher clips its overflow, so an outside ring would be cut off.
+      expect(option.className).toMatch(/focus-visible:ring-inset/);
+      expect(option.className).toMatch(/focus-visible:ring-accent-500/);
+    }
+  });
+
   it('renders one heading and no back link unless the route asks for one', async () => {
     server.use(authenticated);
     renderHeader('/calendar', 'Calendar');

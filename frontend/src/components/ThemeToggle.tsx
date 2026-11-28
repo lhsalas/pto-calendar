@@ -32,6 +32,14 @@ const OPTIONS: Option[] = [
   },
 ];
 
+/**
+ * The theme switcher.
+ *
+ * The group clips its overflow, so a focus ring painted outside the option
+ * would be cut off. Every option therefore paints its focus ring *inside* its
+ * own segment. The unselected dark segment uses the lighter accent, because
+ * the terracotta accent is too close to the dark surface to be seen.
+ */
 export function ThemeToggle(): JSX.Element {
   const { mode, setMode } = useTheme();
   return (
@@ -52,10 +60,10 @@ export function ThemeToggle(): JSX.Element {
             aria-label={opt.aria}
             data-testid={`theme-option-${opt.value}`}
             onClick={() => setMode(opt.value)}
-            className={`inline-flex min-h-11 items-center gap-2 px-3 py-2 text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:focus-visible:ring-offset-surface-dark ${
+            className={`inline-flex min-h-11 items-center gap-2 px-3 py-2 text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500 ${
               selected
                 ? 'bg-ink text-ink-inverse dark:bg-ink-dark dark:text-surface-dark'
-                : 'bg-surface-3 text-ink hover:bg-surface-2 dark:bg-surface-dark-3 dark:text-ink-dark dark:hover:bg-surface-dark-2'
+                : 'bg-surface-3 text-ink hover:bg-surface-2 dark:bg-surface-dark-3 dark:text-ink-dark dark:hover:bg-surface-dark-2 dark:focus-visible:ring-accent-100'
             }`}
           >
             {opt.icon}

@@ -244,8 +244,9 @@ function TokenSettingsPane({ user, guard }: TokenSettingsPaneProps): JSX.Element
 
   return (
     <div className="min-h-full bg-surface p-4 text-ink sm:p-6 lg:p-8 dark:bg-surface-dark dark:text-ink-dark">
+      {/* The header is a sibling of the page body, so it uses the full width. */}
+      <SignedInHeader title="Personal access tokens" showBackToCalendar className="mb-4" />
       <div className="mx-auto max-w-4xl">
-        <SignedInHeader title="Personal access tokens" showBackToCalendar className="mb-4" />
         <p className="mb-6 max-w-2xl text-sm text-ink-muted dark:text-ink-muted-dark">
           A personal access token is a separate credential, not your session: this page is reached
           with your signed-in session, and a tool uses the token instead. You manage only your own

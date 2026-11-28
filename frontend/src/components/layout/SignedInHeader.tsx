@@ -1,5 +1,5 @@
 import type { JSX } from 'react';
-import { Link, NavLink } from 'react-router-dom';
+import { Link, matchPath, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/useAuth';
 import { canManageUsers } from '../../lib/permissions';
 import { ThemeToggle } from '../ThemeToggle';
@@ -13,6 +13,10 @@ interface SignedInHeaderProps {
   /** Extra classes for the header element, e.g. its bottom spacing. */
   className?: string;
 }
+
+const API_ACCESS_PATH = '/settings/tokens';
+const HOLIDAYS_PATH = '/admin/holidays';
+const USERS_PATH = '/admin/users';
 
 /**
  * The top menu of every signed-in route.
@@ -35,7 +39,10 @@ export function SignedInHeader({
   className = '',
 }: SignedInHeaderProps): JSX.Element {
   const { user, logout } = useAuth();
+  const { pathname } = useLocation();
   const mayManage = user !== null && canManageUsers(user);
+  // Use the same matching rules as the routes, including trailing slashes.
+  const isCurrent = (path: string): boolean => matchPath({ path, end: true }, pathname) !== null;
 
   return (
     <header className={`flex flex-wrap items-center justify-between gap-3 ${className}`}>
@@ -62,27 +69,26 @@ export function SignedInHeader({
         </div>
 
         <nav aria-label="Main" className="flex min-w-0 flex-wrap items-center gap-3">
-          <NavLink to="/settings/tokens" end data-testid="api-access-link" className={navLinkClass}>
-            API access
-          </NavLink>
+          <DestinationLink
+            to={API_ACCESS_PATH}
+            label="API access"
+            testId="api-access-link"
+            current={isCurrent(API_ACCESS_PATH)}
+          />
           {mayManage ? (
             <>
-              <NavLink
-                to="/admin/holidays"
-                end
-                data-testid="manage-holidays-link"
-                className={navLinkClass}
-              >
-                Holidays
-              </NavLink>
-              <NavLink
-                to="/admin/users"
-                end
-                data-testid="manage-users-link"
-                className={navLinkClass}
-              >
-                Manage users
-              </NavLink>
+              <DestinationLink
+                to={HOLIDAYS_PATH}
+                label="Holidays"
+                testId="manage-holidays-link"
+                current={isCurrent(HOLIDAYS_PATH)}
+              />
+              <DestinationLink
+                to={USERS_PATH}
+                label="Manage users"
+                testId="manage-users-link"
+                current={isCurrent(USERS_PATH)}
+              />
             </>
           ) : null}
         </nav>
@@ -106,15 +112,42 @@ export function SignedInHeader({
   );
 }
 
+interface DestinationLinkProps {
+  to: string;
+  label: string;
+  testId: string;
+  /** Whether the destination is the route that is open. */
+  current: boolean;
+}
+
+/**
+ * One destination of the header navigation.
+ *
+ * The current destination is marked explicitly, so a route that is reached
+ * with a trailing slash is marked too.
+ */
+function DestinationLink({ to, label, testId, current }: DestinationLinkProps): JSX.Element {
+  return (
+    <Link
+      to={to}
+      data-testid={testId}
+      aria-current={current ? 'page' : undefined}
+      className={destinationClass(current)}
+    >
+      {label}
+    </Link>
+  );
+}
+
 /**
  * One style for every destination. The active one is marked with the accent
  * border and the stronger surface, so the current page is recognizable
  * without relying on colour alone.
  */
-function navLinkClass({ isActive }: { isActive: boolean }): string {
+function destinationClass(current: boolean): string {
   const base =
     'min-h-11 rounded border px-3 py-2 text-ink transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface dark:text-ink-dark dark:focus-visible:ring-offset-surface-dark';
-  return isActive
+  return current
     ? `${base} border-accent bg-surface-2 font-semibold dark:bg-surface-dark-2`
     : `${base} border-border hover:bg-surface-2 dark:border-border-dark dark:hover:bg-surface-dark-2`;
 }

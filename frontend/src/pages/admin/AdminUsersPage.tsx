@@ -153,9 +153,10 @@ export function AdminUsersPage(): JSX.Element {
   }
 
   return (
-    <main className="min-h-full bg-surface p-6 dark:bg-surface-dark">
-      <div className="mx-auto max-w-3xl space-y-6">
-        <SignedInHeader title="Manage users" showBackToCalendar />
+    <div className="min-h-full bg-surface p-6 dark:bg-surface-dark">
+      {/* The header is a sibling of the page body, so it uses the full width. */}
+      <SignedInHeader title="Manage users" showBackToCalendar className="mb-6" />
+      <main className="mx-auto max-w-3xl space-y-6">
         <p className="text-sm text-ink-muted dark:text-ink-muted-dark">
           Create new members and reset passwords. The setup link is shown once — copy it to share
           with the new member.
@@ -323,7 +324,7 @@ export function AdminUsersPage(): JSX.Element {
             </button>
           </section>
         ) : null}
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
